@@ -1,0 +1,99 @@
+const express = require('express')
+const bcrypt = require('bcrypt')
+const jwt = require('jsonwebtoken')
+const { v4: uuidv4 } = require('uuid')
+const db = require('../config/database')
+const auth = require('../middleware/auth')
+
+const router = express.Router()
+
+function signToken(user) {
+  return jwt.sign(
+    { id: user.id, email: user.email, displayName: user.display_name },
+    process.env.JWT_SECRET,
+    { expiresIn: '7d' }
+  )
+}
+
+function userPayload(user) {
+  return { id: user.id, email: user.email, displayName: user.display_name }
+}
+
+router.post('/auth/register', async (req, res) => {
+  try {
+    const { email, password, displayName } = req.body
+    if (!email || !password || !displayName) {
+      return res.status(400).json({ error: 'email, password, and displayName are required' })
+    }
+
+    const existing = db.prepare('SELECT id FROM users WHERE email = ?').get(email)
+    if (existing) {
+      return res.status(409).json({ error: 'Email already in use' })
+    }
+
+    const passwordHash = await bcrypt.hash(password, 10)
+    const userId = uuidv4()
+    const now = new Date().toISOString()
+
+    db.prepare(
+      'INSERT INTO users (id, email, password_hash, display_name, created_at) VALUES (?, ?, ?, ?, ?)'
+    ).run(userId, email, passwordHash, displayName, now)
+
+    const workspaceId = uuidv4()
+    db.prepare(
+      'INSERT INTO workspaces (id, name, created_by, created_at, updated_at) VALUES (?, ?, ?, ?, ?)'
+    ).run(workspaceId, `${displayName}'s Workspace`, userId, now, now)
+
+    db.prepare(
+      'INSERT INTO workspace_members (workspace_id, user_id, role, joined_at) VALUES (?, ?, ?, ?)'
+    ).run(workspaceId, userId, 'owner', now)
+
+    const user = db.prepare('SELECT * FROM users WHERE id = ?').get(userId)
+    const token = signToken(user)
+
+    res.status(201).json({ token, user: userPayload(user) })
+  } catch (err) {
+    console.error(err)
+    res.status(500).json({ error: 'Internal server error' })
+  }
+})
+
+router.post('/auth/login', async (req, res) => {
+  try {
+    const { email, password } = req.body
+    if (!email || !password) {
+      return res.status(400).json({ error: 'email and password are required' })
+    }
+
+    const user = db.prepare('SELECT * FROM users WHERE email = ?').get(email)
+    if (!user) {
+      return res.status(401).json({ error: 'Invalid credentials' })
+    }
+
+    const match = await bcrypt.compare(password, user.password_hash)
+    if (!match) {
+      return res.status(401).json({ error: 'Invalid credentials' })
+    }
+
+    const token = signToken(user)
+    res.json({ token, user: userPayload(user) })
+  } catch (err) {
+    console.error(err)
+    res.status(500).json({ error: 'Internal server error' })
+  }
+})
+
+router.get('/auth/me', auth, (req, res) => {
+  try {
+    const user = db.prepare('SELECT * FROM users WHERE id = ?').get(req.user.id)
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' })
+    }
+    res.json({ user: userPayload(user) })
+  } catch (err) {
+    console.error(err)
+    res.status(500).json({ error: 'Internal server error' })
+  }
+})
+
+module.exports = router
