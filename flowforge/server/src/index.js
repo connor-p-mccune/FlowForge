@@ -19,6 +19,11 @@ const { initSocket } = require('./socket')
 const io = initSocket(server)
 app.set('io', io)
 
+// Bull worker runs in-process alongside the API server
+if (process.env.NODE_ENV !== 'test') {
+  require('./workers/executionWorker').startWorker()
+}
+
 app.get('/api/health', (req, res) => res.json({ status: 'ok' }))
 
 if (process.env.NODE_ENV !== 'test') {

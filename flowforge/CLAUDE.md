@@ -86,14 +86,14 @@ flowforge/
 
 Track progress here. Update as phases complete.
 
-- [ ] **Phase 1** — Foundation: Docker setup, auth, blank canvas
-- [ ] **Phase 2** — Canvas & CRUD: Node types, save/load workflows
-- [ ] **Phase 3** — Execution engine: DAG parser, Bull queue, live step updates
-- [ ] **Phase 4** — Real-time collaboration: WebSocket sync, cursors, presence
+- [x] **Phase 1** — Foundation: Docker setup, auth, blank canvas
+- [x] **Phase 2** — Canvas & CRUD: Node types, save/load workflows
+- [x] **Phase 3** — Execution engine: DAG parser, Bull queue, live step updates
+- [x] **Phase 4** — Real-time collaboration: WebSocket sync, cursors, presence
 - [ ] **Phase 5** — AI suggestions & webhooks: Python service, external triggers
 - [ ] **Phase 6** — Polish & deploy: Error handling, README, production build
 
-**Current phase: 1**
+**Current phase: 5**
 
 ---
 

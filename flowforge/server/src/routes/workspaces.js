@@ -59,6 +59,27 @@ router.get('/workspaces/:id', auth, (req, res) => {
   }
 })
 
+router.put('/workspaces/:id', auth, (req, res) => {
+  try {
+    const member = db.prepare(
+      'SELECT * FROM workspace_members WHERE workspace_id = ? AND user_id = ?'
+    ).get(req.params.id, req.user.id)
+    if (!member) return res.status(404).json({ error: 'Workspace not found' })
+
+    const { name } = req.body
+    if (!name) return res.status(400).json({ error: 'name is required' })
+
+    db.prepare('UPDATE workspaces SET name = ?, updated_at = ? WHERE id = ?')
+      .run(name, new Date().toISOString(), req.params.id)
+
+    const workspace = db.prepare('SELECT * FROM workspaces WHERE id = ?').get(req.params.id)
+    res.json({ workspace })
+  } catch (err) {
+    console.error(err)
+    res.status(500).json({ error: 'Internal server error' })
+  }
+})
+
 router.delete('/workspaces/:id', auth, (req, res) => {
   try {
     const member = db.prepare(

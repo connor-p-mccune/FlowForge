@@ -9,7 +9,7 @@
     "test": "jest --runInBand"
   },
   "dependencies": {
-    "better-sqlite3": "^9.4.3",
+    "better-sqlite3": "^11.10.0",
     "bcrypt": "^5.1.1",
     "bull": "^4.12.2",
     "cors": "^2.8.5",

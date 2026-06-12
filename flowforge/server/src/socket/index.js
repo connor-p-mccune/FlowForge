@@ -36,6 +36,24 @@ function initSocket(httpServer) {
     require('./handlers')(socket, io)
   })
 
+  // Relay exec-update events published by the execution engine (Redis pub/sub)
+  // to every client in the workflow's room.
+  if (process.env.NODE_ENV !== 'test') {
+    const redisClient = require('../config/redis')
+    const sub = redisClient.duplicate()
+    sub.subscribe('exec-update').catch((err) => {
+      console.error('Failed to subscribe to exec-update:', err.message)
+    })
+    sub.on('message', (channel, message) => {
+      try {
+        const payload = JSON.parse(message)
+        io.to(`workflow:${payload.workflowId}`).emit('exec-update', payload)
+      } catch (err) {
+        console.error('Bad exec-update payload:', err.message)
+      }
+    })
+  }
+
   return io
 }
 

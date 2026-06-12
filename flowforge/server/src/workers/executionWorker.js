@@ -1,27 +1,36 @@
-// Phase 3: Bull worker for workflow execution
-// This file is required by index.js to start the worker process alongside the server.
-// The actual execution logic lives in services/executionEngine.js (Phase 3).
+// Bull processor for workflow executions. Started from index.js (not in tests).
+const { getExecutionQueue } = require('../config/queue')
+const { runExecution } = require('../services/executionEngine')
+const db = require('../config/database')
 
-if (process.env.NODE_ENV === 'test') {
-  module.exports = {}
-  return
+function startWorker() {
+  // Connect the exec-update publisher up front — with lazyConnect, publishes
+  // issued while the first connection is still opening can be flushed late
+  // and reach clients out of order.
+  const redis = require('../config/redis')
+  redis.connect().catch((err) => {
+    console.error('Redis connect failed (exec-update events disabled):', err.message)
+  })
+
+  const queue = getExecutionQueue()
+
+  queue.process(async (job) => {
+    const { executionId } = job.data
+    try {
+      await runExecution(executionId)
+    } catch (err) {
+      // Engine handles per-node failures itself; this catches setup errors
+      // (execution/workflow missing, DB issues) so the run never hangs.
+      console.error(`Execution ${executionId} crashed:`, err.message)
+      db.prepare(
+        "UPDATE executions SET status = 'failed', finished_at = ? WHERE id = ?"
+      ).run(new Date().toISOString(), executionId)
+      throw err
+    }
+  })
+
+  console.log('Execution worker started')
+  return queue
 }
 
-const Queue = require('bull')
-
-const executionQueue = new Queue('workflow-execution', {
-  redis: {
-    host: process.env.REDIS_HOST || 'redis',
-    port: parseInt(process.env.REDIS_PORT || '6379'),
-  },
-})
-
-executionQueue.process(async (job) => {
-  console.log('Execution worker: job received', job.data, '— not yet implemented (Phase 3)')
-})
-
-executionQueue.on('error', (err) => {
-  console.error('Execution queue error:', err.message)
-})
-
-module.exports = { executionQueue }
+module.exports = { startWorker }

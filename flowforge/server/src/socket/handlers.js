@@ -27,19 +27,21 @@ module.exports = function registerHandlers(socket, io) {
     socket.to(`workflow:${workflowId}`).emit('user-left', { userId: socket.userId })
   })
 
-  socket.on('node-change', ({ workflowId, action, node }) => {
+  socket.on('node-change', ({ workflowId, action, node, ts }) => {
     socket.to(`workflow:${workflowId}`).emit('remote-node', {
       userId: socket.userId,
       action,
       node,
+      ts, // sender clock — clients use this for last-write-wins
     })
   })
 
-  socket.on('edge-change', ({ workflowId, action, edge }) => {
+  socket.on('edge-change', ({ workflowId, action, edge, ts }) => {
     socket.to(`workflow:${workflowId}`).emit('remote-edge', {
       userId: socket.userId,
       action,
       edge,
+      ts,
     })
   })
 
