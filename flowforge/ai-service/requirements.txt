@@ -1,4 +1,5 @@
 flask==3.0.0
+gunicorn==21.2.0
 openai==1.12.0
 # openai 1.12.0 passes a `proxies` kwarg that httpx removed in 0.28 — pin below it
 # so the OpenAI client can be constructed.

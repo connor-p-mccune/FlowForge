@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
 import { apiFetch } from '../services/api'
+import { useToast } from './useToast'
 
 // Strip volatile React Flow props (selected, dragging, etc.) so the saved
 // graph is stable and snapshot comparison doesn't fire on selection changes.
@@ -18,13 +19,21 @@ export function serializeGraph(nodes, edges) {
 
 export function useWorkflow(workflowId, setNodes, setEdges) {
   const [workflow, setWorkflow] = useState(null)
+  const [loading, setLoading] = useState(true)
   const saveTimer = useRef(null)
   const lastSavedRef = useRef(null)
+  const lastSaveErrorAt = useRef(0)
+
+  // Toast kept in a ref so save/load closures never need it in their deps.
+  const toast = useToast()
+  const toastRef = useRef(toast)
+  toastRef.current = toast
 
   useEffect(() => {
     if (!workflowId) return
     let cancelled = false
     lastSavedRef.current = null
+    setLoading(true)
     apiFetch(`/api/workflows/${workflowId}`)
       .then(({ workflow: wf }) => {
         if (cancelled) return
@@ -34,7 +43,14 @@ export function useWorkflow(workflowId, setNodes, setEdges) {
         setEdges(edges || [])
         setWorkflow(wf)
       })
-      .catch((err) => console.error('Failed to load workflow:', err))
+      .catch((err) => {
+        if (cancelled) return
+        console.error('Failed to load workflow:', err)
+        toastRef.current.error(`Couldn’t load this workflow: ${err.message}`)
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false)
+      })
     return () => {
       cancelled = true
       if (saveTimer.current) clearTimeout(saveTimer.current)
@@ -49,15 +65,28 @@ export function useWorkflow(workflowId, setNodes, setEdges) {
       if (payload === lastSavedRef.current) return
       if (saveTimer.current) clearTimeout(saveTimer.current)
       saveTimer.current = setTimeout(() => {
-        lastSavedRef.current = payload
+        // Only mark as saved once the request actually succeeds — on failure
+        // lastSavedRef stays put so the next edit retries the save.
         apiFetch(`/api/workflows/${workflowId}/graph`, {
           method: 'PUT',
           body: graph,
-        }).catch((err) => console.error('Failed to save graph:', err))
+        })
+          .then(() => {
+            lastSavedRef.current = payload
+          })
+          .catch((err) => {
+            console.error('Failed to save graph:', err)
+            // Throttle so a sustained outage doesn't spam a toast per keystroke.
+            const now = Date.now()
+            if (now - lastSaveErrorAt.current > 8000) {
+              lastSaveErrorAt.current = now
+              toastRef.current.error('Failed to save changes — will retry on next edit.')
+            }
+          })
       }, 500)
     },
     [workflowId]
   )
 
-  return { workflow, saveGraph }
+  return { workflow, saveGraph, loading }
 }

@@ -1,8 +1,9 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { apiFetch } from '../../services/api'
+import Skeleton, { SkeletonRows } from '../Skeleton'
 
-export default function Sidebar() {
+export default function Sidebar({ open = false, onNavigate }) {
   const navigate = useNavigate()
   const { id: currentWorkflowId } = useParams()
 
@@ -10,6 +11,8 @@ export default function Sidebar() {
   const [activeWorkspaceId, setActiveWorkspaceId] = useState(null)
   const [workflows, setWorkflows] = useState([])
   const [error, setError] = useState(null)
+  const [loadingWorkspaces, setLoadingWorkspaces] = useState(true)
+  const [loadingWorkflows, setLoadingWorkflows] = useState(true)
   const [creatingWorkspace, setCreatingWorkspace] = useState(false)
   const [newWorkspaceName, setNewWorkspaceName] = useState('')
   const [renamingId, setRenamingId] = useState(null)
@@ -32,6 +35,8 @@ export default function Sidebar() {
         }
       } catch (err) {
         if (!cancelled) setError(err.message)
+      } finally {
+        if (!cancelled) setLoadingWorkspaces(false)
       }
     }
     load()
@@ -39,12 +44,19 @@ export default function Sidebar() {
   }, [currentWorkflowId])
 
   const loadWorkflows = useCallback(async () => {
-    if (!activeWorkspaceId) return
+    if (!activeWorkspaceId) {
+      setWorkflows([])
+      setLoadingWorkflows(false)
+      return
+    }
+    setLoadingWorkflows(true)
     try {
       const { workflows: wf } = await apiFetch(`/api/workspaces/${activeWorkspaceId}/workflows`)
       setWorkflows(wf)
     } catch (err) {
       setError(err.message)
+    } finally {
+      setLoadingWorkflows(false)
     }
   }, [activeWorkspaceId])
 
@@ -96,6 +108,7 @@ export default function Sidebar() {
       })
       setWorkflows((wf) => [workflow, ...wf])
       navigate(`/workflow/${workflow.id}`)
+      onNavigate?.()
     } catch (err) {
       setError(err.message)
     }
@@ -137,7 +150,7 @@ export default function Sidebar() {
   }
 
   return (
-    <aside className="sidebar">
+    <aside className={`sidebar${open ? ' sidebar--open' : ''}`}>
       <div className="sidebar__section">
         <div className="sidebar__section-header">
           <span className="sidebar__section-title">Workspace</span>
@@ -161,25 +174,31 @@ export default function Sidebar() {
             <button className="sidebar__small-btn" type="submit">Add</button>
           </form>
         )}
-        <div className="sidebar__workspace-row">
-          <select
-            className="sidebar__select"
-            value={activeWorkspaceId || ''}
-            onChange={(e) => setActiveWorkspaceId(e.target.value)}
-          >
-            {workspaces.map((ws) => (
-              <option key={ws.id} value={ws.id}>{ws.name}</option>
-            ))}
-          </select>
-          <button
-            className="sidebar__icon-btn sidebar__icon-btn--danger"
-            title="Delete workspace"
-            onClick={handleDeleteWorkspace}
-            disabled={!activeWorkspaceId}
-          >
-            🗑
-          </button>
-        </div>
+        {loadingWorkspaces ? (
+          <Skeleton height={32} />
+        ) : workspaces.length === 0 ? (
+          <p className="sidebar__empty">No workspaces yet. Create one with +.</p>
+        ) : (
+          <div className="sidebar__workspace-row">
+            <select
+              className="sidebar__select"
+              value={activeWorkspaceId || ''}
+              onChange={(e) => setActiveWorkspaceId(e.target.value)}
+            >
+              {workspaces.map((ws) => (
+                <option key={ws.id} value={ws.id}>{ws.name}</option>
+              ))}
+            </select>
+            <button
+              className="sidebar__icon-btn sidebar__icon-btn--danger"
+              title="Delete workspace"
+              onClick={handleDeleteWorkspace}
+              disabled={!activeWorkspaceId}
+            >
+              🗑
+            </button>
+          </div>
+        )}
       </div>
 
       <div className="sidebar__section">
@@ -195,54 +214,57 @@ export default function Sidebar() {
           </button>
         </div>
         {error && <p className="sidebar__error">{error}</p>}
-        <ul className="sidebar__workflow-list">
-          {workflows.length === 0 && (
-            <li className="sidebar__empty">No workflows yet</li>
-          )}
-          {workflows.map((wf) => (
-            <li
-              key={wf.id}
-              className={`sidebar__workflow${wf.id === currentWorkflowId ? ' sidebar__workflow--active' : ''}`}
-            >
-              {renamingId === wf.id ? (
-                <form className="sidebar__inline-form" onSubmit={handleRenameWorkflow}>
-                  <input
-                    className="sidebar__input"
-                    autoFocus
-                    value={renameValue}
-                    onChange={(e) => setRenameValue(e.target.value)}
-                    onBlur={handleRenameWorkflow}
-                  />
-                </form>
-              ) : (
-                <>
-                  <button
-                    className="sidebar__workflow-link"
-                    onClick={() => navigate(`/workflow/${wf.id}`)}
-                    onDoubleClick={() => startRename(wf)}
-                    title="Double-click to rename"
-                  >
-                    {wf.name}
-                  </button>
-                  <button
-                    className="sidebar__icon-btn"
-                    title="Rename"
-                    onClick={() => startRename(wf)}
-                  >
-                    ✎
-                  </button>
-                  <button
-                    className="sidebar__icon-btn sidebar__icon-btn--danger"
-                    title="Delete"
-                    onClick={() => handleDeleteWorkflow(wf)}
-                  >
-                    ×
-                  </button>
-                </>
-              )}
-            </li>
-          ))}
-        </ul>
+        {loadingWorkflows ? (
+          <SkeletonRows count={4} height={30} />
+        ) : workflows.length === 0 ? (
+          <p className="sidebar__empty">No workflows yet. Click + to create one.</p>
+        ) : (
+          <ul className="sidebar__workflow-list">
+            {workflows.map((wf) => (
+              <li
+                key={wf.id}
+                className={`sidebar__workflow${wf.id === currentWorkflowId ? ' sidebar__workflow--active' : ''}`}
+              >
+                {renamingId === wf.id ? (
+                  <form className="sidebar__inline-form" onSubmit={handleRenameWorkflow}>
+                    <input
+                      className="sidebar__input"
+                      autoFocus
+                      value={renameValue}
+                      onChange={(e) => setRenameValue(e.target.value)}
+                      onBlur={handleRenameWorkflow}
+                    />
+                  </form>
+                ) : (
+                  <>
+                    <button
+                      className="sidebar__workflow-link"
+                      onClick={() => { navigate(`/workflow/${wf.id}`); onNavigate?.() }}
+                      onDoubleClick={() => startRename(wf)}
+                      title="Double-click to rename"
+                    >
+                      {wf.name}
+                    </button>
+                    <button
+                      className="sidebar__icon-btn"
+                      title="Rename"
+                      onClick={() => startRename(wf)}
+                    >
+                      ✎
+                    </button>
+                    <button
+                      className="sidebar__icon-btn sidebar__icon-btn--danger"
+                      title="Delete"
+                      onClick={() => handleDeleteWorkflow(wf)}
+                    >
+                      ×
+                    </button>
+                  </>
+                )}
+              </li>
+            ))}
+          </ul>
+        )}
       </div>
     </aside>
   )

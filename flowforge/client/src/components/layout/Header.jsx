@@ -1,7 +1,7 @@
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../../hooks/useAuth'
 
-export default function Header() {
+export default function Header({ onToggleSidebar }) {
   const { user, logout } = useAuth()
   const navigate = useNavigate()
 
@@ -12,7 +12,18 @@ export default function Header() {
 
   return (
     <header className="header">
-      <span className="header__logo">FlowForge</span>
+      <div className="header__left">
+        {onToggleSidebar && (
+          <button
+            className="header__menu-btn"
+            aria-label="Toggle sidebar"
+            onClick={onToggleSidebar}
+          >
+            ☰
+          </button>
+        )}
+        <span className="header__logo">FlowForge</span>
+      </div>
       <div className="header__right">
         {user && <span className="header__user">{user.displayName}</span>}
         <button className="header__logout" onClick={handleLogout}>

@@ -1,15 +1,12 @@
-version: '3.8'
-
 services:
   client:
-    build: ./client
+    build:
+      context: ./client
+      # Vite bakes the API URL into the bundle at build time.
+      args:
+        VITE_API_URL: ${VITE_API_URL}
     ports:
-      - "5173:5173"
-    volumes:
-      - ./client:/app
-      - /app/node_modules
-    environment:
-      - VITE_API_URL=${VITE_API_URL}
+      - "5173:80"
     depends_on:
       - server
 
@@ -18,10 +15,9 @@ services:
     ports:
       - "3001:3001"
     volumes:
-      - ./server:/app
-      - /app/node_modules
       - db-data:/app/data
     environment:
+      - NODE_ENV=production
       - JWT_SECRET=${JWT_SECRET}
       - REDIS_URL=redis://redis:6379
       - DATABASE_PATH=/app/data/flowforge.db
@@ -33,17 +29,14 @@ services:
 
   ai-service:
     build: ./ai-service
-    ports:
-      - "5000:5000"
-    volumes:
-      - ./ai-service:/app
     environment:
       - OPENAI_API_KEY=${OPENAI_API_KEY}
+    # Internal-only: reached by the server over the compose network. Not
+    # published to the host (see ai-service/CLAUDE.md).
 
   redis:
     image: redis:7-alpine
-    ports:
-      - "6379:6379"
+    # Internal-only: Bull job queue + Socket.io pub/sub for the server.
 
 volumes:
   db-data:

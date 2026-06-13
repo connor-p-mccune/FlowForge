@@ -2,8 +2,11 @@ const express = require('express')
 const { v4: uuidv4 } = require('uuid')
 const db = require('../config/database')
 const auth = require('../middleware/auth')
+const { validate } = require('../middleware/validate')
 
 const router = express.Router()
+
+const nameRule = { name: { required: true, type: 'string', maxLength: 200 } }
 
 router.get('/workspaces', auth, (req, res) => {
   try {
@@ -20,10 +23,9 @@ router.get('/workspaces', auth, (req, res) => {
   }
 })
 
-router.post('/workspaces', auth, (req, res) => {
+router.post('/workspaces', auth, validate(nameRule), (req, res) => {
   try {
     const { name } = req.body
-    if (!name) return res.status(400).json({ error: 'name is required' })
 
     const id = uuidv4()
     const now = new Date().toISOString()
@@ -59,7 +61,7 @@ router.get('/workspaces/:id', auth, (req, res) => {
   }
 })
 
-router.put('/workspaces/:id', auth, (req, res) => {
+router.put('/workspaces/:id', auth, validate(nameRule), (req, res) => {
   try {
     const member = db.prepare(
       'SELECT * FROM workspace_members WHERE workspace_id = ? AND user_id = ?'
@@ -67,7 +69,6 @@ router.put('/workspaces/:id', auth, (req, res) => {
     if (!member) return res.status(404).json({ error: 'Workspace not found' })
 
     const { name } = req.body
-    if (!name) return res.status(400).json({ error: 'name is required' })
 
     db.prepare('UPDATE workspaces SET name = ?, updated_at = ? WHERE id = ?')
       .run(name, new Date().toISOString(), req.params.id)

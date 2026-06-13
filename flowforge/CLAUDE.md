@@ -23,6 +23,10 @@ SQLite database lives at `server/data/flowforge.db` (persisted via Docker volume
 
 ## Dev environment
 
+> `docker-compose` builds and runs **production** images (client served by nginx,
+> AI service by gunicorn) — there is no hot reload. For hot-reload development,
+> run each service directly with `npm run dev` / `python app.py` (see the README).
+
 ```bash
 # Start all services
 docker-compose up --build
@@ -91,23 +95,21 @@ Track progress here. Update as phases complete.
 - [x] **Phase 3** — Execution engine: DAG parser, Bull queue, live step updates
 - [x] **Phase 4** — Real-time collaboration: WebSocket sync, cursors, presence
 - [x] **Phase 5** — AI suggestions & webhooks: Python service, external triggers
-- [ ] **Phase 6** — Polish & deploy: Error handling, README, production build
+- [x] **Phase 6** — Polish & deploy: Error handling, README, production build
 
-**Current phase: 6**
+**Current phase: 6 — complete**
 
 ---
 
 ## Testing
 
+Run each suite locally — the Docker images are production builds and don't
+include dev/test tooling:
+
 ```bash
-# Run server tests
-docker-compose exec server npm test
-
-# Run client tests
-docker-compose exec client npm test
-
-# Run Python tests
-docker-compose exec ai-service python -m pytest
+cd server && npm run lint && npm test              # ESLint + Jest
+cd client && npm run lint && npm test              # ESLint + Vitest
+cd ai-service && ruff check . && python -m pytest  # Ruff + pytest
 ```
 
 Tests live in `server/src/__tests__/`, `client/src/__tests__/`, and `ai-service/tests/`.

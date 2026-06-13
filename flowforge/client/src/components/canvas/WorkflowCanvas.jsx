@@ -12,7 +12,9 @@ import 'reactflow/dist/style.css'
 import { useWorkflow } from '../../hooks/useWorkflow'
 import { useSocket } from '../../hooks/useSocket'
 import { useAuth } from '../../hooks/useAuth'
+import { useToast } from '../../hooks/useToast'
 import { apiFetch } from '../../services/api'
+import Skeleton from '../Skeleton'
 import CanvasToolbar from './CanvasToolbar'
 import NodeConfigPanel from './NodeConfigPanel'
 import SuggestionsPanel from './SuggestionsPanel'
@@ -47,9 +49,16 @@ function CanvasInner({ workflowId }) {
   const wrapperRef = useRef(null)
   const [nodes, setNodes, onNodesChange] = useNodesState([])
   const [edges, setEdges, onEdgesChange] = useEdgesState([])
-  const { saveGraph } = useWorkflow(workflowId, setNodes, setEdges)
+  const { saveGraph, loading } = useWorkflow(workflowId, setNodes, setEdges)
   const { screenToFlowPosition, getNode } = useReactFlow()
   const { user } = useAuth()
+
+  // Toast (kept in a ref so the socket/exec callbacks below need no deps churn).
+  const toast = useToast()
+  const toastRef = useRef(toast)
+  toastRef.current = toast
+  const failToastedRef = useRef(null) // executionId we've already toasted a failure for
+  const connToastRef = useRef(null) // id of the active "connection lost" toast
 
   // Execution state (Phase 3)
   const [execution, setExecution] = useState(null) // { id, status, error }
@@ -82,6 +91,12 @@ function CanvasInner({ workflowId }) {
           }
           return { id: payload.executionId, status: payload.status, error: payload.error }
         })
+        // Surface a run failure as a toast (once per execution) in case the
+        // execution panel is closed.
+        if (payload.status === 'failed' && failToastedRef.current !== payload.executionId) {
+          failToastedRef.current = payload.executionId
+          toastRef.current.error(payload.error || 'Workflow run failed')
+        }
       }
     } else if (payload.kind === 'step' && payload.executionId === executionIdRef.current) {
       setExecSteps((prev) => {
@@ -170,6 +185,21 @@ function CanvasInner({ workflowId }) {
         return rest
       })
     },
+    onConnectionLost: () => {
+      if (connToastRef.current == null) {
+        connToastRef.current = toastRef.current.error(
+          'Connection lost — live collaboration is paused while we reconnect.',
+          { duration: 0 }
+        )
+      }
+    },
+    onReconnect: () => {
+      if (connToastRef.current != null) {
+        toastRef.current.dismiss(connToastRef.current)
+        connToastRef.current = null
+      }
+      toastRef.current.success('Reconnected.')
+    },
   })
 
   const emitNodeChange = useCallback(
@@ -224,6 +254,7 @@ function CanvasInner({ workflowId }) {
     } catch (err) {
       executionIdRef.current = null
       setExecution({ id: null, status: 'failed', error: err.message })
+      toastRef.current.error(`Couldn’t start run: ${err.message}`)
     }
     setExecPanelOpen(true)
   }, [workflowId])
@@ -415,6 +446,24 @@ function CanvasInner({ workflowId }) {
         <Background />
         <Controls />
       </ReactFlow>
+      {loading && (
+        <div className="canvas-loading">
+          <div className="canvas-loading__nodes">
+            <Skeleton width={160} height={58} radius={10} />
+            <Skeleton width={160} height={58} radius={10} />
+            <Skeleton width={160} height={58} radius={10} />
+          </div>
+          <p className="canvas-loading__label">Loading workflow…</p>
+        </div>
+      )}
+      {!loading && nodes.length === 0 && (
+        <div className="canvas-empty">
+          <p className="canvas-empty__title">This canvas is empty</p>
+          <p className="canvas-empty__hint">
+            Add a node from the toolbar above to get started — or hit ✨ Suggest for ideas.
+          </p>
+        </div>
+      )}
       <CursorOverlay cursors={remoteCursors} users={remoteUsers} />
       <NodeConfigPanel
         node={selectedNode}

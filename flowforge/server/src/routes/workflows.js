@@ -2,8 +2,18 @@ const express = require('express')
 const { v4: uuidv4 } = require('uuid')
 const db = require('../config/database')
 const auth = require('../middleware/auth')
+const { validate } = require('../middleware/validate')
 
 const router = express.Router()
+
+const workflowRule = {
+  name: { required: true, type: 'string', maxLength: 200 },
+  description: { type: 'string', maxLength: 2000 },
+}
+const graphRule = {
+  nodes: { required: true, type: 'array', maxItems: 2000 },
+  edges: { required: true, type: 'array', maxItems: 5000 },
+}
 
 function isMember(workspaceId, userId) {
   return db.prepare(
@@ -26,13 +36,12 @@ router.get('/workspaces/:wsId/workflows', auth, (req, res) => {
   }
 })
 
-router.post('/workspaces/:wsId/workflows', auth, (req, res) => {
+router.post('/workspaces/:wsId/workflows', auth, validate(workflowRule), (req, res) => {
   try {
     if (!isMember(req.params.wsId, req.user.id)) {
       return res.status(404).json({ error: 'Workspace not found' })
     }
     const { name, description } = req.body
-    if (!name) return res.status(400).json({ error: 'name is required' })
 
     const id = uuidv4()
     const now = new Date().toISOString()
@@ -62,14 +71,13 @@ router.get('/workflows/:id', auth, (req, res) => {
   }
 })
 
-router.put('/workflows/:id', auth, (req, res) => {
+router.put('/workflows/:id', auth, validate(workflowRule), (req, res) => {
   try {
     const workflow = db.prepare('SELECT * FROM workflows WHERE id = ?').get(req.params.id)
     if (!workflow || !isMember(workflow.workspace_id, req.user.id)) {
       return res.status(404).json({ error: 'Workflow not found' })
     }
     const { name, description } = req.body
-    if (!name) return res.status(400).json({ error: 'name is required' })
 
     const now = new Date().toISOString()
     db.prepare(
@@ -84,16 +92,13 @@ router.put('/workflows/:id', auth, (req, res) => {
   }
 })
 
-router.put('/workflows/:id/graph', auth, (req, res) => {
+router.put('/workflows/:id/graph', auth, validate(graphRule), (req, res) => {
   try {
     const workflow = db.prepare('SELECT * FROM workflows WHERE id = ?').get(req.params.id)
     if (!workflow || !isMember(workflow.workspace_id, req.user.id)) {
       return res.status(404).json({ error: 'Workflow not found' })
     }
     const { nodes, edges } = req.body
-    if (!Array.isArray(nodes) || !Array.isArray(edges)) {
-      return res.status(400).json({ error: 'nodes and edges must be arrays' })
-    }
 
     const graphJson = JSON.stringify({ nodes, edges })
     const now = new Date().toISOString()

@@ -4,6 +4,7 @@ const jwt = require('jsonwebtoken')
 const { v4: uuidv4 } = require('uuid')
 const db = require('../config/database')
 const auth = require('../middleware/auth')
+const { validate, EMAIL_PATTERN } = require('../middleware/validate')
 
 const router = express.Router()
 
@@ -19,12 +20,16 @@ function userPayload(user) {
   return { id: user.id, email: user.email, displayName: user.display_name }
 }
 
-router.post('/auth/register', async (req, res) => {
+router.post(
+  '/auth/register',
+  validate({
+    email: { required: true, type: 'string', maxLength: 320, pattern: EMAIL_PATTERN, patternMessage: 'email is invalid' },
+    password: { required: true, type: 'string', maxLength: 200 },
+    displayName: { required: true, type: 'string', maxLength: 100 },
+  }),
+  async (req, res) => {
   try {
     const { email, password, displayName } = req.body
-    if (!email || !password || !displayName) {
-      return res.status(400).json({ error: 'email, password, and displayName are required' })
-    }
 
     const existing = db.prepare('SELECT id FROM users WHERE email = ?').get(email)
     if (existing) {
@@ -58,12 +63,15 @@ router.post('/auth/register', async (req, res) => {
   }
 })
 
-router.post('/auth/login', async (req, res) => {
+router.post(
+  '/auth/login',
+  validate({
+    email: { required: true, type: 'string', maxLength: 320 },
+    password: { required: true, type: 'string', maxLength: 200 },
+  }),
+  async (req, res) => {
   try {
     const { email, password } = req.body
-    if (!email || !password) {
-      return res.status(400).json({ error: 'email and password are required' })
-    }
 
     const user = db.prepare('SELECT * FROM users WHERE email = ?').get(email)
     if (!user) {

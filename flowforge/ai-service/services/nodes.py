@@ -37,9 +37,9 @@ Respond with ONLY the category name, exactly as written above."""
 
     raw = llm.chat(prompt, temperature=0).strip()
     # Normalise the model's answer back to one of the provided labels.
-    match = next((l for l in label_list if l.lower() == raw.lower()), None)
+    match = next((lbl for lbl in label_list if lbl.lower() == raw.lower()), None)
     if match is None:
-        match = next((l for l in label_list if l.lower() in raw.lower()), raw)
+        match = next((lbl for lbl in label_list if lbl.lower() in raw.lower()), raw)
     return {'label': match}
 
 

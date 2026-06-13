@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { apiFetch } from '../../services/api'
 import { StepList } from './ExecutionPanel'
+import { SkeletonRows } from '../Skeleton'
 
 function parseSteps(rows) {
   return rows.map((r) => ({
@@ -43,7 +44,7 @@ export default function ExecutionHistory({ workflowId, nodes }) {
   }
 
   if (error) return <p className="exec-panel__error">{error}</p>
-  if (loading) return <p className="exec-panel__empty">Loading runs…</p>
+  if (loading) return <SkeletonRows count={4} height={34} />
 
   if (selected) {
     return (
@@ -57,7 +58,12 @@ export default function ExecutionHistory({ workflowId, nodes }) {
   }
 
   if (executions.length === 0) {
-    return <p className="exec-panel__empty">No runs yet.</p>
+    return (
+      <div className="exec-empty">
+        <p className="exec-empty__title">No runs yet</p>
+        <p className="exec-empty__hint">Press ▶ Run to execute this workflow.</p>
+      </div>
+    )
   }
 
   return (

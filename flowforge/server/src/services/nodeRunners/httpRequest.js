@@ -1,4 +1,4 @@
-module.exports = async function runHttpRequest(config, input) {
+module.exports = async function runHttpRequest(config, _input) {
   const { method = 'GET', url, headers = '{}', body = '' } = config
   if (!url) throw new Error('HTTP node: url is required')
 

@@ -3,6 +3,7 @@ const crypto = require('crypto')
 const { v4: uuidv4 } = require('uuid')
 const db = require('../config/database')
 const auth = require('../middleware/auth')
+const { validate } = require('../middleware/validate')
 const { getExecutionQueue } = require('../config/queue')
 
 const router = express.Router()
@@ -34,7 +35,7 @@ router.get('/workflows/:id/webhooks', auth, (req, res) => {
 })
 
 // POST /api/workflows/:id/webhooks — create a webhook trigger
-router.post('/workflows/:id/webhooks', auth, (req, res) => {
+router.post('/workflows/:id/webhooks', auth, validate({ name: { type: 'string', maxLength: 200 } }), (req, res) => {
   try {
     const workflow = getWorkflowForMember(req.params.id, req.user.id)
     if (!workflow) return res.status(404).json({ error: 'Workflow not found' })
