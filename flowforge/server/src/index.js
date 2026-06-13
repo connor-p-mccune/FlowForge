@@ -3,10 +3,15 @@ const http = require('http')
 const cors = require('cors')
 require('dotenv').config()
 
+const { allowedOrigins } = require('./config/cors')
+
 const app = express()
 const server = http.createServer(app)
 
-app.use(cors())
+// Restrict CORS to the production frontend origin(s) via FRONTEND_URL (comma-
+// separated for multiple). Falls back to '*' for local dev / docker-compose.
+const corsOrigins = allowedOrigins()
+app.use(cors({ origin: corsOrigins, credentials: corsOrigins !== '*' }))
 // Cap request bodies so a huge payload can't exhaust memory. Workflow graphs
 // are the largest legitimate body, and 2mb covers very large graphs.
 app.use(express.json({ limit: '2mb' }))

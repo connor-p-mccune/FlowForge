@@ -187,6 +187,15 @@ on every push and pull request to `main`.
 
 ---
 
+## Deployment
+
+Production deploys to **Railway** (server, ai-service, Redis) and **Vercel**
+(client). See **[DEPLOYMENT.md](./DEPLOYMENT.md)** for the full step-by-step guide,
+and **[.env.production.example](./.env.production.example)** for the required
+environment variables per service.
+
+---
+
 ## Common commands
 
 ```bash
@@ -209,5 +218,7 @@ flowforge/
 ├── ai-service/    Flask microservice for LLM-backed features
 ├── docker-compose.yml
 ├── .env.example
+├── .env.production.example
+├── DEPLOYMENT.md
 └── .github/workflows/ci.yml
 ```

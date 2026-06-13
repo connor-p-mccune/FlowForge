@@ -1,3 +1,5 @@
+import os
+
 from flask import Flask, request, jsonify
 from services.suggestion import get_node_suggestions
 from services.nodes import run_llm_prompt, classify_text, extract_fields
@@ -63,4 +65,6 @@ def extract():
 
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5000, debug=True)
+    # Dev entrypoint only — production is served by gunicorn (see Dockerfile).
+    port = int(os.environ.get('PORT', 5000))
+    app.run(host='0.0.0.0', port=port, debug=True)

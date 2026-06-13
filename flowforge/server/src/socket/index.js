@@ -1,5 +1,6 @@
 const { Server } = require('socket.io')
 const jwt = require('jsonwebtoken')
+const { allowedOrigins } = require('../config/cors')
 
 const CURSOR_COLORS = [
   '#ef4444', '#f97316', '#eab308', '#22c55e',
@@ -14,8 +15,10 @@ function nextColor() {
 }
 
 function initSocket(httpServer) {
+  // Same FRONTEND_URL allow-list as the REST layer so the WebSocket handshake
+  // passes the browser's cross-origin check (Vercel client → Railway server).
   const io = new Server(httpServer, {
-    cors: { origin: '*' },
+    cors: { origin: allowedOrigins() },
   })
 
   io.use((socket, next) => {

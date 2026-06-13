@@ -15,4 +15,8 @@ COPY . .
 EXPOSE 5000
 # gunicorn instead of Flask's single-threaded dev server. app.py exposes `app`;
 # the long timeout covers slow upstream LLM calls.
-CMD ["gunicorn", "-b", "0.0.0.0:5000", "-w", "2", "--timeout", "120", "app:app"]
+#   * $PORT — Railway injects the port to listen on (defaults to 5000 locally).
+#   * [::]  — bind IPv6 (dual-stack on Linux) so Railway's IPv6-only private
+#             network can reach this internal-only service. Shell form is
+#             required so ${PORT} is expanded.
+CMD gunicorn -b "[::]:${PORT:-5000}" -w 2 --timeout 120 app:app
