@@ -10,8 +10,13 @@ const { buildAdjacency, topoSort } = require('./dagParser')
 const runners = {
   'action-http': require('./nodeRunners/httpRequest'),
   'action-delay': require('./nodeRunners/delay'),
+  'action-email': require('./nodeRunners/sendEmail'),
+  'action-slack': require('./nodeRunners/sendSlack'),
   'transform': require('./nodeRunners/transform'),
   'condition': require('./nodeRunners/condition'),
+  'ai-prompt': require('./nodeRunners/llmPrompt'),
+  'ai-classify': require('./nodeRunners/classify'),
+  'ai-extract': require('./nodeRunners/extract'),
   'output-log': require('./nodeRunners/outputLog'),
 }
 
@@ -87,8 +92,11 @@ async function runWithRetries(node, config, input) {
   }
 }
 
-async function runExecution(executionId, { publish } = {}) {
+async function runExecution(executionId, { publish, payload } = {}) {
   const pub = publish || defaultPublish
+  // Trigger nodes emit this object as their output, so webhook bodies flow into
+  // the graph (e.g. {{triggerNodeId.field}}). Manual runs pass nothing.
+  const triggerPayload = payload && typeof payload === 'object' ? payload : {}
 
   const execution = db.prepare('SELECT * FROM executions WHERE id = ?').get(executionId)
   if (!execution) throw new Error(`Execution ${executionId} not found`)
@@ -181,8 +189,10 @@ async function runExecution(executionId, { publish } = {}) {
       continue
     }
 
-    // Input = merged outputs of all active upstream nodes
-    const input = Object.assign({}, ...activeIncoming.map((e) => context[e.source] || {}))
+    // Input = merged outputs of all active upstream nodes. Trigger (source)
+    // nodes start from the run's trigger payload instead of an empty object.
+    const baseInput = node.type.startsWith('trigger-') ? { ...triggerPayload } : {}
+    const input = Object.assign(baseInput, ...activeIncoming.map((e) => context[e.source] || {}))
 
     updateStep.run('running', JSON.stringify(input), null, null, now(), null, stepIdByNode[nodeId])
     publishStep(nodeId, 'running')

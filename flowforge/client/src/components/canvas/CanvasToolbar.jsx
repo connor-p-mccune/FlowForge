@@ -1,6 +1,14 @@
 import { TOOLBAR_BUTTONS } from './nodeDefs'
 
-export default function CanvasToolbar({ onAddNode, onRun, onToggleRuns, running }) {
+export default function CanvasToolbar({
+  onAddNode,
+  onRun,
+  onToggleRuns,
+  onSuggest,
+  onToggleWebhooks,
+  running,
+  suggesting,
+}) {
   return (
     <div className="canvas-toolbar">
       {TOOLBAR_BUTTONS.map(({ type, label, className }) => (
@@ -13,6 +21,22 @@ export default function CanvasToolbar({ onAddNode, onRun, onToggleRuns, running 
           + {label}
         </button>
       ))}
+      <span className="canvas-toolbar__divider" />
+      <button
+        className="toolbar-btn toolbar-btn--suggest"
+        title="Suggest the next step with AI"
+        onClick={onSuggest}
+        disabled={suggesting}
+      >
+        {suggesting ? 'Thinking…' : '✨ Suggest'}
+      </button>
+      <button
+        className="toolbar-btn toolbar-btn--webhooks"
+        title="Manage webhook triggers"
+        onClick={onToggleWebhooks}
+      >
+        Webhooks
+      </button>
       <span className="canvas-toolbar__divider" />
       <button
         className="toolbar-btn toolbar-btn--run"

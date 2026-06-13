@@ -25,9 +25,11 @@ services:
       - JWT_SECRET=${JWT_SECRET}
       - REDIS_URL=redis://redis:6379
       - DATABASE_PATH=/app/data/flowforge.db
+      - AI_SERVICE_URL=http://ai-service:5000
       - PORT=3001
     depends_on:
       - redis
+      - ai-service
 
   ai-service:
     build: ./ai-service

@@ -1,7 +1,11 @@
-from openai import OpenAI
-import json
+"""Next-step node suggestions for the workflow builder."""
+from services import llm
 
-client = OpenAI()
+AVAILABLE_NODE_TYPES = (
+    'trigger-manual, trigger-webhook, action-http, action-delay, '
+    'action-email, action-slack, condition, transform, ai-prompt, '
+    'ai-classify, ai-extract, output-log'
+)
 
 
 def get_node_suggestions(nodes, edges, last_node_type=None):
@@ -14,26 +18,18 @@ Last added node type: {last_node_type or 'unknown'}
 
 Suggest 1-3 logical next nodes to add. Return ONLY a JSON array with no explanation:
 [
-  {{"type": "action-http", "label": "Fetch user data", "reason": "Common after a webhook trigger"}},
-  ...
+  {{"type": "action-http", "label": "Fetch user data", "reason": "Common after a webhook trigger"}}
 ]
 
-Available node types: trigger-manual, trigger-webhook, action-http, action-delay,
-action-email, action-slack, condition, loop, ai-prompt, ai-classify, ai-extract,
-output-log, output-return
+Available node types: {AVAILABLE_NODE_TYPES}
 """
 
-    response = client.chat.completions.create(
-        model='gpt-4o-mini',
-        messages=[{'role': 'user', 'content': prompt}],
-        temperature=0.3,
-    )
-
-    raw = response.choices[0].message.content.strip()
-    if raw.startswith('```'):
-        raw = '\n'.join(raw.split('\n')[1:-1])
-
-    return json.loads(raw)
+    raw = llm.chat(prompt, temperature=0.3)
+    suggestions = llm.parse_json(raw)
+    # Defend against the model returning a single object instead of an array
+    if isinstance(suggestions, dict):
+        suggestions = [suggestions]
+    return suggestions
 
 
 def build_node_summary(nodes, edges):

@@ -54,3 +54,13 @@ CREATE TABLE IF NOT EXISTS execution_steps (
   started_at   TEXT,
   finished_at  TEXT
 );
+
+CREATE TABLE IF NOT EXISTS webhooks (
+  id                TEXT PRIMARY KEY,
+  workflow_id       TEXT NOT NULL REFERENCES workflows(id) ON DELETE CASCADE,
+  webhook_key       TEXT UNIQUE NOT NULL,
+  name              TEXT,
+  created_by        TEXT REFERENCES users(id),
+  created_at        TEXT NOT NULL DEFAULT (datetime('now')),
+  last_triggered_at TEXT
+);

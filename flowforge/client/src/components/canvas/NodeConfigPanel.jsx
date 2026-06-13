@@ -23,6 +23,14 @@ export default function NodeConfigPanel({ node, onChange, onClose, onDelete }) {
             Manual triggers start the workflow when you press Run.
           </p>
         )
+      case 'trigger-webhook':
+        return (
+          <p className="config-panel__hint">
+            Webhook triggers start the workflow when an external service POSTs to
+            its URL. Create and copy the URL from the “Webhooks” panel. The request
+            body is available downstream as <code>{'{{' + node.id + '.field}}'}</code>.
+          </p>
+        )
       case 'action-http':
         return (
           <>
@@ -75,6 +83,60 @@ export default function NodeConfigPanel({ node, onChange, onClose, onDelete }) {
             />
           </label>
         )
+      case 'action-email':
+        return (
+          <>
+            <label className="config-panel__field">
+              <span>To</span>
+              <input
+                value={config.to || ''}
+                placeholder="person@example.com"
+                onChange={(e) => setConfig('to', e.target.value)}
+              />
+            </label>
+            <label className="config-panel__field">
+              <span>Subject</span>
+              <input
+                value={config.subject || ''}
+                placeholder="Workflow result"
+                onChange={(e) => setConfig('subject', e.target.value)}
+              />
+            </label>
+            <label className="config-panel__field">
+              <span>Body (supports {'{{node-id.field}}'})</span>
+              <textarea
+                rows={4}
+                value={config.body || ''}
+                onChange={(e) => setConfig('body', e.target.value)}
+              />
+            </label>
+            <p className="config-panel__hint">
+              Without SMTP env configured, sends are simulated (logged, not delivered).
+            </p>
+          </>
+        )
+      case 'action-slack':
+        return (
+          <>
+            <label className="config-panel__field">
+              <span>Slack webhook URL</span>
+              <input
+                value={config.webhookUrl || ''}
+                placeholder="https://hooks.slack.com/services/..."
+                onChange={(e) => setConfig('webhookUrl', e.target.value)}
+              />
+            </label>
+            <label className="config-panel__field">
+              <span>Message (supports {'{{node-id.field}}'})</span>
+              <textarea
+                rows={4}
+                value={config.text || ''}
+                placeholder="Run finished: {{node-id.status}}"
+                onChange={(e) => setConfig('text', e.target.value)}
+              />
+            </label>
+          </>
+        )
       case 'transform':
         return (
           <label className="config-panel__field">
@@ -119,15 +181,73 @@ export default function NodeConfigPanel({ node, onChange, onClose, onDelete }) {
         )
       case 'ai-prompt':
         return (
-          <label className="config-panel__field">
-            <span>Prompt (supports {'{{node-id.field}}'})</span>
-            <textarea
-              rows={6}
-              value={config.prompt || ''}
-              placeholder="Summarize this: {{node-id.body}}"
-              onChange={(e) => setConfig('prompt', e.target.value)}
-            />
-          </label>
+          <>
+            <label className="config-panel__field">
+              <span>Prompt (supports {'{{node-id.field}}'})</span>
+              <textarea
+                rows={6}
+                value={config.prompt || ''}
+                placeholder="Summarize this: {{node-id.body}}"
+                onChange={(e) => setConfig('prompt', e.target.value)}
+              />
+            </label>
+            <label className="config-panel__field">
+              <span>System instructions (optional)</span>
+              <textarea
+                rows={2}
+                value={config.system || ''}
+                placeholder="You are a concise assistant."
+                onChange={(e) => setConfig('system', e.target.value)}
+              />
+            </label>
+            <p className="config-panel__hint">Returns text as {'{{' + node.id + '.text}}'}.</p>
+          </>
+        )
+      case 'ai-classify':
+        return (
+          <>
+            <label className="config-panel__field">
+              <span>Text (supports {'{{node-id.field}}'})</span>
+              <textarea
+                rows={4}
+                value={config.text || ''}
+                placeholder="{{node-id.body}}"
+                onChange={(e) => setConfig('text', e.target.value)}
+              />
+            </label>
+            <label className="config-panel__field">
+              <span>Labels (comma-separated)</span>
+              <input
+                value={config.labels || ''}
+                placeholder="positive, negative, neutral"
+                onChange={(e) => setConfig('labels', e.target.value)}
+              />
+            </label>
+            <p className="config-panel__hint">Returns the chosen label as {'{{' + node.id + '.label}}'}.</p>
+          </>
+        )
+      case 'ai-extract':
+        return (
+          <>
+            <label className="config-panel__field">
+              <span>Text (supports {'{{node-id.field}}'})</span>
+              <textarea
+                rows={4}
+                value={config.text || ''}
+                placeholder="{{node-id.body}}"
+                onChange={(e) => setConfig('text', e.target.value)}
+              />
+            </label>
+            <label className="config-panel__field">
+              <span>Fields to extract (comma-separated)</span>
+              <input
+                value={config.fields || ''}
+                placeholder="name, email, company"
+                onChange={(e) => setConfig('fields', e.target.value)}
+              />
+            </label>
+            <p className="config-panel__hint">Returns an object as {'{{' + node.id + '.data}}'}.</p>
+          </>
         )
       case 'output-log':
         return (

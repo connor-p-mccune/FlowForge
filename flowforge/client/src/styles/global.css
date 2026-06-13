@@ -98,6 +98,10 @@ html, body, #root {
   transform: translateX(-50%);
   z-index: 10;
   display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  align-items: center;
+  max-width: calc(100vw - 340px);
   gap: 8px;
   background: #fff;
   border: 1px solid #e5e5e5;
@@ -745,6 +749,196 @@ html, body, #root {
   background: #fff;
   color: #555;
 }
+
+.toolbar-btn--suggest {
+  border-color: #a855f7;
+  background: #a855f7;
+  color: #fff;
+}
+
+.toolbar-btn--suggest:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.toolbar-btn--webhooks {
+  border-color: #0ea5e9;
+  background: #f0f9ff;
+  color: #0369a1;
+}
+
+/* AI suggestions panel */
+.suggest-panel {
+  position: absolute;
+  top: 64px;
+  right: 16px;
+  width: 300px;
+  max-height: calc(100% - 96px);
+  overflow-y: auto;
+  background: #fff;
+  border: 1px solid #e5e5e5;
+  border-radius: 10px;
+  box-shadow: 0 6px 24px rgba(0,0,0,0.12);
+  z-index: 25;
+  animation: config-panel-slide 0.18s ease-out;
+}
+
+.suggest-panel__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 14px;
+  border-bottom: 1px solid #f0f0f0;
+}
+
+.suggest-panel__title { font-weight: 700; color: #7e22ce; }
+
+.suggest-panel__close,
+.webhook-panel__close {
+  border: none;
+  background: none;
+  font-size: 20px;
+  line-height: 1;
+  cursor: pointer;
+  color: #888;
+}
+
+.suggest-panel__body { padding: 10px 14px 14px; }
+
+.suggest-panel__hint { color: #777; font-size: 13px; margin: 6px 0; }
+.suggest-panel__error { color: #b91c1c; font-size: 13px; margin: 6px 0; }
+
+.suggest-item {
+  border: 1px solid #efe6fb;
+  background: #faf5ff;
+  border-radius: 8px;
+  padding: 10px;
+  margin-bottom: 8px;
+}
+
+.suggest-item__main {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.suggest-item__label { font-weight: 600; color: #1f2937; }
+.suggest-item__type {
+  font-family: ui-monospace, monospace;
+  font-size: 11px;
+  color: #7e22ce;
+  white-space: nowrap;
+}
+.suggest-item__reason { font-size: 12px; color: #555; margin: 6px 0 8px; }
+
+.suggest-item__add {
+  border: 1px solid #a855f7;
+  background: #a855f7;
+  color: #fff;
+  border-radius: 6px;
+  padding: 4px 10px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+/* Webhook management panel */
+.webhook-panel {
+  position: absolute;
+  top: 64px;
+  right: 16px;
+  width: 340px;
+  max-height: calc(100% - 96px);
+  overflow-y: auto;
+  background: #fff;
+  border: 1px solid #e5e5e5;
+  border-radius: 10px;
+  box-shadow: 0 6px 24px rgba(0,0,0,0.12);
+  z-index: 25;
+  animation: config-panel-slide 0.18s ease-out;
+}
+
+.webhook-panel__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 14px;
+  border-bottom: 1px solid #f0f0f0;
+}
+
+.webhook-panel__title { font-weight: 700; color: #0369a1; }
+.webhook-panel__body { padding: 10px 14px 14px; }
+.webhook-panel__hint { color: #777; font-size: 12px; margin: 4px 0 10px; }
+.webhook-panel__error { color: #b91c1c; font-size: 13px; margin: 8px 0; }
+
+.webhook-panel__create {
+  width: 100%;
+  border: 1px solid #0ea5e9;
+  background: #f0f9ff;
+  color: #0369a1;
+  border-radius: 6px;
+  padding: 8px;
+  font-weight: 600;
+  cursor: pointer;
+  margin-bottom: 10px;
+}
+
+.webhook-panel__create:disabled { opacity: 0.6; cursor: not-allowed; }
+
+.webhook-list { list-style: none; margin: 0; padding: 0; }
+
+.webhook-item {
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  padding: 10px;
+  margin-bottom: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.webhook-item__row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.webhook-item__name { font-weight: 600; color: #1f2937; }
+
+.webhook-item__delete {
+  border: none;
+  background: none;
+  color: #b91c1c;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.webhook-item__url {
+  display: block;
+  font-family: ui-monospace, monospace;
+  font-size: 11px;
+  color: #334155;
+  background: #f8fafc;
+  border: 1px solid #eef2f7;
+  border-radius: 6px;
+  padding: 6px;
+  word-break: break-all;
+}
+
+.webhook-item__copy {
+  align-self: flex-start;
+  border: 1px solid #0ea5e9;
+  background: #fff;
+  color: #0369a1;
+  border-radius: 6px;
+  padding: 4px 10px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.webhook-item__meta { font-size: 11px; color: #94a3b8; }
 
 /* Execution panel */
 .exec-panel {

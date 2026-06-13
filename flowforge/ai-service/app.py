@@ -1,6 +1,6 @@
 from flask import Flask, request, jsonify
 from services.suggestion import get_node_suggestions
-import os
+from services.nodes import run_llm_prompt, classify_text, extract_fields
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -25,6 +25,39 @@ def suggest():
             last_node_type=data.get('lastNodeType'),
         )
         return jsonify({'suggestions': suggestions})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/llm', methods=['POST'])
+def llm_prompt():
+    data = request.get_json() or {}
+    if not data.get('prompt'):
+        return jsonify({'error': 'prompt is required'}), 400
+    try:
+        return jsonify(run_llm_prompt(data['prompt'], system=data.get('system')))
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/classify', methods=['POST'])
+def classify():
+    data = request.get_json() or {}
+    if not data.get('text') or not data.get('labels'):
+        return jsonify({'error': 'text and labels are required'}), 400
+    try:
+        return jsonify(classify_text(data['text'], data['labels']))
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/extract', methods=['POST'])
+def extract():
+    data = request.get_json() or {}
+    if not data.get('text') or not data.get('fields'):
+        return jsonify({'error': 'text and fields are required'}), 400
+    try:
+        return jsonify(extract_fields(data['text'], data['fields']))
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 

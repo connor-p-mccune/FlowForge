@@ -90,10 +90,10 @@ Track progress here. Update as phases complete.
 - [x] **Phase 2** — Canvas & CRUD: Node types, save/load workflows
 - [x] **Phase 3** — Execution engine: DAG parser, Bull queue, live step updates
 - [x] **Phase 4** — Real-time collaboration: WebSocket sync, cursors, presence
-- [ ] **Phase 5** — AI suggestions & webhooks: Python service, external triggers
+- [x] **Phase 5** — AI suggestions & webhooks: Python service, external triggers
 - [ ] **Phase 6** — Polish & deploy: Error handling, README, production build
 
-**Current phase: 5**
+**Current phase: 6**
 
 ---
 

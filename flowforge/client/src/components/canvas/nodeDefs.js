@@ -6,6 +6,11 @@ export const NODE_DEFS = {
     subtype: 'manual',
     config: {},
   },
+  'trigger-webhook': {
+    label: 'Webhook Trigger',
+    subtype: 'webhook',
+    config: {},
+  },
   'action-http': {
     label: 'HTTP Request',
     subtype: 'http',
@@ -15,6 +20,16 @@ export const NODE_DEFS = {
     label: 'Delay',
     subtype: 'delay',
     config: { durationMs: 1000 },
+  },
+  'action-email': {
+    label: 'Send Email',
+    subtype: 'email',
+    config: { to: '', subject: '', body: '' },
+  },
+  'action-slack': {
+    label: 'Send Slack',
+    subtype: 'slack',
+    config: { webhookUrl: '', text: '' },
   },
   'transform': {
     label: 'Transform',
@@ -29,7 +44,17 @@ export const NODE_DEFS = {
   'ai-prompt': {
     label: 'AI Prompt',
     subtype: 'prompt',
-    config: { prompt: '' },
+    config: { prompt: '', system: '' },
+  },
+  'ai-classify': {
+    label: 'Classify',
+    subtype: 'classify',
+    config: { text: '', labels: '' },
+  },
+  'ai-extract': {
+    label: 'Extract',
+    subtype: 'extract',
+    config: { text: '', fields: '' },
   },
   'output-log': {
     label: 'Log Output',
@@ -40,10 +65,15 @@ export const NODE_DEFS = {
 
 export const TOOLBAR_BUTTONS = [
   { type: 'trigger-manual', label: 'Trigger', className: 'toolbar-btn--trigger' },
+  { type: 'trigger-webhook', label: 'Webhook', className: 'toolbar-btn--trigger' },
   { type: 'action-http', label: 'HTTP', className: 'toolbar-btn--action' },
   { type: 'action-delay', label: 'Delay', className: 'toolbar-btn--action' },
+  { type: 'action-email', label: 'Email', className: 'toolbar-btn--action' },
+  { type: 'action-slack', label: 'Slack', className: 'toolbar-btn--action' },
   { type: 'transform', label: 'Transform', className: 'toolbar-btn--action' },
   { type: 'condition', label: 'Condition', className: 'toolbar-btn--condition' },
   { type: 'ai-prompt', label: 'AI', className: 'toolbar-btn--ai' },
+  { type: 'ai-classify', label: 'Classify', className: 'toolbar-btn--ai' },
+  { type: 'ai-extract', label: 'Extract', className: 'toolbar-btn--ai' },
   { type: 'output-log', label: 'Output', className: 'toolbar-btn--output' },
 ]

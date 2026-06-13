@@ -15,9 +15,9 @@ function startWorker() {
   const queue = getExecutionQueue()
 
   queue.process(async (job) => {
-    const { executionId } = job.data
+    const { executionId, payload } = job.data
     try {
-      await runExecution(executionId)
+      await runExecution(executionId, { payload })
     } catch (err) {
       // Engine handles per-node failures itself; this catches setup errors
       // (execution/workflow missing, DB issues) so the run never hangs.

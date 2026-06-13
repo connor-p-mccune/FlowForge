@@ -15,6 +15,8 @@ import { useAuth } from '../../hooks/useAuth'
 import { apiFetch } from '../../services/api'
 import CanvasToolbar from './CanvasToolbar'
 import NodeConfigPanel from './NodeConfigPanel'
+import SuggestionsPanel from './SuggestionsPanel'
+import WebhookPanel from './WebhookPanel'
 import ExecutionPanel from '../execution/ExecutionPanel'
 import CursorOverlay from '../collaboration/CursorOverlay'
 import PresenceBar from '../collaboration/PresenceBar'
@@ -54,6 +56,13 @@ function CanvasInner({ workflowId }) {
   const [execSteps, setExecSteps] = useState([]) // [{ nodeId, status, output, error }]
   const [execPanelOpen, setExecPanelOpen] = useState(false)
   const executionIdRef = useRef(null)
+
+  // AI suggestions + webhook panel (Phase 5)
+  const [suggestions, setSuggestions] = useState(null) // null = panel closed
+  const [suggestLoading, setSuggestLoading] = useState(false)
+  const [suggestError, setSuggestError] = useState(null)
+  const suggestAnchorRef = useRef(null)
+  const [webhookOpen, setWebhookOpen] = useState(false)
 
   const handleExecUpdate = useCallback((payload) => {
     if (payload.kind === 'execution') {
@@ -270,15 +279,23 @@ function CanvasInner({ workflowId }) {
     [setEdges, emitEdgeChange]
   )
 
-  const handleAddNode = useCallback(
-    (type) => {
+  const addNodeOfType = useCallback(
+    (type, { label, connectFromId } = {}) => {
       const def = NODE_DEFS[type]
-      if (!def) return
-      const rect = wrapperRef.current.getBoundingClientRect()
-      const position = screenToFlowPosition({
-        x: rect.left + rect.width / 2,
-        y: rect.top + rect.height / 2,
-      })
+      if (!def) return null
+
+      // Place below the anchor node when wiring from one, else at canvas center
+      const anchor = connectFromId ? getNode(connectFromId) : null
+      let position
+      if (anchor) {
+        position = { x: anchor.position.x, y: anchor.position.y + 120 }
+      } else {
+        const rect = wrapperRef.current.getBoundingClientRect()
+        position = screenToFlowPosition({
+          x: rect.left + rect.width / 2,
+          y: rect.top + rect.height / 2,
+        })
+      }
       // small jitter so repeated adds don't stack exactly
       position.x += Math.round(Math.random() * 40 - 20)
       position.y += Math.round(Math.random() * 40 - 20)
@@ -288,15 +305,66 @@ function CanvasInner({ workflowId }) {
         type,
         position,
         data: {
-          label: def.label,
+          label: label || def.label,
           subtype: def.subtype,
           config: { ...def.config },
         },
       }
       setNodes((nds) => [...nds, node])
       emitNodeChange('add', node)
+
+      if (connectFromId) {
+        const edge = { id: crypto.randomUUID(), source: connectFromId, target: node.id }
+        setEdges((eds) => addEdge(edge, eds))
+        emitEdgeChange('add', edge)
+      }
+      return node
     },
-    [screenToFlowPosition, setNodes, emitNodeChange]
+    [screenToFlowPosition, getNode, setNodes, setEdges, emitNodeChange, emitEdgeChange]
+  )
+
+  const handleAddNode = useCallback((type) => addNodeOfType(type), [addNodeOfType])
+
+  const handleSuggest = useCallback(async () => {
+    setWebhookOpen(false)
+    setSuggestError(null)
+    setSuggestLoading(true)
+    setSuggestions([])
+    const anchor = nodes.find((n) => n.selected) || nodes[nodes.length - 1] || null
+    suggestAnchorRef.current = anchor?.id || null
+    try {
+      const payloadNodes = nodes.map((n) => ({
+        id: n.id,
+        type: n.type,
+        data: { label: n.data?.label },
+      }))
+      const payloadEdges = edges.map((e) => ({ source: e.source, target: e.target }))
+      const { suggestions: result } = await apiFetch('/api/ai/suggest', {
+        method: 'POST',
+        body: { nodes: payloadNodes, edges: payloadEdges, lastNodeType: anchor?.type || null },
+      })
+      setSuggestions(result)
+    } catch (err) {
+      setSuggestError(err.message)
+    } finally {
+      setSuggestLoading(false)
+    }
+  }, [nodes, edges])
+
+  const handleAddSuggestion = useCallback(
+    (suggestion) => {
+      if (!NODE_DEFS[suggestion.type]) {
+        setSuggestError(`Unsupported suggested type: ${suggestion.type}`)
+        return
+      }
+      const created = addNodeOfType(suggestion.type, {
+        label: suggestion.label,
+        connectFromId: suggestAnchorRef.current,
+      })
+      // Chain further additions from the node we just created
+      if (created) suggestAnchorRef.current = created.id
+    },
+    [addNodeOfType]
   )
 
   const handleNodeDataChange = useCallback(
@@ -329,7 +397,10 @@ function CanvasInner({ workflowId }) {
         onAddNode={handleAddNode}
         onRun={handleRun}
         onToggleRuns={() => setExecPanelOpen((v) => !v)}
+        onSuggest={handleSuggest}
+        onToggleWebhooks={() => setWebhookOpen((v) => !v)}
         running={execution?.status === 'running' || execution?.status === 'pending'}
+        suggesting={suggestLoading}
       />
       <PresenceBar users={remoteUsers} selfId={user?.id} />
       <ReactFlow
@@ -350,6 +421,20 @@ function CanvasInner({ workflowId }) {
         onChange={handleNodeDataChange}
         onClose={handleClosePanel}
         onDelete={handleDeleteNode}
+      />
+      {suggestions !== null && (
+        <SuggestionsPanel
+          loading={suggestLoading}
+          error={suggestError}
+          suggestions={suggestions}
+          onAdd={handleAddSuggestion}
+          onClose={() => setSuggestions(null)}
+        />
+      )}
+      <WebhookPanel
+        workflowId={workflowId}
+        open={webhookOpen}
+        onClose={() => setWebhookOpen(false)}
       />
       <ExecutionPanel
         open={execPanelOpen}

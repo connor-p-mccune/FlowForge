@@ -1,4 +1,7 @@
 flask==3.0.0
 openai==1.12.0
+# openai 1.12.0 passes a `proxies` kwarg that httpx removed in 0.28 — pin below it
+# so the OpenAI client can be constructed.
+httpx==0.27.2
 python-dotenv==1.0.0
 pytest==8.0.0
