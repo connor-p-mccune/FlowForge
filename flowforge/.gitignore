@@ -32,3 +32,10 @@ Thumbs.db
 
 # Build artifacts
 server/data/*.db
+
+# Coverage
+coverage/
+.coverage
+htmlcov/
+*.lcov
+.ruff_cache/

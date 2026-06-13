@@ -21,7 +21,7 @@ jobs:
           cache-dependency-path: flowforge/server/package-lock.json
       - run: npm ci
       - run: npm run lint
-      - run: npm test
+      - run: npm run test:coverage
 
   client:
     runs-on: ubuntu-latest
@@ -37,7 +37,7 @@ jobs:
           cache-dependency-path: flowforge/client/package-lock.json
       - run: npm ci
       - run: npm run lint
-      - run: npm test
+      - run: npm run test:coverage
 
   ai-service:
     runs-on: ubuntu-latest
@@ -52,4 +52,5 @@ jobs:
       - run: pip install -r requirements.txt
       - run: pip install ruff
       - run: ruff check .
-      - run: python -m pytest tests/ -v
+      # Coverage flags come from pytest.ini (addopts)
+      - run: python -m pytest -v

@@ -7,6 +7,11 @@ const sendEmail = require('../services/nodeRunners/sendEmail')
 const llmPrompt = require('../services/nodeRunners/llmPrompt')
 const classify = require('../services/nodeRunners/classify')
 const extract = require('../services/nodeRunners/extract')
+const httpRequest = require('../services/nodeRunners/httpRequest')
+const transform = require('../services/nodeRunners/transform')
+const delay = require('../services/nodeRunners/delay')
+const condition = require('../services/nodeRunners/condition')
+const outputLog = require('../services/nodeRunners/outputLog')
 
 function startServer(handler) {
   return new Promise((resolve) => {
@@ -133,5 +138,158 @@ describe('AI node runners call the AI service over HTTP', () => {
 
   it('surfaces errors returned by the AI service', async () => {
     await expect(llmPrompt({ prompt: 'FAIL' })).rejects.toThrow('kaboom')
+  })
+})
+
+describe('httpRequest runner', () => {
+  it('performs a GET and returns status + parsed JSON body', async () => {
+    const server = await startServer((req, res) => {
+      res.writeHead(200, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({ hello: 'world' }))
+    })
+    const port = server.address().port
+    const out = await httpRequest({ method: 'GET', url: `http://127.0.0.1:${port}/` }, {})
+    server.close()
+    expect(out).toEqual({ status: 200, body: { hello: 'world' } })
+  })
+
+  it('sends a JSON body on POST and defaults the Content-Type header', async () => {
+    let received
+    let contentType
+    const server = await startServer(async (req, res) => {
+      contentType = req.headers['content-type']
+      received = await readJson(req)
+      res.writeHead(201, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({ created: true }))
+    })
+    const port = server.address().port
+    const out = await httpRequest(
+      { method: 'POST', url: `http://127.0.0.1:${port}/`, body: '{"name":"Ada"}' },
+      {}
+    )
+    server.close()
+    expect(out.status).toBe(201)
+    expect(received).toEqual({ name: 'Ada' })
+    expect(contentType).toMatch(/application\/json/)
+  })
+
+  it('returns a non-JSON body as plain text', async () => {
+    const server = await startServer((req, res) => {
+      res.writeHead(200, { 'Content-Type': 'text/plain' })
+      res.end('just text')
+    })
+    const port = server.address().port
+    const out = await httpRequest({ url: `http://127.0.0.1:${port}/` }, {})
+    server.close()
+    expect(out).toEqual({ status: 200, body: 'just text' })
+  })
+
+  it('throws on a non-2xx response, including the status code', async () => {
+    const server = await startServer((req, res) => {
+      res.writeHead(404)
+      res.end('missing')
+    })
+    const port = server.address().port
+    await expect(
+      httpRequest({ url: `http://127.0.0.1:${port}/` }, {})
+    ).rejects.toThrow(/HTTP 404/)
+    server.close()
+  })
+
+  it('requires a url', async () => {
+    await expect(httpRequest({ method: 'GET' }, {})).rejects.toThrow(/url is required/)
+  })
+
+  it('rejects malformed JSON headers', async () => {
+    await expect(
+      httpRequest({ url: 'http://127.0.0.1:1/', headers: '{not json}' }, {})
+    ).rejects.toThrow(/headers must be valid JSON/)
+  })
+})
+
+describe('transform runner', () => {
+  it('parses a JSON template string into an object', async () => {
+    const out = await transform({ template: '{"a": 1, "b": "two"}' }, {})
+    expect(out).toEqual({ a: 1, b: 'two' })
+  })
+
+  it('passes upstream input through when the template is empty', async () => {
+    const out = await transform({ template: '' }, { carried: true })
+    expect(out).toEqual({ carried: true })
+  })
+
+  it('passes upstream input through when there is no template', async () => {
+    const out = await transform({}, { carried: 7 })
+    expect(out).toEqual({ carried: 7 })
+  })
+
+  it('returns an already-resolved object template as-is', async () => {
+    const out = await transform({ template: { resolved: true } }, {})
+    expect(out).toEqual({ resolved: true })
+  })
+
+  it('wraps an unparseable template string as { value }', async () => {
+    const out = await transform({ template: 'not json at all' }, {})
+    expect(out).toEqual({ value: 'not json at all' })
+  })
+})
+
+describe('delay runner', () => {
+  it('waits the requested time and passes input through with delayedMs', async () => {
+    const out = await delay({ durationMs: 5 }, { foo: 'bar' })
+    expect(out).toEqual({ foo: 'bar', delayedMs: 5 })
+  })
+
+  it('clamps negative durations to zero', async () => {
+    const out = await delay({ durationMs: -100 }, {})
+    expect(out.delayedMs).toBe(0)
+  })
+
+  it('treats a missing duration as zero', async () => {
+    const out = await delay({}, { keep: 1 })
+    expect(out).toEqual({ keep: 1, delayedMs: 0 })
+  })
+})
+
+describe('condition runner', () => {
+  it('compares with loose string equality by default', async () => {
+    expect(await condition({ left: 5, right: '5' })).toEqual({ result: true })
+    expect(await condition({ left: 'a', right: 'b' })).toEqual({ result: false })
+  })
+
+  it('supports not_equals', async () => {
+    expect(await condition({ left: 'a', operator: 'not_equals', right: 'b' })).toEqual({ result: true })
+  })
+
+  it('supports contains', async () => {
+    expect(await condition({ left: 'hello world', operator: 'contains', right: 'world' })).toEqual({ result: true })
+    expect(await condition({ left: 'hello', operator: 'contains', right: 'zzz' })).toEqual({ result: false })
+  })
+
+  it('supports numeric greater_than and less_than', async () => {
+    expect(await condition({ left: '10', operator: 'greater_than', right: '3' })).toEqual({ result: true })
+    expect(await condition({ left: '2', operator: 'less_than', right: '3' })).toEqual({ result: true })
+    expect(await condition({ left: '2', operator: 'greater_than', right: '3' })).toEqual({ result: false })
+  })
+
+  it('throws on an unknown operator', async () => {
+    await expect(condition({ left: 1, operator: 'spaceship', right: 2 })).rejects.toThrow(/unknown operator/)
+  })
+})
+
+describe('outputLog runner', () => {
+  it('returns the configured message and logs it', async () => {
+    const spy = jest.spyOn(console, 'log').mockImplementation(() => {})
+    const out = await outputLog({ message: 'done' }, {})
+    expect(out).toEqual({ message: 'done' })
+    expect(spy).toHaveBeenCalledWith('[output-log]', 'done')
+    spy.mockRestore()
+  })
+
+  it('falls back to a serialised input when no message is configured', async () => {
+    const spy = jest.spyOn(console, 'log').mockImplementation(() => {})
+    const out = await outputLog({}, { value: 42 })
+    expect(out).toEqual({ message: '{"value":42}' })
+    spy.mockRestore()
   })
 })

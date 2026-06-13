@@ -7,7 +7,20 @@
     "dev": "nodemon src/index.js",
     "start": "node src/index.js",
     "lint": "eslint src --ext .js",
-    "test": "jest --runInBand"
+    "test": "jest --runInBand",
+    "test:coverage": "jest --runInBand --coverage"
+  },
+  "jest": {
+    "testEnvironment": "node",
+    "collectCoverageFrom": [
+      "src/**/*.js",
+      "!src/**/__tests__/**",
+      "!src/db/seed.js"
+    ],
+    "coverageReporters": [
+      "text",
+      "text-summary"
+    ]
   },
   "dependencies": {
     "better-sqlite3": "^11.10.0",
