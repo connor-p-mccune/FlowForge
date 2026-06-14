@@ -4,6 +4,7 @@ const { v4: uuidv4 } = require('uuid')
 const db = require('../config/database')
 const auth = require('../middleware/auth')
 const { validate } = require('../middleware/validate')
+const { webhookLimiter } = require('../middleware/rateLimit')
 const { getExecutionQueue } = require('../config/queue')
 
 const router = express.Router()
@@ -75,7 +76,7 @@ router.delete('/webhooks/:webhookId', auth, (req, res) => {
 
 // POST /api/webhooks/:key — anyone with the key can fire the workflow.
 // The request body becomes the trigger node's output for this run.
-router.post('/webhooks/:key', async (req, res) => {
+router.post('/webhooks/:key', webhookLimiter, async (req, res) => {
   try {
     const webhook = db.prepare('SELECT * FROM webhooks WHERE webhook_key = ?').get(req.params.key)
     if (!webhook) return res.status(404).json({ error: 'Webhook not found' })

@@ -194,6 +194,37 @@ module.exports = function auth(req, res, next) {
 
 Apply with `router.get('/path', auth, handler)`. Public routes (auth endpoints, webhook trigger) do not use this middleware.
 
+JWTs are signed with a `7d` expiry (`signToken` in `routes/auth.js`). Token
+revocation/refresh is out of scope for the MVP — see `SECURITY.md`.
+
+---
+
+## Rate limiting
+
+IP-based limits via `express-rate-limit`, defined in `middleware/rateLimit.js`
+and applied as per-route middleware. On exceed, the limiter responds `429` with
+the app-wide `{ error }` JSON shape and emits `RateLimit-*` headers.
+
+| Limiter          | Endpoint(s)                              | Default limit       | Purpose                       |
+|------------------|------------------------------------------|---------------------|-------------------------------|
+| `loginLimiter`   | `POST /api/auth/login`                   | 5 / 15 min / IP     | Brute-force / credential stuffing |
+| `registerLimiter`| `POST /api/auth/register`                | 5 / 15 min / IP     | Signup spam                   |
+| `webhookLimiter` | `POST /api/webhooks/:key` (public trigger)| 60 / min / IP      | Abuse / accidental floods     |
+
+Login and register each have their own independent counter (not a shared pool).
+
+**Tuning** — every limit is env-overridable:
+`AUTH_RATE_LIMIT_MAX`, `AUTH_RATE_LIMIT_WINDOW_MS`,
+`WEBHOOK_RATE_LIMIT_MAX`, `WEBHOOK_RATE_LIMIT_WINDOW_MS`.
+
+**Proxies** — `index.js` sets `trust proxy = 1` in production so limits key off
+the real client IP behind Railway's proxy (scoped to one hop, so `X-Forwarded-For`
+can't be spoofed).
+
+**Tests** — limiting is skipped under `NODE_ENV=test` (suites fire many auth
+requests) unless a suite sets `ENABLE_RATE_LIMIT=true`; `DISABLE_RATE_LIMIT=true`
+turns it off anywhere. See `__tests__/rateLimit.test.js`.
+
 ---
 
 ## Socket.io handlers
@@ -431,6 +462,8 @@ server.listen(PORT, () => console.log(`Server running on ${PORT}`))
     "cors": "^2.8.5",
     "dotenv": "^16.0.0",
     "express": "^4.18.0",
+    "express-rate-limit": "^7.5.1",
+    "helmet": "^8.2.0",
     "ioredis": "^5.3.0",
     "jsonwebtoken": "^9.0.0",
     "socket.io": "^4.7.0",

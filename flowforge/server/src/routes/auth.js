@@ -5,9 +5,13 @@ const { v4: uuidv4 } = require('uuid')
 const db = require('../config/database')
 const auth = require('../middleware/auth')
 const { validate, EMAIL_PATTERN } = require('../middleware/validate')
+const { loginLimiter, registerLimiter } = require('../middleware/rateLimit')
 
 const router = express.Router()
 
+// Access tokens expire after 7 days. They are stateless and not individually
+// revocable; a refresh-token flow (short access token + hashed refresh token +
+// /api/auth/refresh) is documented as deferred future work in SECURITY.md.
 function signToken(user) {
   return jwt.sign(
     { id: user.id, email: user.email, displayName: user.display_name },
@@ -22,6 +26,7 @@ function userPayload(user) {
 
 router.post(
   '/auth/register',
+  registerLimiter,
   validate({
     email: { required: true, type: 'string', maxLength: 320, pattern: EMAIL_PATTERN, patternMessage: 'email is invalid' },
     password: { required: true, type: 'string', maxLength: 200 },
@@ -65,6 +70,7 @@ router.post(
 
 router.post(
   '/auth/login',
+  loginLimiter,
   validate({
     email: { required: true, type: 'string', maxLength: 320 },
     password: { required: true, type: 'string', maxLength: 200 },

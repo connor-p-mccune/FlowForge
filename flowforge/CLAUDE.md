@@ -97,7 +97,40 @@ Track progress here. Update as phases complete.
 - [x] **Phase 5** — AI suggestions & webhooks: Python service, external triggers
 - [x] **Phase 6** — Polish & deploy: Error handling, README, production build
 
-**Current phase: 6 — complete**
+**Current phase: 7 — Security Hardening (complete)**
+
+---
+
+## Phase 7 — Security Hardening
+
+A focused security pass on top of the completed MVP. This section tracks each
+hardening item and its status. The full threat model and the disposition of any
+deferred items live in `SECURITY.md`.
+
+- [x] **1. Sandboxed expression evaluation** — Audited: no `eval`/`new Function`/`vm`
+      exists. transform = `JSON.parse`, condition = fixed operator switch, the
+      `{{...}}` resolver only substitutes values via a `[\w-.]`-restricted path
+      grammar. No code-execution path to sandbox, so no evaluator lib was added
+      (vm2 is deprecated/escapable; isolated-vm would add risk for no benefit).
+      Locked in by `server/src/__tests__/sandbox.test.js`.
+- [x] **2. Rate limiting** — `express-rate-limit` (`middleware/rateLimit.js`): 5/15min
+      on `/api/auth/login` and `/api/auth/register`, 60/min on the public
+      `/api/webhooks/:key` trigger. 429 → `{ error }`; env-tunable; `trust proxy`
+      in prod. Tests: `__tests__/rateLimit.test.js`. Documented in server/CLAUDE.md.
+- [x] **3. Security headers** — `helmet` in `index.js` with API defaults; CSP
+      disabled (JSON API + Socket.io — see note in code). Tests:
+      `__tests__/securityHeaders.test.js`.
+- [x] **4. JWT review** — Confirmed: tokens already expire (`7d`). Decision: keep
+      the 7-day access token; refresh-token flow deferred (documented in SECURITY.md).
+- [x] **5. Input validation audit** — Confirmed comprehensive: name/workspace/webhook
+      ≤200, description ≤2000, graph nodes/edges maxItems, 2mb body cap, auth fields
+      capped. No gaps; observations (password min-length, SSRF) noted in SECURITY.md.
+- [x] **6. CORS review** — Confirmed restricted to `FRONTEND_URL` (`*` only as dev
+      fallback); added a production startup warning if left open. Shared by REST + Socket.io.
+- [x] **7. Webhook signing** — Decision: deferred. Public trigger is protected by a
+      192-bit random key + 60/min rate limit; HMAC signing documented in SECURITY.md.
+- [x] **8. SECURITY.md** — Written at project root: threat model (T1–T7), implemented
+      controls, and deferred items with rationale.
 
 ---
 

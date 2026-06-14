@@ -1,6 +1,7 @@
 const express = require('express')
 const http = require('http')
 const cors = require('cors')
+const helmet = require('helmet')
 require('dotenv').config()
 
 const { allowedOrigins } = require('./config/cors')
@@ -8,9 +9,28 @@ const { allowedOrigins } = require('./config/cors')
 const app = express()
 const server = http.createServer(app)
 
+// Behind Railway's proxy in production, trust the first proxy hop so req.ip is
+// the real client IP (used by rate limiting) rather than the proxy's address.
+// Scoped to a single hop — not `true` — so clients can't spoof X-Forwarded-For.
+if (process.env.NODE_ENV === 'production') {
+  app.set('trust proxy', 1)
+}
+
+// Security headers (sensible defaults for an API). contentSecurityPolicy is
+// disabled on purpose: this service returns only JSON and hosts Socket.io — it
+// serves no HTML/scripts, so a server-set CSP protects nothing here, and the
+// restrictive default policy would interfere with the Socket.io transport and
+// the cross-origin browser client. CSP belongs on the frontend host (nginx /
+// Vercel), which serves the actual app shell.
+app.use(helmet({ contentSecurityPolicy: false }))
+
 // Restrict CORS to the production frontend origin(s) via FRONTEND_URL (comma-
 // separated for multiple). Falls back to '*' for local dev / docker-compose.
 const corsOrigins = allowedOrigins()
+// Loud warning if a production deploy is left wide open (FRONTEND_URL unset).
+if (process.env.NODE_ENV === 'production' && corsOrigins === '*') {
+  console.warn('[security] CORS is open to "*" in production. Set FRONTEND_URL to restrict it.')
+}
 app.use(cors({ origin: corsOrigins, credentials: corsOrigins !== '*' }))
 // Cap request bodies so a huge payload can't exhaust memory. Workflow graphs
 // are the largest legitimate body, and 2mb covers very large graphs.
