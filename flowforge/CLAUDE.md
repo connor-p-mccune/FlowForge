@@ -96,8 +96,10 @@ Track progress here. Update as phases complete.
 - [x] **Phase 4** — Real-time collaboration: WebSocket sync, cursors, presence
 - [x] **Phase 5** — AI suggestions & webhooks: Python service, external triggers
 - [x] **Phase 6** — Polish & deploy: Error handling, README, production build
+- [x] **Phase 7** — Security hardening: rate limiting, helmet, CORS, SECURITY.md
+- [x] **Phase 8** — Analytics dashboard: workspace metrics, charts, per-workflow stats
 
-**Current phase: 7 — Security Hardening (complete)**
+**Current phase: 8 — Analytics Dashboard (complete)**
 
 ---
 
@@ -131,6 +133,39 @@ deferred items live in `SECURITY.md`.
       192-bit random key + 60/min rate limit; HMAC signing documented in SECURITY.md.
 - [x] **8. SECURITY.md** — Written at project root: threat model (T1–T7), implemented
       controls, and deferred items with rationale.
+
+---
+
+## Phase 8 — Analytics Dashboard
+
+Per-workspace execution analytics: summary metrics, a daily timeline, node-type
+usage/timing, and per-workflow stats. Backend aggregates run as SQL `GROUP BY`
+queries against `executions`/`execution_steps` (no row-by-row JS); the frontend
+renders them with Recharts.
+
+- [x] **1. Schema & engine** — `node_type` added to `execution_steps`, populated
+      at run time by the execution engine (idempotent ALTER migration in
+      `config/database.js` for existing DBs). Indexes:
+      `executions(workflow_id, started_at)` and `execution_steps(execution_id, node_type)`.
+- [x] **2. Analytics API** — `routes/analytics.js`: workspace-scoped, `auth` +
+      membership check, returns the app-wide `{ error }` shape on failure.
+- [x] **3. Demo seed** — `db/seed.js` populates a demo workspace with workflows
+      and ~90 days of executions/steps so the dashboard has data to show.
+- [x] **4. Tests** — `__tests__/analytics.test.js` (supertest, mirrors the other route suites).
+- [x] **5. Frontend** — `/workspace/:wsId/analytics` page: summary cards, timeline
+      (stacked), node-usage (horizontal bar), sortable workflows table, 7/30/90-day
+      range selector, loading skeletons, empty state. Nav link in the sidebar.
+      Components in `client/src/components/analytics/`; charts via Recharts.
+
+| Endpoint | Returns |
+|----------|---------|
+| `GET /api/workspaces/:wsId/analytics/summary?days=N`   | total executions, success rate, avg duration |
+| `GET /api/workspaces/:wsId/analytics/timeline?days=N`  | daily completed/failed counts (for a stacked chart) |
+| `GET /api/workspaces/:wsId/analytics/node-usage`       | per node type: count across workflows + avg step duration |
+| `GET /api/workspaces/:wsId/analytics/workflows?days=N` | per-workflow execution count, success rate, avg duration, last run |
+
+`days` defaults to 30 (clamped 1–365). Success = execution `status = 'completed'`;
+durations are `finished_at − started_at` computed with SQLite `julianday()`.
 
 ---
 

@@ -132,15 +132,16 @@ async function runExecution(executionId, { publish, payload } = {}) {
     return
   }
 
-  // One step row per node, in execution order
+  // One step row per node, in execution order. node_type is captured now so
+  // analytics can aggregate per-type timing even if the graph is edited later.
   const insertStep = db.prepare(
-    'INSERT INTO execution_steps (id, execution_id, node_id, status) VALUES (?, ?, ?, ?)'
+    'INSERT INTO execution_steps (id, execution_id, node_id, node_type, status) VALUES (?, ?, ?, ?, ?)'
   )
   const stepIdByNode = {}
   for (const nodeId of order) {
     const stepId = uuidv4()
     stepIdByNode[nodeId] = stepId
-    insertStep.run(stepId, executionId, nodeId, 'pending')
+    insertStep.run(stepId, executionId, nodeId, nodeById[nodeId]?.type ?? null, 'pending')
   }
 
   const updateStep = db.prepare(`

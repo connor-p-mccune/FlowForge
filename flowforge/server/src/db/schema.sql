@@ -47,6 +47,7 @@ CREATE TABLE IF NOT EXISTS execution_steps (
   id           TEXT PRIMARY KEY,
   execution_id TEXT NOT NULL REFERENCES executions(id) ON DELETE CASCADE,
   node_id      TEXT NOT NULL,
+  node_type    TEXT,
   status       TEXT NOT NULL DEFAULT 'pending',
   input_json   TEXT,
   output_json  TEXT,
@@ -64,3 +65,9 @@ CREATE TABLE IF NOT EXISTS webhooks (
   created_at        TEXT NOT NULL DEFAULT (datetime('now')),
   last_triggered_at TEXT
 );
+
+-- Phase 8 (analytics): the summary/timeline/workflows queries scan executions by
+-- workflow + time range. (The execution_steps(execution_id, node_type) index is
+-- created in config/database.js, after the node_type column migration runs.)
+CREATE INDEX IF NOT EXISTS idx_executions_workflow_started
+  ON executions (workflow_id, started_at);

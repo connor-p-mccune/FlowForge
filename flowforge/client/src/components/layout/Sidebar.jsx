@@ -1,11 +1,13 @@
 import { useState, useEffect, useCallback } from 'react'
-import { useNavigate, useParams } from 'react-router-dom'
+import { useNavigate, useParams, useLocation } from 'react-router-dom'
 import { apiFetch } from '../../services/api'
 import Skeleton, { SkeletonRows } from '../Skeleton'
 
 export default function Sidebar({ open = false, onNavigate }) {
   const navigate = useNavigate()
-  const { id: currentWorkflowId } = useParams()
+  const location = useLocation()
+  const { id: currentWorkflowId, wsId: routeWorkspaceId } = useParams()
+  const onAnalytics = location.pathname.endsWith('/analytics')
 
   const [workspaces, setWorkspaces] = useState([])
   const [activeWorkspaceId, setActiveWorkspaceId] = useState(null)
@@ -30,6 +32,8 @@ export default function Sidebar({ open = false, onNavigate }) {
           const { workflow } = await apiFetch(`/api/workflows/${currentWorkflowId}`)
           if (cancelled) return
           setActiveWorkspaceId(workflow.workspace_id)
+        } else if (routeWorkspaceId) {
+          setActiveWorkspaceId(routeWorkspaceId)
         } else if (ws.length > 0) {
           setActiveWorkspaceId((prev) => prev || ws[0].id)
         }
@@ -41,7 +45,7 @@ export default function Sidebar({ open = false, onNavigate }) {
     }
     load()
     return () => { cancelled = true }
-  }, [currentWorkflowId])
+  }, [currentWorkflowId, routeWorkspaceId])
 
   const loadWorkflows = useCallback(async () => {
     if (!activeWorkspaceId) {
@@ -61,6 +65,12 @@ export default function Sidebar({ open = false, onNavigate }) {
   }, [activeWorkspaceId])
 
   useEffect(() => { loadWorkflows() }, [loadWorkflows])
+
+  function handleSelectWorkspace(id) {
+    setActiveWorkspaceId(id)
+    // Keep the analytics view in sync when switching workspaces from the dropdown.
+    if (onAnalytics) navigate(`/workspace/${id}/analytics`)
+  }
 
   async function handleCreateWorkspace(e) {
     e.preventDefault()
@@ -183,7 +193,7 @@ export default function Sidebar({ open = false, onNavigate }) {
             <select
               className="sidebar__select"
               value={activeWorkspaceId || ''}
-              onChange={(e) => setActiveWorkspaceId(e.target.value)}
+              onChange={(e) => handleSelectWorkspace(e.target.value)}
             >
               {workspaces.map((ws) => (
                 <option key={ws.id} value={ws.id}>{ws.name}</option>
@@ -198,6 +208,14 @@ export default function Sidebar({ open = false, onNavigate }) {
               🗑
             </button>
           </div>
+        )}
+        {activeWorkspaceId && (
+          <button
+            className={`sidebar__nav-link${onAnalytics ? ' sidebar__nav-link--active' : ''}`}
+            onClick={() => { navigate(`/workspace/${activeWorkspaceId}/analytics`); onNavigate?.() }}
+          >
+            <span aria-hidden="true">📊</span> Analytics
+          </button>
         )}
       </div>
 
