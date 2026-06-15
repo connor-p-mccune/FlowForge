@@ -1,0 +1,197 @@
+{
+    "metrics": {
+        "http_reqs": {
+            "rate": 1567.1237678251482,
+            "count": 94333
+        },
+        "data_received": {
+            "rate": 1261058.463905461,
+            "count": 75909402
+        },
+        "webhook_accepted_202": {
+            "count": 74,
+            "rate": 1.2293381830224943
+        },
+        "iteration_duration": {
+            "avg": 11.646778155086588,
+            "min": 0.673669,
+            "med": 10.0159345,
+            "max": 89.206716,
+            "p(90)": 18.816528299999998,
+            "p(95)": 23.2663395
+        },
+        "http_req_failed": {
+            "fails": 79,
+            "passes": 94254,
+            "thresholds": {
+                "rate<1.0": false
+            },
+            "value": 0.9991625412103929
+        },
+        "http_req_tls_handshaking": {
+            "p(90)": 0,
+            "p(95)": 0,
+            "avg": 0,
+            "min": 0,
+            "med": 0,
+            "max": 0
+        },
+        "http_req_duration{expected_response:true}": {
+            "p(90)": 30.794912200000002,
+            "p(95)": 31.944425499999998,
+            "avg": 10.580894784810127,
+            "min": 1.608953,
+            "med": 3.958469,
+            "max": 131.229089
+        },
+        "checks": {
+            "passes": 94406,
+            "fails": 94254,
+            "value": 0.5004028410897912
+        },
+        "http_req_waiting": {
+            "p(90)": 18.278077400000004,
+            "p(95)": 22.583393399999984,
+            "avg": 11.278691534362281,
+            "min": 0.524398,
+            "med": 9.720278,
+            "max": 131.012686
+        },
+        "data_sent": {
+            "rate": 301712.41676574247,
+            "count": 18161576
+        },
+        "webhook_trigger_ms": {
+            "med": 9.834867,
+            "max": 89.097923,
+            "p(90)": 18.518841200000004,
+            "p(95)": 22.92190209999998,
+            "avg": 11.429263956619499,
+            "min": 0.580924,
+            "thresholds": {
+                "p(95)<60000": false
+            }
+        },
+        "iterations": {
+            "count": 94328,
+            "rate": 1567.0407044344033
+        },
+        "vus": {
+            "value": 20,
+            "min": 2,
+            "max": 20
+        },
+        "http_req_connecting": {
+            "p(95)": 0,
+            "avg": 0.00014498252997360413,
+            "min": 0,
+            "med": 0,
+            "max": 5.270936,
+            "p(90)": 0
+        },
+        "http_req_sending": {
+            "avg": 0.045549302990470636,
+            "min": 0.004067,
+            "med": 0.01061,
+            "max": 21.117483,
+            "p(90)": 0.017884,
+            "p(95)": 0.062154599999999886
+        },
+        "vus_max": {
+            "min": 20,
+            "max": 20,
+            "value": 20
+        },
+        "http_req_blocked": {
+            "med": 0.003026,
+            "max": 9.176443,
+            "p(90)": 0.003817,
+            "p(95)": 0.004308,
+            "avg": 0.007012250612193743,
+            "min": 0.001012
+        },
+        "http_req_receiving": {
+            "avg": 0.10612898794695383,
+            "min": 0.014627,
+            "med": 0.042269,
+            "max": 35.850329,
+            "p(90)": 0.07521,
+            "p(95)": 0.16342499999999913
+        },
+        "http_req_duration": {
+            "avg": 11.430369825299776,
+            "min": 0.580924,
+            "med": 9.834862,
+            "max": 131.229089,
+            "p(90)": 18.519568200000005,
+            "p(95)": 22.9234294
+        },
+        "webhook_rate_limited_429": {
+            "count": 94254,
+            "rate": 1565.8113662513808
+        }
+    },
+    "setup_data": {
+        "key": "Z88FFvKF6A7Qh7um-lIWqFXZanPFTHo-",
+        "wfId": "65424988-454f-4a3c-b1f4-9b24f3d8b0c4"
+    },
+    "root_group": {
+        "name": "",
+        "path": "",
+        "id": "d41d8cd98f00b204e9800998ecf8427e",
+        "groups": {
+            "setup": {
+                "name": "setup",
+                "path": "::setup",
+                "id": "5c0f8025f7e0b6654089e5b00e950f1a",
+                "groups": {},
+                "checks": {
+                        "register 201": {
+                            "name": "register 201",
+                            "path": "::setup::register 201",
+                            "id": "09b4317cf1f0cccb084b00576cc103e4",
+                            "passes": 1,
+                            "fails": 0
+                        },
+                        "workflow 201": {
+                            "fails": 0,
+                            "name": "workflow 201",
+                            "path": "::setup::workflow 201",
+                            "id": "04f33ebd16ebcce11e4ba2c8d358a438",
+                            "passes": 1
+                        },
+                        "graph 200": {
+                            "fails": 0,
+                            "name": "graph 200",
+                            "path": "::setup::graph 200",
+                            "id": "89b36391a82347d3fc7cf59af81c8d57",
+                            "passes": 1
+                        },
+                        "webhook 201": {
+                            "name": "webhook 201",
+                            "path": "::setup::webhook 201",
+                            "id": "6f8782e81f290cc8713310ffd8c9b93f",
+                            "passes": 1,
+                            "fails": 0
+                        }
+                    }
+            }
+        },
+        "checks": {
+            "accepted 202": {
+                "id": "4cdd873d3f3d4e123bfff3e97ba7f2a1",
+                "passes": 74,
+                "fails": 94254,
+                "name": "accepted 202",
+                "path": "::accepted 202"
+            },
+            "not 5xx": {
+                "id": "190338f12de9620ea4fd03a4d3055937",
+                "passes": 94328,
+                "fails": 0,
+                "name": "not 5xx",
+                "path": "::not 5xx"
+            }
+        }
+    }
+}

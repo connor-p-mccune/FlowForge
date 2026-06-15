@@ -98,8 +98,9 @@ Track progress here. Update as phases complete.
 - [x] **Phase 6** — Polish & deploy: Error handling, README, production build
 - [x] **Phase 7** — Security hardening: rate limiting, helmet, CORS, SECURITY.md
 - [x] **Phase 8** — Analytics dashboard: workspace metrics, charts, per-workflow stats
+- [x] **Phase 9** — Load testing & scaling: k6 baseline, one bottleneck, one fix, re-measure
 
-**Current phase: 8 — Analytics Dashboard (complete)**
+**Current phase: 9 — Load Testing & Scaling (complete)**
 
 ---
 
@@ -166,6 +167,43 @@ renders them with Recharts.
 
 `days` defaults to 30 (clamped 1–365). Success = execution `status = 'completed'`;
 durations are `finished_at − started_at` computed with SQLite `julianday()`.
+
+---
+
+## Phase 9 — Load Testing & Scaling
+
+A measured performance pass on the execution pipeline: establish a baseline,
+identify one bottleneck, make one targeted fix, and re-measure. Full methodology,
+numbers, and the before/after table live in `LOAD_TESTING.md`; the harness lives
+in `load-testing/`.
+
+Target path: `POST /api/webhooks/:key` → Bull enqueue → worker → SQLite logging,
+driven by a deliberately cheap workflow (**webhook-trigger → delay → output-log**)
+so the test stresses the pipeline, not OpenAI/SMTP/Slack egress. Run against local
+**docker-compose** (production images), never the deployed app.
+
+- [x] **1. Harness** — `load-testing/`: a k6 script (`webhook_load.js`, run via the
+      `grafana/k6` image on the compose network) that registers a user, builds the
+      cheap workflow + a webhook, and floods it while ramping 1→~80 VUs; a
+      server-side `monitor.js` (Bull queue depth + trigger→completion latency from
+      SQLite); `docker-compose.loadtest.yml` test-only overrides.
+- [x] **2. Baseline** — 80 VUs: accepted **686 req/s** (0% errors) but only
+      **4.46 exec/s** completed; Bull `active` pinned at 1; queue grew to ~102k;
+      e2e p95 **140.9 s**. Probe (limiter ON): 60/min/IP → 99.9% `429`, first within ~1 s.
+- [x] **3. Bottleneck** — **Bull worker concurrency = 1** (`executionWorker.js`,
+      `queue.process()` no arg). WAL already on and write path is PK-indexed —
+      both ruled out in code. ~150× accept-vs-complete gap.
+- [x] **4. Fix** — one line: `queue.process(CONCURRENCY, …)` with
+      `EXEC_CONCURRENCY` (default 10) in `executionWorker.js`. Nothing else changed.
+- [x] **5. Re-measure & document** — identical run → **41.14 exec/s (~9.2×)**,
+      `active`=10, 0% errors. Full methodology + before/after table in `LOAD_TESTING.md`.
+      Honest caveat: throughput 9×; latency-under-flood unchanged (offered ≫ capacity).
+
+**Rate-limit note:** the public webhook trigger is capped at 60/min/IP (Phase 7),
+which a single-source flood trips almost immediately. The pipeline runs therefore
+set `DISABLE_RATE_LIMIT=true` via the loadtest compose override as a documented
+**test-only** exception; a separate run with the limiter ON measures exactly where
+it starts rejecting.
 
 ---
 

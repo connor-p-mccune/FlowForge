@@ -1,0 +1,17 @@
+{
+  "since": "2026-06-15T17:41:19Z",
+  "executionsCreated": 70,
+  "byStatus": {
+    "completed": 61,
+    "pending": 8,
+    "running": 1
+  },
+  "completed": 61,
+  "completionThroughputPerSec": 1.02,
+  "latencyMs": {
+    "p50": 4980,
+    "p95": 9570,
+    "p99": 10107,
+    "max": 10107
+  }
+}

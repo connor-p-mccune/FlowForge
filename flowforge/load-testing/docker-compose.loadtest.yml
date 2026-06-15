@@ -1,0 +1,19 @@
+# Phase 9 load-test overrides — TEST ONLY, never use in production.
+#
+# Layer on top of the real compose file so the prod config stays untouched:
+#   docker compose -f docker-compose.yml -f load-testing/docker-compose.loadtest.yml up -d --build
+#
+# It changes nothing about the app's behavior except the rate-limit knobs, which
+# are the documented test-only exception (see LOAD_TESTING.md / Phase 9 in CLAUDE.md).
+services:
+  server:
+    environment:
+      # The harness registers a fresh user every run; without this it would trip
+      # the Phase 7 auth limiter (5 / 15 min / IP) and lock itself out. Raising the
+      # AUTH limit does NOT touch the WEBHOOK limiter, so the "where does the
+      # webhook 429 kick in" probe is still meaningful.
+      - AUTH_RATE_LIMIT_MAX=1000000
+      # Toggled per run via the shell:
+      #   (unset)                 -> webhook limiter ON  (baseline 60/min probe)
+      #   LT_DISABLE_RATE_LIMIT=true -> all limiters OFF (pipeline throughput test)
+      - DISABLE_RATE_LIMIT=${LT_DISABLE_RATE_LIMIT:-}
