@@ -124,3 +124,43 @@ describe('ExecutionHistory replay', () => {
     expect(screen.getByRole('dialog')).toHaveTextContent(/original webhook trigger data/)
   })
 })
+
+describe('ExecutionHistory dry-run (test) badge', () => {
+  const DRY_RUN_EXEC = {
+    id: 'exT',
+    status: 'completed',
+    trigger_type: 'dry-run',
+    triggered_by: 'u1',
+    created_at: '2026-06-17T12:00:00.000Z',
+    started_at: '2026-06-17T12:00:00.000Z',
+    finished_at: '2026-06-17T12:00:00.500Z',
+  }
+
+  function mockDryRunList() {
+    apiFetch.mockImplementation((path) => {
+      if (path.endsWith('/replay')) return Promise.resolve({ execution: REPLAY_EXEC })
+      if (path === '/api/workflows/wf1/executions') {
+        return Promise.resolve({ executions: [DRY_RUN_EXEC], workflowUpdatedAt: WF_UPDATED })
+      }
+      return Promise.reject(new Error(`unexpected request: ${path}`))
+    })
+  }
+
+  it('marks a dry-run execution with a Test badge and a tinted row', async () => {
+    mockDryRunList()
+    const { container } = render(<ExecutionHistory workflowId="wf1" nodes={[]} />)
+    await screen.findByText('completed')
+    expect(screen.getByText('Test')).toBeInTheDocument()
+    expect(container.querySelector('.exec-history__row--test')).toBeInTheDocument()
+  })
+
+  it('labels a dry-run replay confirmation as a "test" run', async () => {
+    mockDryRunList()
+    render(<ExecutionHistory workflowId="wf1" nodes={[]} />)
+    await screen.findByText('Test')
+    fireEvent.click(screen.getByRole('button', { name: 'Replay this run' }))
+    expect(screen.getByRole('dialog')).toHaveTextContent(
+      'Re-run this workflow with the original test trigger data?'
+    )
+  })
+})

@@ -46,6 +46,9 @@ function CanvasInner({ workflowId }) {
   const [execution, setExecution] = useState(null) // { id, status, error }
   const [execSteps, setExecSteps] = useState([]) // [{ nodeId, status, output, error }]
   const [execPanelOpen, setExecPanelOpen] = useState(false)
+  // Whether the current/last run is a dry run (Test). Drives the test-mode banner;
+  // the per-node "Would send" badges derive from the step outputs themselves.
+  const [isTestRun, setIsTestRun] = useState(false)
   const executionIdRef = useRef(null)
 
   // Deep link from a notification: /workflow/:id?execution=<id> opens the runs
@@ -83,6 +86,7 @@ function CanvasInner({ workflowId }) {
       if (payload.status === 'running' && payload.executionId !== executionIdRef.current) {
         executionIdRef.current = payload.executionId
         setExecSteps([])
+        setIsTestRun(Boolean(payload.dryRun))
         setExecution({ id: payload.executionId, status: 'running', error: null })
         setExecPanelOpen(true)
         return
@@ -248,6 +252,7 @@ function CanvasInner({ workflowId }) {
   )
 
   const handleRun = useCallback(async () => {
+    setIsTestRun(false)
     try {
       const { execution: ex } = await apiFetch(`/api/workflows/${workflowId}/execute`, {
         method: 'POST',
@@ -259,6 +264,26 @@ function CanvasInner({ workflowId }) {
       executionIdRef.current = null
       setExecution({ id: null, status: 'failed', error: err.message })
       toastRef.current.error(`Couldn’t start run: ${err.message}`)
+    }
+    setExecPanelOpen(true)
+  }, [workflowId])
+
+  // Test mode: same as Run but a dry run — action nodes (email/Slack/HTTP) report
+  // what they would have sent instead of firing. Results show as "Would send"
+  // badges on the canvas (derived from each step's output below).
+  const handleTest = useCallback(async () => {
+    setIsTestRun(true)
+    try {
+      const { execution: ex } = await apiFetch(`/api/workflows/${workflowId}/test`, {
+        method: 'POST',
+      })
+      executionIdRef.current = ex.id
+      setExecSteps([])
+      setExecution({ id: ex.id, status: ex.status, error: null })
+    } catch (err) {
+      executionIdRef.current = null
+      setExecution({ id: null, status: 'failed', error: err.message })
+      toastRef.current.error(`Couldn’t start test run: ${err.message}`)
     }
     setExecPanelOpen(true)
   }, [workflowId])
@@ -311,6 +336,31 @@ function CanvasInner({ workflowId }) {
   }, [nodes, edges, saveGraph])
 
   const selectedNode = useMemo(() => nodes.find((n) => n.selected) || null, [nodes])
+
+  // Dry-run results, keyed by node id, derived from the current run's step outputs
+  // (a step's output is { dryRun: true, wouldHaveSent }). Cleared automatically
+  // whenever a new run resets execSteps, so badges only reflect the latest run.
+  const dryRunByNode = useMemo(() => {
+    const map = {}
+    for (const s of execSteps) {
+      if (s.output?.dryRun && s.output.wouldHaveSent) map[s.nodeId] = s.output.wouldHaveSent
+    }
+    return map
+  }, [execSteps])
+
+  // Merge dry-run results into node data for rendering only — never into the
+  // `nodes` state itself, which is what the debounced auto-save persists. When
+  // there are no results this returns the same array reference (no-op).
+  const displayNodes = useMemo(() => {
+    if (Object.keys(dryRunByNode).length === 0) return nodes
+    return nodes.map((n) =>
+      dryRunByNode[n.id] ? { ...n, data: { ...n.data, dryRunResult: dryRunByNode[n.id] } } : n
+    )
+  }, [nodes, dryRunByNode])
+
+  // The test-mode banner shows only while a dry run is actively executing.
+  const testBannerVisible =
+    isTestRun && (execution?.status === 'pending' || execution?.status === 'running')
 
   // Wrap React Flow's change handlers to broadcast drags and deletions
   const handleNodesChange = useCallback(
@@ -477,19 +527,26 @@ function CanvasInner({ workflowId }) {
       <CanvasToolbar
         onAddNode={handleAddNode}
         onRun={handleRun}
+        onTest={handleTest}
         onToggleRuns={() => setExecPanelOpen((v) => !v)}
         onSuggest={handleSuggest}
         onToggleWebhooks={handleToggleWebhooks}
         onDeploy={handleDeploy}
         onToggleHistory={handleToggleHistory}
         running={execution?.status === 'running' || execution?.status === 'pending'}
+        testing={testBannerVisible}
         suggesting={suggestLoading}
         deploying={deploying}
         scheduleWarning={hasSchedule && !deployed}
       />
       <PresenceBar users={remoteUsers} selfId={user?.id} />
+      {testBannerVisible && (
+        <div className="canvas-test-banner" role="status">
+          ⚡ Test mode — action nodes will not fire
+        </div>
+      )}
       <ReactFlow
-        nodes={nodes}
+        nodes={displayNodes}
         edges={edges}
         onNodesChange={handleNodesChange}
         onEdgesChange={handleEdgesChange}

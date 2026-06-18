@@ -1,12 +1,19 @@
 // Posts a message to a Slack incoming webhook.
 // config: { webhookUrl, text } — text supports {{node-id.field}} templates,
 // which the execution engine resolves before this runner is called.
-module.exports = async function runSendSlack(config, input) {
+// isDryRun (test mode): skip the POST and report what would have been sent.
+module.exports = async function runSendSlack(config, input, isDryRun) {
   const { webhookUrl, text } = config
   if (!webhookUrl) throw new Error('Slack node: webhookUrl is required')
 
   const message =
     text || (input && typeof input === 'object' ? JSON.stringify(input) : String(input ?? ''))
+
+  // The incoming-webhook URL *is* the destination (the Slack channel is baked
+  // into it server-side), so report it as `channel` alongside the message.
+  if (isDryRun) {
+    return { dryRun: true, wouldHaveSent: { channel: webhookUrl, message } }
+  }
 
   const res = await fetch(webhookUrl, {
     method: 'POST',

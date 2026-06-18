@@ -314,6 +314,7 @@ html, body, #root {
 
 /* Node styles */
 .node {
+  position: relative; /* anchor for the dry-run "Would send" badge/popover */
   padding: 10px 16px;
   border-radius: 8px;
   border: 2px solid #e5e5e5;
@@ -401,6 +402,99 @@ html, body, #root {
 
 .node__condition-label--true { color: #22c55e; }
 .node__condition-label--false { color: #ef4444; }
+
+/* Test mode (dry run): "Would send" badge + read-only payload popover */
+.node__dry-run-badge {
+  margin-top: 8px;
+  padding: 2px 8px;
+  border: 1px solid #f59e0b;
+  border-radius: 10px;
+  background: #fef3c7;
+  color: #92400e;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  cursor: pointer;
+}
+
+.node__dry-run-badge::before {
+  content: '✉ ';
+}
+
+.node__dry-run-badge:hover {
+  background: #fde68a;
+}
+
+.dry-run-popover {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  z-index: 20;
+  width: 280px;
+  max-width: 280px;
+  background: #fff;
+  border: 1px solid #f59e0b;
+  border-radius: 8px;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.18);
+  cursor: default;
+}
+
+.dry-run-popover__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 10px;
+  border-bottom: 1px solid #fde68a;
+  background: #fffbeb;
+  border-radius: 8px 8px 0 0;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #92400e;
+}
+
+.dry-run-popover__close {
+  border: none;
+  background: none;
+  color: #92400e;
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 2px;
+}
+
+.dry-run-popover__body {
+  margin: 0;
+  padding: 10px;
+  max-height: 220px;
+  overflow: auto;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 11px;
+  line-height: 1.5;
+  color: #1a1a1a;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* Banner shown across the top of the canvas during a dry run */
+.canvas-test-banner {
+  position: absolute;
+  top: 62px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 9;
+  padding: 6px 16px;
+  background: #fef3c7;
+  border: 1px solid #f59e0b;
+  border-radius: 8px;
+  color: #92400e;
+  font-size: 13px;
+  font-weight: 600;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+  pointer-events: none;
+}
 
 /* Sidebar sections */
 .sidebar__section {
@@ -807,6 +901,22 @@ html, body, #root {
   cursor: not-allowed;
 }
 
+/* Test (dry run) — secondary/outlined next to the filled Run button */
+.toolbar-btn--test {
+  border-color: #d97706;
+  background: #fff;
+  color: #b45309;
+}
+
+.toolbar-btn--test:hover:not(:disabled) {
+  background: #fffbeb;
+}
+
+.toolbar-btn--test:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
 .toolbar-btn--runs {
   border-color: #d1d5db;
   background: #fff;
@@ -1168,6 +1278,29 @@ html, body, #root {
 
 .exec-history__row:hover {
   background: #f9f9f9;
+}
+
+/* Dry-run (Test) executions stand out from real runs in the history list */
+.exec-history__row--test {
+  background: #fffbeb;
+  border-color: #fde68a;
+}
+
+.exec-history__row--test:hover {
+  background: #fef3c7;
+}
+
+.exec-history__test-badge {
+  flex-shrink: 0;
+  padding: 1px 7px;
+  border-radius: 10px;
+  background: #fef3c7;
+  border: 1px solid #f59e0b;
+  color: #92400e;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
 }
 
 .exec-history__date {

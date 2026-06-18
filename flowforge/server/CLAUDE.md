@@ -347,6 +347,25 @@ const runners = {
 
 ---
 
+## Test mode (dry run)
+
+`POST /api/workflows/:id/test` enqueues a run exactly like `/execute`, but the
+Bull job carries `dryRun: true`. The worker threads it into `runExecution`, which
+passes a third `isDryRun` argument to every node runner.
+
+Side-effecting runners (`sendEmail`, `sendSlack`, `httpRequest`) validate their
+config as usual, then — when `isDryRun` — skip the external call and return
+`{ dryRun: true, wouldHaveSent: {...} }` instead of firing. Everything else
+(transform, condition, delay, AI nodes) ignores the flag and runs for real, so
+test output (branches taken, AI results) is genuine. A new runner only needs to
+care about `isDryRun` if it has an external side effect.
+
+The execution row is marked `trigger_type = 'dry-run'` (`triggered_by` stays the
+user FK), which the history UI flags with a "Test" badge. Replaying a dry-run
+stays a dry-run, and dry-run failures don't raise a bell notification.
+
+---
+
 ## DAG parser and execution engine
 
 ```javascript

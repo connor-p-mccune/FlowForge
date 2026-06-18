@@ -32,6 +32,8 @@ function triggerLabel(execution) {
       return 'schedule'
     case 'replay':
       return 'replay'
+    case 'dry-run':
+      return 'test'
     default:
       return execution.triggered_by ? 'manual' : 'webhook'
   }
@@ -188,8 +190,16 @@ export default function ExecutionHistory({ workflowId, nodes, autoOpenId }) {
       {executions.map((ex) => (
         <li className="exec-history__item" key={ex.id}>
           <div className="exec-history__row-wrap">
-            <button className="exec-history__row" onClick={() => openRun(ex.id)}>
+            <button
+              className={`exec-history__row${ex.trigger_type === 'dry-run' ? ' exec-history__row--test' : ''}`}
+              onClick={() => openRun(ex.id)}
+            >
               <span className={`status-badge status-badge--${ex.status}`}>{ex.status}</span>
+              {ex.trigger_type === 'dry-run' && (
+                <span className="exec-history__test-badge" title="Test run — no actions fired">
+                  Test
+                </span>
+              )}
               <span className="exec-history__date">
                 {new Date(ex.created_at).toLocaleString()}
               </span>

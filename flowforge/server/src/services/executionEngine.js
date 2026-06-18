@@ -97,11 +97,11 @@ function defaultPublish(payload) {
     .catch((err) => console.error('Failed to publish exec-update:', err.message))
 }
 
-async function runWithRetries(node, config, input) {
+async function runWithRetries(node, config, input, isDryRun) {
   const runner = getRunner(node.type)
   for (let attempt = 1; ; attempt++) {
     try {
-      return await runner(config, input)
+      return await runner(config, input, isDryRun)
     } catch (err) {
       if (attempt >= MAX_ATTEMPTS) throw err
       await sleep(BASE_BACKOFF_MS * 2 ** (attempt - 1))
@@ -109,7 +109,10 @@ async function runWithRetries(node, config, input) {
   }
 }
 
-async function runExecution(executionId, { publish, payload } = {}) {
+// dryRun (test mode): side-effecting node runners (email/Slack/HTTP) skip their
+// external call and instead return what they *would* have sent. Everything else
+// — conditions, transforms, AI nodes — runs for real, so test output is genuine.
+async function runExecution(executionId, { publish, payload, dryRun = false } = {}) {
   const pub = publish || defaultPublish
 
   const execution = db.prepare('SELECT * FROM executions WHERE id = ?').get(executionId)
@@ -131,7 +134,9 @@ async function runExecution(executionId, { publish, payload } = {}) {
   )
 
   function publishExecution(status, error) {
-    pub({ kind: 'execution', workflowId, executionId, status, error: error || null })
+    // dryRun rides along so clients (including collaborators who adopt a run they
+    // didn't start) can show the test-mode banner without an extra fetch.
+    pub({ kind: 'execution', workflowId, executionId, status, error: error || null, dryRun })
   }
 
   function failExecution(message) {
@@ -219,7 +224,7 @@ async function runExecution(executionId, { publish, payload } = {}) {
 
     try {
       const config = resolveTemplates(node.data?.config || {}, context)
-      const output = (await runWithRetries(node, config, input)) ?? {}
+      const output = (await runWithRetries(node, config, input, dryRun)) ?? {}
       context[nodeId] = output
       nodeStatus[nodeId] = 'success'
       updateStep.run(

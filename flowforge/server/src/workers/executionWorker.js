@@ -12,6 +12,9 @@ function notifyExecutionFailed(executionId) {
   try {
     const execution = db.prepare('SELECT * FROM executions WHERE id = ?').get(executionId)
     if (!execution || execution.status !== 'failed') return
+    // Test (dry-run) runs are interactive — the user is watching the canvas — so a
+    // failure there shouldn't raise a bell notification.
+    if (execution.trigger_type === 'dry-run') return
     const workflow = db.prepare('SELECT * FROM workflows WHERE id = ?').get(execution.workflow_id)
     if (!workflow || !workflow.created_by) return
     createNotification(workflow.created_by, {
@@ -44,9 +47,9 @@ function startWorker() {
   const queue = getExecutionQueue()
 
   queue.process(CONCURRENCY, async (job) => {
-    const { executionId, payload } = job.data
+    const { executionId, payload, dryRun } = job.data
     try {
-      await runExecution(executionId, { payload })
+      await runExecution(executionId, { payload, dryRun })
     } catch (err) {
       // Engine handles per-node failures itself; this catches setup errors
       // (execution/workflow missing, DB issues) so the run never hangs.

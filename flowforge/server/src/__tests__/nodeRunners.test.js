@@ -58,6 +58,21 @@ describe('sendSlack runner', () => {
   it('requires a webhookUrl', async () => {
     await expect(sendSlack({ text: 'x' }, {})).rejects.toThrow(/webhookUrl is required/)
   })
+
+  it('in dry-run mode reports what it would send without posting', async () => {
+    let called = false
+    const server = await startServer((req, res) => {
+      called = true
+      res.writeHead(200)
+      res.end('ok')
+    })
+    const port = server.address().port
+    const url = `http://127.0.0.1:${port}/`
+    const out = await sendSlack({ webhookUrl: url, text: 'hello' }, {}, true)
+    server.close()
+    expect(out).toEqual({ dryRun: true, wouldHaveSent: { channel: url, message: 'hello' } })
+    expect(called).toBe(false)
+  })
 })
 
 describe('sendEmail runner (simulated, no SMTP configured)', () => {
@@ -72,6 +87,25 @@ describe('sendEmail runner (simulated, no SMTP configured)', () => {
 
   it('requires a recipient', async () => {
     await expect(sendEmail({ subject: 'Hi' }, {})).rejects.toThrow(/"to" is required/)
+  })
+
+  it('in dry-run mode reports what it would send without delivering', async () => {
+    const out = await sendEmail({ to: 'a@b.com', subject: 'Hi', body: 'Body' }, {}, true)
+    expect(out).toEqual({
+      dryRun: true,
+      wouldHaveSent: { to: 'a@b.com', subject: 'Hi', body: 'Body' },
+    })
+    expect(out.sent).toBeUndefined()
+  })
+
+  it('in dry-run mode still falls back to serialised input and a default subject', async () => {
+    const out = await sendEmail({ to: 'a@b.com' }, { order: 1 }, true)
+    expect(out.wouldHaveSent.subject).toBe('(no subject)')
+    expect(out.wouldHaveSent.body).toBe(JSON.stringify({ order: 1 }, null, 2))
+  })
+
+  it('still validates required fields in dry-run mode', async () => {
+    await expect(sendEmail({ subject: 'Hi' }, {}, true)).rejects.toThrow(/"to" is required/)
   })
 })
 
@@ -204,6 +238,32 @@ describe('httpRequest runner', () => {
     await expect(
       httpRequest({ url: 'http://127.0.0.1:1/', headers: '{not json}' }, {})
     ).rejects.toThrow(/headers must be valid JSON/)
+  })
+
+  it('in dry-run mode reports the request it would send without making it', async () => {
+    let called = false
+    const server = await startServer((req, res) => {
+      called = true
+      res.writeHead(200)
+      res.end('ok')
+    })
+    const port = server.address().port
+    const url = `http://127.0.0.1:${port}/`
+    const out = await httpRequest(
+      { method: 'POST', url, headers: '{"X-Api-Key":"abc"}', body: '{"name":"Ada"}' },
+      {},
+      true
+    )
+    server.close()
+    expect(called).toBe(false)
+    expect(out.dryRun).toBe(true)
+    expect(out.wouldHaveSent).toEqual({
+      method: 'POST',
+      url,
+      // Content-Type is defaulted in for the body, mirroring a real send.
+      headers: { 'X-Api-Key': 'abc', 'Content-Type': 'application/json' },
+      body: '{"name":"Ada"}',
+    })
   })
 })
 

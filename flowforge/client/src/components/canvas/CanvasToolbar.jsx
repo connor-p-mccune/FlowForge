@@ -3,12 +3,14 @@ import { TOOLBAR_BUTTONS } from './nodeDefs'
 export default function CanvasToolbar({
   onAddNode,
   onRun,
+  onTest,
   onToggleRuns,
   onSuggest,
   onToggleWebhooks,
   onDeploy,
   onToggleHistory,
   running,
+  testing,
   suggesting,
   deploying,
   scheduleWarning,
@@ -48,7 +50,15 @@ export default function CanvasToolbar({
         onClick={onRun}
         disabled={running}
       >
-        {running ? 'Running…' : '▶ Run'}
+        {running && !testing ? 'Running…' : '▶ Run'}
+      </button>
+      <button
+        className="toolbar-btn toolbar-btn--test"
+        title="Test run — execute the full workflow without firing email, Slack, or HTTP actions"
+        onClick={onTest}
+        disabled={running}
+      >
+        {testing ? 'Testing…' : '⚡ Test'}
       </button>
       <button
         className="toolbar-btn toolbar-btn--runs"

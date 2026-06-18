@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { render, screen } from '@testing-library/react'
+import { render, screen, fireEvent } from '@testing-library/react'
 import { ReactFlowProvider } from 'reactflow'
 
 import TriggerNode from '../components/canvas/nodes/TriggerNode'
@@ -82,6 +82,33 @@ describe('ActionNode', () => {
     expect(sources(container)).toHaveLength(1)
     expect(container.querySelector('.react-flow__handle.target').dataset.handlepos).toBe('top')
     expect(container.querySelector('.react-flow__handle.source').dataset.handlepos).toBe('bottom')
+  })
+
+  it('shows no dry-run badge when there is no dryRunResult', () => {
+    renderNode(<ActionNode data={{ label: 'Email' }} selected={false} />)
+    expect(screen.queryByRole('button', { name: 'Would send' })).toBeNull()
+  })
+
+  it('renders a "Would send" badge in test mode and toggles a JSON payload popover', () => {
+    const { container } = renderNode(
+      <ActionNode
+        data={{ label: 'Email', dryRunResult: { to: 'a@b.com', subject: 'Hi' } }}
+        selected={false}
+      />
+    )
+    const badge = screen.getByRole('button', { name: 'Would send' })
+    // Payload stays hidden until the badge is clicked.
+    expect(container.querySelector('.dry-run-popover')).toBeNull()
+
+    fireEvent.click(badge)
+    const popover = container.querySelector('.dry-run-popover__body')
+    expect(popover).toBeInTheDocument()
+    expect(popover.textContent).toContain('"to": "a@b.com"')
+    expect(popover.textContent).toContain('"subject": "Hi"')
+
+    // Clicking again closes it.
+    fireEvent.click(badge)
+    expect(container.querySelector('.dry-run-popover')).toBeNull()
   })
 })
 

@@ -26,18 +26,25 @@ function getTransport() {
 }
 
 // config: { to, subject, body } — all support {{node-id.field}} templates.
-module.exports = async function runSendEmail(config, input) {
+// isDryRun (test mode): skip delivery and report the message that would have been
+// sent, so the canvas can show it on the node without anything actually firing.
+module.exports = async function runSendEmail(config, input, isDryRun) {
   const { to, subject, body } = config
   if (!to) throw new Error('Email node: "to" is required')
 
-  const { transport, simulated } = getTransport()
   const text =
     body || (input && typeof input === 'object' ? JSON.stringify(input, null, 2) : String(input ?? ''))
+  const effectiveSubject = subject || '(no subject)'
 
+  if (isDryRun) {
+    return { dryRun: true, wouldHaveSent: { to, subject: effectiveSubject, body: text } }
+  }
+
+  const { transport, simulated } = getTransport()
   const info = await transport.sendMail({
     from: process.env.EMAIL_FROM || 'flowforge@example.com',
     to,
-    subject: subject || '(no subject)',
+    subject: effectiveSubject,
     text,
   })
 
@@ -46,6 +53,6 @@ module.exports = async function runSendEmail(config, input) {
     simulated,
     messageId: info.messageId,
     to,
-    subject: subject || '(no subject)',
+    subject: effectiveSubject,
   }
 }

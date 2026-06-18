@@ -44,6 +44,38 @@ router.post('/workflows/:id/execute', auth, async (req, res) => {
   }
 })
 
+// POST /api/workflows/:id/test — enqueue a dry run. Identical to /execute, but
+// the job carries dryRun: true so side-effecting nodes (email/Slack/HTTP) report
+// what they would have sent instead of firing. trigger_type 'dry-run' marks the
+// run so history can flag it and a later replay stays a dry run (see below).
+router.post('/workflows/:id/test', auth, async (req, res) => {
+  try {
+    const workflow = getWorkflowForMember(req.params.id, req.user.id)
+    if (!workflow) return res.status(404).json({ error: 'Workflow not found' })
+
+    const { nodes } = JSON.parse(workflow.graph_json)
+    if (!nodes || nodes.length === 0) {
+      return res.status(400).json({ error: 'Workflow has no nodes to execute' })
+    }
+
+    const executionId = uuidv4()
+    const now = new Date().toISOString()
+    // triggered_by stays the user FK (who ran the test); trigger_type 'dry-run'
+    // is the marker, mirroring how 'manual'/'webhook'/'replay' are recorded.
+    db.prepare(
+      'INSERT INTO executions (id, workflow_id, status, triggered_by, trigger_type, created_at) VALUES (?, ?, ?, ?, ?, ?)'
+    ).run(executionId, workflow.id, 'pending', req.user.id, 'dry-run', now)
+
+    await getExecutionQueue().add({ executionId, workflowId: workflow.id, dryRun: true })
+
+    const execution = db.prepare('SELECT * FROM executions WHERE id = ?').get(executionId)
+    res.status(202).json({ execution })
+  } catch (err) {
+    console.error(err)
+    res.status(500).json({ error: 'Internal server error' })
+  }
+})
+
 // GET /api/workflows/:id/executions — past runs, newest first. workflowUpdatedAt
 // lets the client flag runs whose workflow has been edited since (a replay runs
 // the *current* definition), without a per-row query.
@@ -112,14 +144,24 @@ router.post('/executions/:id/replay', auth, async (req, res) => {
       }
     }
 
+    // Replaying a dry-run stays a dry-run, so re-running a test from history never
+    // fires real actions; any other run replays for real as 'replay'.
+    const isDryRun = original.trigger_type === 'dry-run'
+
     const executionId = uuidv4()
     const now = new Date().toISOString()
-    // triggered_by is the user who clicked Replay; trigger_type marks it a replay.
+    // triggered_by is the user who clicked Replay; trigger_type marks it a replay
+    // (or 'dry-run' when the original was a test).
     db.prepare(
       'INSERT INTO executions (id, workflow_id, status, triggered_by, trigger_type, trigger_data, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)'
-    ).run(executionId, workflow.id, 'pending', req.user.id, 'replay', original.trigger_data ?? null, now)
+    ).run(executionId, workflow.id, 'pending', req.user.id, isDryRun ? 'dry-run' : 'replay', original.trigger_data ?? null, now)
 
-    await getExecutionQueue().add({ executionId, workflowId: workflow.id, payload })
+    await getExecutionQueue().add({
+      executionId,
+      workflowId: workflow.id,
+      payload,
+      ...(isDryRun ? { dryRun: true } : {}),
+    })
 
     const execution = db.prepare('SELECT * FROM executions WHERE id = ?').get(executionId)
     res.status(202).json({ execution })

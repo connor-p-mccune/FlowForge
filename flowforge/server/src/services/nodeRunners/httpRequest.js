@@ -1,4 +1,6 @@
-module.exports = async function runHttpRequest(config, _input) {
+// isDryRun (test mode): build the request as normal but, instead of sending it,
+// report the method/url/headers/body that would have gone out.
+module.exports = async function runHttpRequest(config, _input, isDryRun) {
   const { method = 'GET', url, headers = '{}', body = '' } = config
   if (!url) throw new Error('HTTP node: url is required')
 
@@ -18,6 +20,13 @@ module.exports = async function runHttpRequest(config, _input) {
       (h) => h.toLowerCase() === 'content-type'
     )
     if (!hasContentType) options.headers['Content-Type'] = 'application/json'
+  }
+
+  if (isDryRun) {
+    return {
+      dryRun: true,
+      wouldHaveSent: { method, url, headers: options.headers, body: options.body ?? null },
+    }
   }
 
   const res = await fetch(url, options)

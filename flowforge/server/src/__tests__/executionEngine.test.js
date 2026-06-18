@@ -138,6 +138,39 @@ describe('runExecution', () => {
     expect(JSON.parse(stepFor(execId, 'o1').output_json)).toEqual({ message: 'order 7' })
   })
 
+  it('in dry-run mode intercepts side-effecting nodes but runs logic for real', async () => {
+    const graph = {
+      nodes: [
+        node('t1', 'trigger-manual'),
+        node('tr1', 'transform', { template: '{"amount": 42}' }),
+        node('c1', 'condition', { left: '{{tr1.amount}}', operator: 'greater_than', right: '10' }),
+        // A dead port: a real fetch would throw, so a clean success proves the
+        // HTTP call was never made.
+        node('h1', 'action-http', { method: 'POST', url: 'http://127.0.0.1:1/', body: 'hi' }),
+        node('e1', 'action-email', { to: 'a@b.com', subject: 'Hi', body: 'Body' }),
+      ],
+      edges: [edge('t1', 'tr1'), edge('tr1', 'c1'), edge('c1', 'h1', 'true'), edge('h1', 'e1')],
+    }
+    const { execId } = seedWorkflow(graph)
+    const events = []
+    await runExecution(execId, { dryRun: true, publish: (p) => events.push(p) })
+
+    expect(getExecution(execId).status).toBe('completed')
+    // Logic nodes ran for real.
+    expect(JSON.parse(stepFor(execId, 'tr1').output_json)).toEqual({ amount: 42 })
+    expect(JSON.parse(stepFor(execId, 'c1').output_json)).toEqual({ result: true })
+    // Side-effecting nodes were intercepted.
+    const httpOut = JSON.parse(stepFor(execId, 'h1').output_json)
+    expect(httpOut.dryRun).toBe(true)
+    expect(httpOut.wouldHaveSent.url).toBe('http://127.0.0.1:1/')
+    expect(JSON.parse(stepFor(execId, 'e1').output_json)).toEqual({
+      dryRun: true,
+      wouldHaveSent: { to: 'a@b.com', subject: 'Hi', body: 'Body' },
+    })
+    // Execution-level events advertise the dry run so clients can show the banner.
+    expect(events.some((e) => e.kind === 'execution' && e.status === 'running' && e.dryRun === true)).toBe(true)
+  })
+
   it('skips the branch a condition did not take', async () => {
     const graph = {
       nodes: [
