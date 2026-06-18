@@ -36,9 +36,14 @@ app.use(cors({ origin: corsOrigins, credentials: corsOrigins !== '*' }))
 // are the largest legitimate body, and 2mb covers very large graphs.
 app.use(express.json({ limit: '2mb' }))
 
+// Populate the built-in workflow templates on first run. Idempotent: only seeds
+// when the templates table is empty, so admin edits/removals survive restarts.
+require('./db/templates').seedTemplates(require('./config/database'))
+
 app.use('/api', require('./routes/auth'))
 app.use('/api', require('./routes/workspaces'))
 app.use('/api', require('./routes/workflows'))
+app.use('/api', require('./routes/templates'))
 app.use('/api', require('./routes/executions'))
 app.use('/api', require('./routes/webhooks'))
 app.use('/api', require('./routes/ai'))

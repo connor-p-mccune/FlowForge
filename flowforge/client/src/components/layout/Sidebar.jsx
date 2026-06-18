@@ -2,6 +2,18 @@ import { useState, useEffect, useCallback } from 'react'
 import { useNavigate, useParams, useLocation } from 'react-router-dom'
 import { apiFetch } from '../../services/api'
 import Skeleton, { SkeletonRows } from '../Skeleton'
+import TemplateGallery from '../templates/TemplateGallery'
+import ImportWorkflowModal from '../workflows/ImportWorkflowModal'
+
+// Turn a workflow name into a safe download filename: "My Flow!" -> "my-flow.json".
+function exportFilename(name) {
+  const slug = (name || 'workflow')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+  return `${slug || 'workflow'}.json`
+}
 
 export default function Sidebar({ open = false, onNavigate }) {
   const navigate = useNavigate()
@@ -19,6 +31,23 @@ export default function Sidebar({ open = false, onNavigate }) {
   const [newWorkspaceName, setNewWorkspaceName] = useState('')
   const [renamingId, setRenamingId] = useState(null)
   const [renameValue, setRenameValue] = useState('')
+  const [showTemplates, setShowTemplates] = useState(false)
+  const [showImport, setShowImport] = useState(false)
+  const [menuOpenId, setMenuOpenId] = useState(null)
+
+  // Close the open workflow actions menu on any outside click or Escape. The
+  // toggle button stops propagation, so opening/switching menus isn't caught here.
+  useEffect(() => {
+    if (!menuOpenId) return
+    function close() { setMenuOpenId(null) }
+    function onKey(e) { if (e.key === 'Escape') setMenuOpenId(null) }
+    document.addEventListener('click', close)
+    document.addEventListener('keydown', onKey)
+    return () => {
+      document.removeEventListener('click', close)
+      document.removeEventListener('keydown', onKey)
+    }
+  }, [menuOpenId])
 
   // Initial load: workspaces, and if a workflow is open, select its workspace
   useEffect(() => {
@@ -136,6 +165,26 @@ export default function Sidebar({ open = false, onNavigate }) {
     }
   }
 
+  // Fetch the workflow's portable export JSON and save it as a file download. The
+  // export endpoint returns JSON (not a file); the browser download happens here.
+  async function handleExport(workflow) {
+    setError(null)
+    try {
+      const data = await apiFetch(`/api/workflows/${workflow.id}/export`)
+      const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' })
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = exportFilename(workflow.name)
+      document.body.appendChild(a)
+      a.click()
+      a.remove()
+      URL.revokeObjectURL(url)
+    } catch (err) {
+      setError(err.message)
+    }
+  }
+
   function startRename(workflow) {
     setRenamingId(workflow.id)
     setRenameValue(workflow.name)
@@ -222,14 +271,33 @@ export default function Sidebar({ open = false, onNavigate }) {
       <div className="sidebar__section">
         <div className="sidebar__section-header">
           <span className="sidebar__section-title">Workflows</span>
-          <button
-            className="sidebar__icon-btn"
-            title="New workflow"
-            onClick={handleCreateWorkflow}
-            disabled={!activeWorkspaceId}
-          >
-            +
-          </button>
+          <div className="sidebar__header-actions">
+            <button
+              className="sidebar__icon-btn"
+              title="Import workflow"
+              aria-label="Import workflow"
+              onClick={() => setShowImport(true)}
+              disabled={!activeWorkspaceId}
+            >
+              ↥
+            </button>
+            <button
+              className="sidebar__icon-btn"
+              title="New from template"
+              onClick={() => setShowTemplates(true)}
+              disabled={!activeWorkspaceId}
+            >
+              ⧉
+            </button>
+            <button
+              className="sidebar__icon-btn"
+              title="New workflow"
+              onClick={handleCreateWorkflow}
+              disabled={!activeWorkspaceId}
+            >
+              +
+            </button>
+          </div>
         </div>
         {error && <p className="sidebar__error">{error}</p>}
         {loadingWorkflows ? (
@@ -241,7 +309,7 @@ export default function Sidebar({ open = false, onNavigate }) {
             {workflows.map((wf) => (
               <li
                 key={wf.id}
-                className={`sidebar__workflow${wf.id === currentWorkflowId ? ' sidebar__workflow--active' : ''}`}
+                className={`sidebar__workflow${wf.id === currentWorkflowId ? ' sidebar__workflow--active' : ''}${menuOpenId === wf.id ? ' sidebar__workflow--menu-open' : ''}`}
               >
                 {renamingId === wf.id ? (
                   <form className="sidebar__inline-form" onSubmit={handleRenameWorkflow}>
@@ -263,20 +331,45 @@ export default function Sidebar({ open = false, onNavigate }) {
                     >
                       {wf.name}
                     </button>
-                    <button
-                      className="sidebar__icon-btn"
-                      title="Rename"
-                      onClick={() => startRename(wf)}
-                    >
-                      ✎
-                    </button>
-                    <button
-                      className="sidebar__icon-btn sidebar__icon-btn--danger"
-                      title="Delete"
-                      onClick={() => handleDeleteWorkflow(wf)}
-                    >
-                      ×
-                    </button>
+                    <div className="sidebar__menu">
+                      <button
+                        className="sidebar__icon-btn"
+                        aria-label="Workflow actions"
+                        aria-haspopup="menu"
+                        aria-expanded={menuOpenId === wf.id}
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          setMenuOpenId((id) => (id === wf.id ? null : wf.id))
+                        }}
+                      >
+                        ⋯
+                      </button>
+                      {menuOpenId === wf.id && (
+                        <div className="sidebar__menu-dropdown" role="menu">
+                          <button
+                            role="menuitem"
+                            className="sidebar__menu-item"
+                            onClick={() => { setMenuOpenId(null); startRename(wf) }}
+                          >
+                            Rename
+                          </button>
+                          <button
+                            role="menuitem"
+                            className="sidebar__menu-item"
+                            onClick={() => { setMenuOpenId(null); handleExport(wf) }}
+                          >
+                            Export
+                          </button>
+                          <button
+                            role="menuitem"
+                            className="sidebar__menu-item sidebar__menu-item--danger"
+                            onClick={() => { setMenuOpenId(null); handleDeleteWorkflow(wf) }}
+                          >
+                            Delete
+                          </button>
+                        </div>
+                      )}
+                    </div>
                   </>
                 )}
               </li>
@@ -284,6 +377,22 @@ export default function Sidebar({ open = false, onNavigate }) {
           </ul>
         )}
       </div>
+
+      {showTemplates && (
+        <TemplateGallery
+          workspaceId={activeWorkspaceId}
+          onClose={() => setShowTemplates(false)}
+          onCreated={(wf) => setWorkflows((prev) => [wf, ...prev])}
+        />
+      )}
+
+      {showImport && (
+        <ImportWorkflowModal
+          workspaceId={activeWorkspaceId}
+          onClose={() => setShowImport(false)}
+          onCreated={(wf) => setWorkflows((prev) => [wf, ...prev])}
+        />
+      )}
     </aside>
   )
 }

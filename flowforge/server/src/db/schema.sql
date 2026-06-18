@@ -66,6 +66,19 @@ CREATE TABLE IF NOT EXISTS webhooks (
   last_triggered_at TEXT
 );
 
+-- Built-in workflow templates for the gallery. Global (not workspace-scoped):
+-- read by the public GET /api/templates and cloned into a workspace's workflows.
+-- graph_data holds the same {"nodes":[...],"edges":[...]} shape as workflows.graph_json.
+-- Populated by db/templates.js (auto-seeded on startup when the table is empty).
+CREATE TABLE IF NOT EXISTS templates (
+  id          TEXT PRIMARY KEY,
+  name        TEXT NOT NULL,
+  description TEXT,
+  category    TEXT,
+  graph_data  TEXT NOT NULL DEFAULT '{"nodes":[],"edges":[]}',
+  created_at  TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 -- Phase 8 (analytics): the summary/timeline/workflows queries scan executions by
 -- workflow + time range. (The execution_steps(execution_id, node_type) index is
 -- created in config/database.js, after the node_type column migration runs.)
