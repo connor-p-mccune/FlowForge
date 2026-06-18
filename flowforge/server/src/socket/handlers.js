@@ -20,6 +20,11 @@ function getActiveUsers(io, workflowId) {
 }
 
 module.exports = function registerHandlers(socket, io) {
+  // Every socket joins its own personal room so the server can push in-app
+  // notifications to a specific user (notificationService emits to user:<id>),
+  // in addition to the workflow rooms joined below.
+  if (socket.userId) socket.join(`user:${socket.userId}`)
+
   socket.on('join-workflow', ({ workflowId }) => {
     socket.join(`workflow:${workflowId}`)
     socket.emit('presence', { users: getActiveUsers(io, workflowId) })

@@ -1,5 +1,6 @@
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../../hooks/useAuth'
+import NotificationBell from '../notifications/NotificationBell'
 
 export default function Header({ onToggleSidebar }) {
   const { user, logout } = useAuth()
@@ -25,6 +26,7 @@ export default function Header({ onToggleSidebar }) {
         <span className="header__logo">FlowForge</span>
       </div>
       <div className="header__right">
+        {user && <NotificationBell />}
         {user && <span className="header__user">{user.displayName}</span>}
         <button className="header__logout" onClick={handleLogout}>
           Sign out

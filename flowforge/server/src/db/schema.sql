@@ -71,3 +71,22 @@ CREATE TABLE IF NOT EXISTS webhooks (
 -- created in config/database.js, after the node_type column migration runs.)
 CREATE INDEX IF NOT EXISTS idx_executions_workflow_started
   ON executions (workflow_id, started_at);
+
+-- In-app notifications (bell menu). Written by services/notificationService.js
+-- (e.g. a failed run, a workspace invite) and read by GET /api/notifications.
+-- Delivered live over Socket.io to the recipient's personal room (user:<id>);
+-- this row is the source of truth, so a missed live emit self-heals on next fetch.
+CREATE TABLE IF NOT EXISTS notifications (
+  id         TEXT PRIMARY KEY,
+  user_id    TEXT REFERENCES users(id),
+  type       TEXT,
+  title      TEXT,
+  message    TEXT,
+  link       TEXT,
+  is_read    INTEGER DEFAULT 0,
+  created_at TEXT
+);
+
+-- The bell lists a user's newest notifications and counts unread ones.
+CREATE INDEX IF NOT EXISTS idx_notifications_user_created
+  ON notifications (user_id, created_at);

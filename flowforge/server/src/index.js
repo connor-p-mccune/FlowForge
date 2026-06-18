@@ -43,10 +43,14 @@ app.use('/api', require('./routes/executions'))
 app.use('/api', require('./routes/webhooks'))
 app.use('/api', require('./routes/ai'))
 app.use('/api', require('./routes/analytics'))
+app.use('/api', require('./routes/notifications'))
 
 const { initSocket } = require('./socket')
 const io = initSocket(server)
 app.set('io', io)
+// Give the notification service the Socket.io server so it can push live
+// notifications to a user's personal room (used by the worker + invite route).
+require('./services/notificationService').init(io)
 
 // Bull worker runs in-process alongside the API server
 if (process.env.NODE_ENV !== 'test') {

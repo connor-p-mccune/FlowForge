@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import ReactFlow, {
   ReactFlowProvider,
   useNodesState,
@@ -65,6 +66,14 @@ function CanvasInner({ workflowId }) {
   const [execSteps, setExecSteps] = useState([]) // [{ nodeId, status, output, error }]
   const [execPanelOpen, setExecPanelOpen] = useState(false)
   const executionIdRef = useRef(null)
+
+  // Deep link from a notification: /workflow/:id?execution=<id> opens the runs
+  // panel straight to that run's history (see ExecutionPanel/ExecutionHistory).
+  const [searchParams] = useSearchParams()
+  const deepLinkExecId = searchParams.get('execution')
+  useEffect(() => {
+    if (deepLinkExecId) setExecPanelOpen(true)
+  }, [deepLinkExecId])
 
   // AI suggestions + webhook panel (Phase 5)
   const [suggestions, setSuggestions] = useState(null) // null = panel closed
@@ -492,6 +501,7 @@ function CanvasInner({ workflowId }) {
         steps={execSteps}
         nodes={nodes}
         workflowId={workflowId}
+        initialHistoryExecId={deepLinkExecId}
       />
     </div>
   )

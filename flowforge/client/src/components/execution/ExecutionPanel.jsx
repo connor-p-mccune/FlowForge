@@ -27,8 +27,9 @@ export function StepList({ steps, nodes }) {
   )
 }
 
-export default function ExecutionPanel({ open, onClose, execution, steps, nodes, workflowId }) {
-  const [tab, setTab] = useState('live')
+export default function ExecutionPanel({ open, onClose, execution, steps, nodes, workflowId, initialHistoryExecId }) {
+  // Arriving via a notification deep link opens straight to the run's history.
+  const [tab, setTab] = useState(initialHistoryExecId ? 'history' : 'live')
 
   if (!open) return null
 
@@ -67,7 +68,7 @@ export default function ExecutionPanel({ open, onClose, execution, steps, nodes,
             <p className="exec-panel__empty">Press Run to execute this workflow.</p>
           )
         ) : (
-          <ExecutionHistory workflowId={workflowId} nodes={nodes} />
+          <ExecutionHistory workflowId={workflowId} nodes={nodes} autoOpenId={initialHistoryExecId} />
         )}
       </div>
     </div>

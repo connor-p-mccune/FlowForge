@@ -63,7 +63,7 @@ function ReplayConfirm({ label, modified, busy, onCancel, onConfirm }) {
   )
 }
 
-export default function ExecutionHistory({ workflowId, nodes }) {
+export default function ExecutionHistory({ workflowId, nodes, autoOpenId }) {
   const [executions, setExecutions] = useState([])
   const [workflowUpdatedAt, setWorkflowUpdatedAt] = useState(null)
   const [selected, setSelected] = useState(null) // { execution, steps }
@@ -113,6 +113,11 @@ export default function ExecutionHistory({ workflowId, nodes }) {
       setError(err.message)
     }
   }, [])
+
+  // Auto-open a specific run when deep-linked from a notification.
+  useEffect(() => {
+    if (autoOpenId) openRun(autoOpenId)
+  }, [autoOpenId, openRun])
 
   async function handleReplay() {
     if (!pendingReplay) return
