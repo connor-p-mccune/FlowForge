@@ -28,6 +28,7 @@ CREATE TABLE IF NOT EXISTS workflows (
   name         TEXT NOT NULL,
   description  TEXT,
   graph_json   TEXT NOT NULL DEFAULT '{"nodes":[],"edges":[]}',
+  status       TEXT NOT NULL DEFAULT 'draft',
   created_by   TEXT NOT NULL REFERENCES users(id),
   created_at   TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at   TEXT NOT NULL DEFAULT (datetime('now'))
@@ -65,6 +66,25 @@ CREATE TABLE IF NOT EXISTS webhooks (
   created_at        TEXT NOT NULL DEFAULT (datetime('now')),
   last_triggered_at TEXT
 );
+
+-- Version history: each "deploy" snapshots the workflow's current graph here with
+-- a per-workflow incrementing version number, so a workflow can be rolled back to
+-- any prior deploy. Restoring snapshots the live state first (see routes/
+-- workflows.js), which makes a rollback itself reversible. graph_json mirrors the
+-- column on workflows; created_by is the deploying user (LEFT JOINed for display,
+-- so a deleted user doesn't drop the version from history).
+CREATE TABLE IF NOT EXISTS workflow_versions (
+  id          TEXT PRIMARY KEY,
+  workflow_id TEXT NOT NULL REFERENCES workflows(id) ON DELETE CASCADE,
+  version     INTEGER NOT NULL,
+  graph_json  TEXT NOT NULL,
+  created_by  TEXT REFERENCES users(id),
+  created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE (workflow_id, version)
+);
+
+CREATE INDEX IF NOT EXISTS idx_workflow_versions_workflow
+  ON workflow_versions (workflow_id, version);
 
 -- Built-in workflow templates for the gallery. Global (not workspace-scoped):
 -- read by the public GET /api/templates and cloned into a workspace's workflows.

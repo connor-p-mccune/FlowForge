@@ -20,37 +20,18 @@ import CanvasToolbar from './CanvasToolbar'
 import NodeConfigPanel from './NodeConfigPanel'
 import SuggestionsPanel from './SuggestionsPanel'
 import WebhookPanel from './WebhookPanel'
+import HistoryPanel from './HistoryPanel'
 import ExecutionPanel from '../execution/ExecutionPanel'
 import CursorOverlay from '../collaboration/CursorOverlay'
 import PresenceBar from '../collaboration/PresenceBar'
 import { NODE_DEFS } from './nodeDefs'
-import TriggerNode from './nodes/TriggerNode'
-import ActionNode from './nodes/ActionNode'
-import ConditionNode from './nodes/ConditionNode'
-import AINode from './nodes/AINode'
-import OutputNode from './nodes/OutputNode'
-
-const nodeTypes = {
-  'trigger-manual': TriggerNode,
-  'trigger-webhook': TriggerNode,
-  'action-http': ActionNode,
-  'action-delay': ActionNode,
-  'action-email': ActionNode,
-  'action-slack': ActionNode,
-  'transform': ActionNode,
-  'condition': ConditionNode,
-  'ai-prompt': AINode,
-  'ai-classify': AINode,
-  'ai-extract': AINode,
-  'output-log': OutputNode,
-  'output-return': OutputNode,
-}
+import { nodeTypes } from './nodeTypes'
 
 function CanvasInner({ workflowId }) {
   const wrapperRef = useRef(null)
   const [nodes, setNodes, onNodesChange] = useNodesState([])
   const [edges, setEdges, onEdgesChange] = useEdgesState([])
-  const { saveGraph, loading } = useWorkflow(workflowId, setNodes, setEdges)
+  const { workflow, saveGraph, loading, deploy, applyWorkflow } = useWorkflow(workflowId, setNodes, setEdges)
   const { screenToFlowPosition, getNode } = useReactFlow()
   const { user } = useAuth()
 
@@ -81,6 +62,20 @@ function CanvasInner({ workflowId }) {
   const [suggestError, setSuggestError] = useState(null)
   const suggestAnchorRef = useRef(null)
   const [webhookOpen, setWebhookOpen] = useState(false)
+
+  // Version history (deploy / restore)
+  const [historyOpen, setHistoryOpen] = useState(false)
+  const [historyReload, setHistoryReload] = useState(0)
+  const [deploying, setDeploying] = useState(false)
+  // Whether the live graph is deployed — drives the schedule warning. Synced from
+  // the loaded workflow's status, set true on a successful deploy, and reset false
+  // when the schedule node is added/edited (the running cron is then stale until
+  // the user redeploys).
+  const [deployed, setDeployed] = useState(false)
+  useEffect(() => {
+    setDeployed(workflow?.status === 'deployed')
+  }, [workflow])
+  const hasSchedule = useMemo(() => nodes.some((n) => n.type === 'trigger-schedule'), [nodes])
 
   const handleExecUpdate = useCallback((payload) => {
     if (payload.kind === 'execution') {
@@ -268,6 +263,47 @@ function CanvasInner({ workflowId }) {
     setExecPanelOpen(true)
   }, [workflowId])
 
+  // Deploy the current canvas as a new version, then nudge the history drawer to
+  // refresh if it's open so the new version appears.
+  const handleDeploy = useCallback(async () => {
+    setDeploying(true)
+    try {
+      const version = await deploy(nodes, edges)
+      setDeployed(true)
+      toastRef.current.success(`Deployed — saved as version ${version.version}.`)
+      setHistoryReload((n) => n + 1)
+    } catch (err) {
+      toastRef.current.error(`Couldn’t deploy: ${err.message}`)
+    } finally {
+      setDeploying(false)
+    }
+  }, [deploy, nodes, edges])
+
+  // The right-side panels (history / webhooks / suggestions) share screen space,
+  // so opening one closes the others.
+  const handleToggleHistory = useCallback(() => {
+    setHistoryOpen((v) => !v)
+    setWebhookOpen(false)
+    setSuggestions(null)
+  }, [])
+
+  const handleToggleWebhooks = useCallback(() => {
+    setWebhookOpen((v) => !v)
+    setHistoryOpen(false)
+    setSuggestions(null)
+  }, [])
+
+  // After a restore the server has already swapped the live graph; load it onto
+  // the canvas (which also resyncs the auto-save baseline) and close the drawer.
+  const handleRestored = useCallback(
+    (updatedWorkflow) => {
+      applyWorkflow(updatedWorkflow)
+      setHistoryOpen(false)
+      toastRef.current.success('Workflow restored.')
+    },
+    [applyWorkflow]
+  )
+
   // Debounced auto-save whenever the graph changes (no-ops until loaded,
   // and when only volatile props like selection changed)
   useEffect(() => {
@@ -323,6 +359,8 @@ function CanvasInner({ workflowId }) {
     (type, { label, connectFromId } = {}) => {
       const def = NODE_DEFS[type]
       if (!def) return null
+      // A newly added schedule node isn't active until the workflow is deployed.
+      if (type === 'trigger-schedule') setDeployed(false)
 
       // Place below the anchor node when wiring from one, else at canvas center
       const anchor = connectFromId ? getNode(connectFromId) : null
@@ -367,6 +405,7 @@ function CanvasInner({ workflowId }) {
 
   const handleSuggest = useCallback(async () => {
     setWebhookOpen(false)
+    setHistoryOpen(false)
     setSuggestError(null)
     setSuggestLoading(true)
     setSuggestions([])
@@ -413,8 +452,10 @@ function CanvasInner({ workflowId }) {
         nds.map((n) => (n.id === nodeId ? { ...n, data: { ...n.data, ...patch } } : n))
       )
       emitNodeChange('update', { id: nodeId, data: patch })
+      // Editing a schedule node makes the live cron job stale until it's redeployed.
+      if (nodes.find((n) => n.id === nodeId)?.type === 'trigger-schedule') setDeployed(false)
     },
-    [setNodes, emitNodeChange]
+    [setNodes, emitNodeChange, nodes]
   )
 
   const handleDeleteNode = useCallback(
@@ -438,9 +479,13 @@ function CanvasInner({ workflowId }) {
         onRun={handleRun}
         onToggleRuns={() => setExecPanelOpen((v) => !v)}
         onSuggest={handleSuggest}
-        onToggleWebhooks={() => setWebhookOpen((v) => !v)}
+        onToggleWebhooks={handleToggleWebhooks}
+        onDeploy={handleDeploy}
+        onToggleHistory={handleToggleHistory}
         running={execution?.status === 'running' || execution?.status === 'pending'}
         suggesting={suggestLoading}
+        deploying={deploying}
+        scheduleWarning={hasSchedule && !deployed}
       />
       <PresenceBar users={remoteUsers} selfId={user?.id} />
       <ReactFlow
@@ -493,6 +538,13 @@ function CanvasInner({ workflowId }) {
         workflowId={workflowId}
         open={webhookOpen}
         onClose={() => setWebhookOpen(false)}
+      />
+      <HistoryPanel
+        workflowId={workflowId}
+        open={historyOpen}
+        reloadSignal={historyReload}
+        onClose={() => setHistoryOpen(false)}
+        onRestored={handleRestored}
       />
       <ExecutionPanel
         open={execPanelOpen}

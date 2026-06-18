@@ -25,6 +25,12 @@ function ensureColumn(table, column, definition) {
   if (!exists) db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`)
 }
 
+// Schedule triggers: workflows carry a deploy status ('draft' | 'deployed' |
+// 'archived') so the scheduler can re-register cron jobs for deployed workflows on
+// startup, and stop them on archive/delete. Added here (idempotent ALTER) so
+// existing databases pick up the column without a wipe.
+ensureColumn('workflows', 'status', "TEXT NOT NULL DEFAULT 'draft'")
+
 // Phase 8 (analytics): node_type denormalises each step's node type at run time so
 // per-type timing survives later edits to the workflow graph. Indexed for the
 // node-usage aggregate. Created here (not in schema.sql) so the index can be built

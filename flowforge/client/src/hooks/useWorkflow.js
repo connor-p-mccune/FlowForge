@@ -29,6 +29,22 @@ export function useWorkflow(workflowId, setNodes, setEdges) {
   const toastRef = useRef(toast)
   toastRef.current = toast
 
+  // Load a workflow's graph onto the canvas and record it as the last-saved
+  // state, so the debounced auto-save doesn't immediately re-save what we just
+  // loaded. Used for the initial load and after a version restore.
+  const applyWorkflow = useCallback(
+    (wf) => {
+      const parsed = JSON.parse(wf.graph_json)
+      const nodes = parsed.nodes || []
+      const edges = parsed.edges || []
+      lastSavedRef.current = JSON.stringify(serializeGraph(nodes, edges))
+      setNodes(nodes)
+      setEdges(edges)
+      setWorkflow(wf)
+    },
+    [setNodes, setEdges]
+  )
+
   useEffect(() => {
     if (!workflowId) return
     let cancelled = false
@@ -37,11 +53,7 @@ export function useWorkflow(workflowId, setNodes, setEdges) {
     apiFetch(`/api/workflows/${workflowId}`)
       .then(({ workflow: wf }) => {
         if (cancelled) return
-        const { nodes, edges } = JSON.parse(wf.graph_json)
-        lastSavedRef.current = JSON.stringify(serializeGraph(nodes || [], edges || []))
-        setNodes(nodes || [])
-        setEdges(edges || [])
-        setWorkflow(wf)
+        applyWorkflow(wf)
       })
       .catch((err) => {
         if (cancelled) return
@@ -55,7 +67,7 @@ export function useWorkflow(workflowId, setNodes, setEdges) {
       cancelled = true
       if (saveTimer.current) clearTimeout(saveTimer.current)
     }
-  }, [workflowId, setNodes, setEdges])
+  }, [workflowId, applyWorkflow])
 
   const saveGraph = useCallback(
     (nodes, edges) => {
@@ -88,5 +100,26 @@ export function useWorkflow(workflowId, setNodes, setEdges) {
     [workflowId]
   )
 
-  return { workflow, saveGraph, loading }
+  // Deploy: persist the live graph (cancelling any pending debounced save so the
+  // snapshot matches exactly what's on the canvas), then record it as a new
+  // version on the server. Returns the created version row.
+  const deploy = useCallback(
+    async (nodes, edges) => {
+      if (saveTimer.current) {
+        clearTimeout(saveTimer.current)
+        saveTimer.current = null
+      }
+      const graph = serializeGraph(nodes, edges)
+      const payload = JSON.stringify(graph)
+      if (payload !== lastSavedRef.current) {
+        await apiFetch(`/api/workflows/${workflowId}/graph`, { method: 'PUT', body: graph })
+        lastSavedRef.current = payload
+      }
+      const { version } = await apiFetch(`/api/workflows/${workflowId}/deploy`, { method: 'POST' })
+      return version
+    },
+    [workflowId]
+  )
+
+  return { workflow, saveGraph, loading, deploy, applyWorkflow }
 }

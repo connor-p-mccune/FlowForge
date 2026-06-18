@@ -43,6 +43,24 @@ describe('TriggerNode', () => {
     const { container } = renderNode(<TriggerNode data={{}} selected={true} />)
     expect(container.querySelector('.node')).toHaveClass('node--trigger', 'node--selected')
   })
+
+  it('shows the cron expression for a schedule trigger', () => {
+    renderNode(
+      <TriggerNode
+        data={{ label: 'Nightly', subtype: 'schedule', config: { cron: '0 9 * * *' } }}
+        selected={false}
+      />
+    )
+    expect(screen.getByText('schedule')).toBeInTheDocument()
+    expect(screen.getByText('0 9 * * *')).toBeInTheDocument()
+  })
+
+  it('does not render a cron line for non-schedule triggers', () => {
+    const { container } = renderNode(
+      <TriggerNode data={{ subtype: 'webhook', config: { cron: '0 9 * * *' } }} selected={false} />
+    )
+    expect(container.querySelector('.node__cron')).toBeNull()
+  })
 })
 
 describe('ActionNode', () => {

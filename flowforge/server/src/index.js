@@ -60,6 +60,8 @@ require('./services/notificationService').init(io)
 // Bull worker runs in-process alongside the API server
 if (process.env.NODE_ENV !== 'test') {
   require('./workers/executionWorker').startWorker()
+  // Re-register cron jobs for already-deployed scheduled workflows after a restart.
+  require('./services/scheduler').restoreSchedules()
 }
 
 app.get('/api/health', (req, res) => res.json({ status: 'ok' }))

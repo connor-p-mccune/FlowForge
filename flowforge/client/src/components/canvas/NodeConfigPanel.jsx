@@ -1,3 +1,5 @@
+import cronstrue from 'cronstrue'
+
 const OPERATORS = [
   { value: 'equals', label: 'equals' },
   { value: 'not_equals', label: 'does not equal' },
@@ -5,6 +7,23 @@ const OPERATORS = [
   { value: 'greater_than', label: 'is greater than' },
   { value: 'less_than', label: 'is less than' },
 ]
+
+// One-click cron presets for the schedule trigger (label + standard 5-field cron).
+const SCHEDULE_PRESETS = [
+  { label: 'Every hour', cron: '0 * * * *' },
+  { label: 'Every day at 9am', cron: '0 9 * * *' },
+  { label: 'Every Monday', cron: '0 9 * * 1' },
+  { label: 'Every 1st of month', cron: '0 9 1 * *' },
+]
+
+// Turn a cron expression into a human-readable description, or flag it invalid.
+function describeCron(expr) {
+  try {
+    return { text: cronstrue.toString(expr, { throwExceptionOnParseError: true }), error: false }
+  } catch {
+    return { text: 'Not a valid cron expression yet — e.g. 0 9 * * 1', error: true }
+  }
+}
 
 export default function NodeConfigPanel({ node, onChange, onClose, onDelete }) {
   if (!node) return null
@@ -31,6 +50,41 @@ export default function NodeConfigPanel({ node, onChange, onClose, onDelete }) {
             body is available downstream as <code>{'{{' + node.id + '.field}}'}</code>.
           </p>
         )
+      case 'trigger-schedule': {
+        const cronValue = config.cron || ''
+        const desc = describeCron(cronValue)
+        return (
+          <>
+            <label className="config-panel__field">
+              <span>Cron expression</span>
+              <input
+                value={cronValue}
+                placeholder="0 9 * * 1"
+                onChange={(e) => setConfig('cron', e.target.value)}
+              />
+            </label>
+            <p className={`schedule-preview${desc.error ? ' schedule-preview--error' : ''}`}>
+              {desc.error ? '⚠ ' : '🕑 '}
+              {desc.text}
+            </p>
+            <div className="schedule-quickpicks">
+              {SCHEDULE_PRESETS.map((p) => (
+                <button
+                  key={p.cron}
+                  type="button"
+                  className="schedule-quickpick"
+                  onClick={() => setConfig('cron', p.cron)}
+                >
+                  {p.label}
+                </button>
+              ))}
+            </div>
+            <p className="config-panel__hint">
+              Deploy the workflow to activate the schedule. Runs use the server’s timezone.
+            </p>
+          </>
+        )
+      }
       case 'action-http':
         return (
           <>

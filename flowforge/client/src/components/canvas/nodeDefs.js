@@ -11,6 +11,11 @@ export const NODE_DEFS = {
     subtype: 'webhook',
     config: {},
   },
+  'trigger-schedule': {
+    label: 'Schedule Trigger',
+    subtype: 'schedule',
+    config: { cron: '0 9 * * *' },
+  },
   'action-http': {
     label: 'HTTP Request',
     subtype: 'http',
@@ -66,6 +71,7 @@ export const NODE_DEFS = {
 export const TOOLBAR_BUTTONS = [
   { type: 'trigger-manual', label: 'Trigger', className: 'toolbar-btn--trigger' },
   { type: 'trigger-webhook', label: 'Webhook', className: 'toolbar-btn--trigger' },
+  { type: 'trigger-schedule', label: 'Schedule', className: 'toolbar-btn--trigger' },
   { type: 'action-http', label: 'HTTP', className: 'toolbar-btn--action' },
   { type: 'action-delay', label: 'Delay', className: 'toolbar-btn--action' },
   { type: 'action-email', label: 'Email', className: 'toolbar-btn--action' },

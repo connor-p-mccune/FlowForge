@@ -80,6 +80,21 @@ describe('NodeConfigPanel rendering', () => {
     setup(mk('mystery-type'))
     expect(screen.getByText(/No configuration for this node type/)).toBeInTheDocument()
   })
+
+  it('renders the cron field, a humanized preview, and quick-picks for trigger-schedule', () => {
+    setup(mk('trigger-schedule', { config: { cron: '0 9 * * 1' } }))
+    expect(screen.getByText('Cron expression')).toBeInTheDocument()
+    expect(screen.getByDisplayValue('0 9 * * 1')).toBeInTheDocument()
+    // cronstrue humanization (scoped to the preview — "At 09:00" isn't on any button)
+    expect(screen.getByText(/At 09:00/)).toBeInTheDocument()
+    expect(screen.getByText('Every hour')).toBeInTheDocument()
+    expect(screen.getByText('Every 1st of month')).toBeInTheDocument()
+  })
+
+  it('flags an invalid cron expression in the preview', () => {
+    setup(mk('trigger-schedule', { config: { cron: 'definitely-not-cron' } }))
+    expect(screen.getByText(/Not a valid cron expression/i)).toBeInTheDocument()
+  })
 })
 
 describe('NodeConfigPanel interactions', () => {
@@ -115,5 +130,11 @@ describe('NodeConfigPanel interactions', () => {
     const { onClose } = setup(mk('output-log'))
     fireEvent.click(screen.getByTitle('Close'))
     expect(onClose).toHaveBeenCalled()
+  })
+
+  it('clicking a schedule quick-pick sets that cron via onChange', () => {
+    const { onChange } = setup(mk('trigger-schedule', { config: { cron: '0 9 * * *' } }))
+    fireEvent.click(screen.getByText('Every Monday'))
+    expect(onChange).toHaveBeenCalledWith('n1', { config: { cron: '0 9 * * 1' } })
   })
 })

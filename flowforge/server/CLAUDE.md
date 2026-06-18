@@ -39,6 +39,7 @@ src/
 ├── services/
 │   ├── dagParser.js                # Graph → adjacency list → topological sort
 │   ├── executionEngine.js          # Runs sorted nodes, manages context, emits events
+│   ├── scheduler.js                # node-cron jobs for schedule triggers (lock + enqueue)
 │   └── nodeRunners/                # One file per node type
 │       ├── httpRequest.js
 │       ├── sendEmail.js
@@ -416,6 +417,33 @@ executionQueue.process(async (job) => {
 
 ---
 
+## Schedule triggers
+
+`trigger-schedule` nodes run a workflow on a cron schedule. `services/scheduler.js`
+owns the active jobs (built on `node-cron`) and enqueues onto the same Bull queue
+as webhook/manual runs, so scheduled runs flow through the existing worker +
+execution engine unchanged (a `trigger-*` node is a pass-through in the engine).
+
+- `registerSchedule(workflowId, cron)` — (re)create the cron job; throws on an
+  invalid expression (`cron.validate`).
+- `unregisterSchedule(workflowId)` — stop and forget the job.
+- `restoreSchedules()` — re-register every deployed workflow that has a schedule
+  node; called once on startup in `index.js` so schedules survive a restart.
+
+Wiring (`routes/workflows.js`): `POST /workflows/:id/deploy` validates the schedule
+node's cron, marks the workflow `status = 'deployed'`, and registers it — an invalid
+cron is rejected `400` before anything is snapshotted. `POST /workflows/:id/archive`
+(`status = 'archived'`) and `DELETE /workflows/:id` both unregister it.
+
+Each cron tick takes a short-lived Redis lock (`SET lock:schedule:{id} NX EX`) and
+releases it right after enqueuing, so across multiple server instances only one
+enqueues per tick (`SCHEDULE_LOCK_TTL_SECONDS`, default 30, is a crash safety-net).
+The workflow `status` column is added by an idempotent migration in
+`config/database.js`. Tests: `__tests__/scheduler.test.js` (service: lock/enqueue,
+validate, register/restore) and `__tests__/schedule.test.js` (route wiring).
+
+---
+
 ## index.js skeleton
 
 ```javascript
@@ -466,6 +494,7 @@ server.listen(PORT, () => console.log(`Server running on ${PORT}`))
     "helmet": "^8.2.0",
     "ioredis": "^5.3.0",
     "jsonwebtoken": "^9.0.0",
+    "node-cron": "^3.0.3",
     "socket.io": "^4.7.0",
     "uuid": "^9.0.0"
   },

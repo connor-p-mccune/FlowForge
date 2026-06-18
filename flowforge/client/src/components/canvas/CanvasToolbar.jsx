@@ -6,8 +6,12 @@ export default function CanvasToolbar({
   onToggleRuns,
   onSuggest,
   onToggleWebhooks,
+  onDeploy,
+  onToggleHistory,
   running,
   suggesting,
+  deploying,
+  scheduleWarning,
 }) {
   return (
     <div className="canvas-toolbar">
@@ -53,6 +57,27 @@ export default function CanvasToolbar({
       >
         Runs
       </button>
+      <span className="canvas-toolbar__divider" />
+      <button
+        className="toolbar-btn toolbar-btn--deploy"
+        title="Deploy — save the current workflow as a new version"
+        onClick={onDeploy}
+        disabled={deploying}
+      >
+        {deploying ? 'Deploying…' : '🚀 Deploy'}
+      </button>
+      <button
+        className="toolbar-btn toolbar-btn--history"
+        title="Version history"
+        onClick={onToggleHistory}
+      >
+        🕘 History
+      </button>
+      {scheduleWarning && (
+        <span className="canvas-toolbar__warning" role="status">
+          ⚠ Deploy this workflow to activate the schedule
+        </span>
+      )}
     </div>
   )
 }
