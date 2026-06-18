@@ -35,7 +35,9 @@
     "jsonwebtoken": "^9.0.2",
     "node-cron": "^3.0.3",
     "nodemailer": "^6.9.14",
+    "qrcode": "^1.5.4",
     "socket.io": "^4.7.5",
+    "speakeasy": "^2.0.0",
     "uuid": "^9.0.1"
   },
   "devDependencies": {

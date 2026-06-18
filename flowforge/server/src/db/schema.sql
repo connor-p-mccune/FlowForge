@@ -1,9 +1,15 @@
 CREATE TABLE IF NOT EXISTS users (
-  id            TEXT PRIMARY KEY,
-  email         TEXT UNIQUE NOT NULL,
-  password_hash TEXT NOT NULL,
-  display_name  TEXT NOT NULL,
-  created_at    TEXT NOT NULL DEFAULT (datetime('now'))
+  id                TEXT PRIMARY KEY,
+  email             TEXT UNIQUE NOT NULL,
+  password_hash     TEXT NOT NULL,
+  display_name      TEXT NOT NULL,
+  -- Optional TOTP two-factor auth. totp_secret is the base32 shared secret;
+  -- totp_enabled is only set to 1 once the user verifies a code; totp_backup_codes
+  -- is a JSON array of { hash, used } one-time recovery codes (bcrypt-hashed).
+  totp_secret       TEXT,
+  totp_enabled      INTEGER NOT NULL DEFAULT 0,
+  totp_backup_codes TEXT,
+  created_at        TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
 CREATE TABLE IF NOT EXISTS workspaces (

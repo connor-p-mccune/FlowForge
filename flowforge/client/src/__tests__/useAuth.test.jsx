@@ -61,6 +61,39 @@ describe('login', () => {
   })
 })
 
+describe('login with 2FA enabled', () => {
+  it('surfaces requires2FA + tempToken without persisting a session', async () => {
+    apiFetch.mockResolvedValue({ requires2FA: true, tempToken: 'temp-abc' })
+
+    const { result } = renderAuth()
+    let outcome
+    await act(async () => {
+      outcome = await result.current.login('ada@example.com', 'password123')
+    })
+
+    expect(outcome).toEqual({ requires2FA: true, tempToken: 'temp-abc' })
+    expect(result.current.user).toBeNull()
+    expect(localStorage.getItem('token')).toBeNull()
+  })
+
+  it('loginWith2FA exchanges the code for a session', async () => {
+    const user = { id: '1', email: 'ada@example.com', displayName: 'Ada', twoFactorEnabled: true }
+    apiFetch.mockResolvedValue({ token: 'tok-2fa', user })
+
+    const { result } = renderAuth()
+    await act(async () => {
+      await result.current.loginWith2FA('temp-abc', '123456')
+    })
+
+    expect(apiFetch).toHaveBeenCalledWith('/api/auth/2fa/login', {
+      method: 'POST',
+      body: { tempToken: 'temp-abc', code: '123456' },
+    })
+    expect(result.current.user).toEqual(user)
+    expect(localStorage.getItem('token')).toBe('tok-2fa')
+  })
+})
+
 describe('register', () => {
   it('persists token + user and updates state', async () => {
     const user = { id: '2', email: 'new@example.com', displayName: 'New' }

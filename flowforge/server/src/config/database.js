@@ -50,4 +50,13 @@ db.exec(`
 ensureColumn('executions', 'trigger_data', 'TEXT')
 ensureColumn('executions', 'trigger_type', 'TEXT')
 
+// Two-factor authentication (TOTP). Optional, opt-in per user. totp_enabled stays
+// 0 until the user verifies a code from their authenticator, so a half-finished
+// setup never locks them out of login. totp_backup_codes is a JSON array of
+// { hash, used } recovery codes. Added here (idempotent ALTER) so existing
+// databases pick up the columns without a wipe.
+ensureColumn('users', 'totp_secret', 'TEXT')
+ensureColumn('users', 'totp_enabled', 'INTEGER NOT NULL DEFAULT 0')
+ensureColumn('users', 'totp_backup_codes', 'TEXT')
+
 module.exports = db
