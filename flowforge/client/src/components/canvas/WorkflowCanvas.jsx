@@ -19,6 +19,7 @@ import Skeleton from '../Skeleton'
 import CanvasToolbar from './CanvasToolbar'
 import NodeConfigPanel from './NodeConfigPanel'
 import SuggestionsPanel from './SuggestionsPanel'
+import GenerateModal from './GenerateModal'
 import WebhookPanel from './WebhookPanel'
 import HistoryPanel from './HistoryPanel'
 import ExecutionPanel from '../execution/ExecutionPanel'
@@ -27,12 +28,17 @@ import PresenceBar from '../collaboration/PresenceBar'
 import { NODE_DEFS } from './nodeDefs'
 import { nodeTypes } from './nodeTypes'
 
+// Shown for any generation failure — the model may have returned something
+// unusable, the prompt may be too vague, or the AI service may be unreachable.
+const GENERATE_ERROR_MESSAGE =
+  'The AI couldn’t generate a valid workflow for that description — try being more specific about the trigger and actions'
+
 function CanvasInner({ workflowId }) {
   const wrapperRef = useRef(null)
   const [nodes, setNodes, onNodesChange] = useNodesState([])
   const [edges, setEdges, onEdgesChange] = useEdgesState([])
   const { workflow, saveGraph, loading, deploy, applyWorkflow } = useWorkflow(workflowId, setNodes, setEdges)
-  const { screenToFlowPosition, getNode } = useReactFlow()
+  const { screenToFlowPosition, getNode, fitView } = useReactFlow()
   const { user } = useAuth()
 
   // Toast (kept in a ref so the socket/exec callbacks below need no deps churn).
@@ -65,6 +71,12 @@ function CanvasInner({ workflowId }) {
   const [suggestError, setSuggestError] = useState(null)
   const suggestAnchorRef = useRef(null)
   const [webhookOpen, setWebhookOpen] = useState(false)
+
+  // AI workflow generation (natural-language description → full graph)
+  const [generateOpen, setGenerateOpen] = useState(false)
+  const [generating, setGenerating] = useState(false)
+  const [generateError, setGenerateError] = useState(null)
+  const [pendingGraph, setPendingGraph] = useState(null) // graph awaiting replace-confirm
 
   // Version history (deploy / restore)
   const [historyOpen, setHistoryOpen] = useState(false)
@@ -496,6 +508,97 @@ function CanvasInner({ workflowId }) {
     [addNodeOfType]
   )
 
+  // Load an AI-generated graph onto the canvas. Normalizes each node to the shape
+  // the canvas + runners expect (merging in NODE_DEFS config defaults), selects
+  // the first node so its config panel opens for review, then lets the debounced
+  // auto-save persist it. Unlike applyWorkflow (restore), this is a brand-new
+  // graph the user should review node-by-node, so we don't touch the save baseline.
+  const applyGeneratedGraph = useCallback(
+    (graphData) => {
+      const rawNodes = Array.isArray(graphData?.nodes) ? graphData.nodes : []
+      const rawEdges = Array.isArray(graphData?.edges) ? graphData.edges : []
+      const newNodes = rawNodes.map((n, i) => {
+        const def = NODE_DEFS[n.type]
+        const pos =
+          n.position && Number.isFinite(n.position.x) && Number.isFinite(n.position.y)
+            ? n.position
+            : { x: 250, y: 60 + i * 140 }
+        return {
+          id: n.id || crypto.randomUUID(),
+          type: n.type,
+          position: pos,
+          selected: i === 0, // open the config panel on the first node
+          data: {
+            label: n.data?.label || def?.label || n.type,
+            subtype: def?.subtype || n.type.replace(/^[^-]+-/, '') || n.type,
+            config: { ...(def?.config || {}), ...(n.data?.config || {}) },
+          },
+        }
+      })
+      const newEdges = rawEdges.map((e) => ({
+        id: e.id || crypto.randomUUID(),
+        source: e.source,
+        target: e.target,
+        sourceHandle: e.sourceHandle ?? null,
+        targetHandle: e.targetHandle ?? null,
+      }))
+      setNodes(newNodes)
+      setEdges(newEdges)
+      // Frame the new graph once React Flow has measured the nodes.
+      setTimeout(() => fitView({ padding: 0.2, duration: 300 }), 60)
+    },
+    [setNodes, setEdges, fitView]
+  )
+
+  const handleOpenGenerate = useCallback(() => {
+    // Share screen space with the other panels.
+    setWebhookOpen(false)
+    setHistoryOpen(false)
+    setSuggestions(null)
+    setGenerateError(null)
+    setPendingGraph(null)
+    setGenerateOpen(true)
+  }, [])
+
+  const handleGenerate = useCallback(
+    async (prompt) => {
+      setGenerating(true)
+      setGenerateError(null)
+      try {
+        const { graph_data: graphData } = await apiFetch('/api/ai/generate', {
+          method: 'POST',
+          body: { prompt },
+        })
+        if (!graphData || !Array.isArray(graphData.nodes) || graphData.nodes.length === 0) {
+          throw new Error('empty graph')
+        }
+        if (nodes.length === 0) {
+          applyGeneratedGraph(graphData)
+          setGenerateOpen(false)
+          toastRef.current.success('Workflow generated — review each node’s config.')
+        } else {
+          // Canvas already has nodes — confirm before overwriting them.
+          setPendingGraph(graphData)
+        }
+      } catch (err) {
+        console.error('AI generate failed:', err)
+        setGenerateError(GENERATE_ERROR_MESSAGE)
+      } finally {
+        setGenerating(false)
+      }
+    },
+    [nodes.length, applyGeneratedGraph]
+  )
+
+  const handleConfirmReplace = useCallback(() => {
+    if (pendingGraph) applyGeneratedGraph(pendingGraph)
+    setPendingGraph(null)
+    setGenerateOpen(false)
+    toastRef.current.success('Workflow generated — review each node’s config.')
+  }, [pendingGraph, applyGeneratedGraph])
+
+  const handleCancelReplace = useCallback(() => setPendingGraph(null), [])
+
   const handleNodeDataChange = useCallback(
     (nodeId, patch) => {
       setNodes((nds) =>
@@ -530,12 +633,14 @@ function CanvasInner({ workflowId }) {
         onTest={handleTest}
         onToggleRuns={() => setExecPanelOpen((v) => !v)}
         onSuggest={handleSuggest}
+        onGenerate={handleOpenGenerate}
         onToggleWebhooks={handleToggleWebhooks}
         onDeploy={handleDeploy}
         onToggleHistory={handleToggleHistory}
         running={execution?.status === 'running' || execution?.status === 'pending'}
         testing={testBannerVisible}
         suggesting={suggestLoading}
+        generating={generating}
         deploying={deploying}
         scheduleWarning={hasSchedule && !deployed}
       />
@@ -589,6 +694,21 @@ function CanvasInner({ workflowId }) {
           suggestions={suggestions}
           onAdd={handleAddSuggestion}
           onClose={() => setSuggestions(null)}
+        />
+      )}
+      {generateOpen && (
+        <GenerateModal
+          generating={generating}
+          error={generateError}
+          confirmReplace={pendingGraph !== null}
+          onSubmit={handleGenerate}
+          onConfirmReplace={handleConfirmReplace}
+          onCancelReplace={handleCancelReplace}
+          onClose={() => {
+            setGenerateOpen(false)
+            setPendingGraph(null)
+            setGenerateError(null)
+          }}
         />
       )}
       <WebhookPanel

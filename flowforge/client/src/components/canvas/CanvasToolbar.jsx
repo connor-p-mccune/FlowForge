@@ -6,12 +6,14 @@ export default function CanvasToolbar({
   onTest,
   onToggleRuns,
   onSuggest,
+  onGenerate,
   onToggleWebhooks,
   onDeploy,
   onToggleHistory,
   running,
   testing,
   suggesting,
+  generating,
   deploying,
   scheduleWarning,
 }) {
@@ -28,6 +30,20 @@ export default function CanvasToolbar({
         </button>
       ))}
       <span className="canvas-toolbar__divider" />
+      <button
+        className="toolbar-btn toolbar-btn--generate"
+        title="Generate a whole workflow from a description with AI"
+        onClick={onGenerate}
+        disabled={generating}
+      >
+        <span
+          className={`toolbar-btn__sparkle${generating ? ' toolbar-btn__sparkle--spin' : ''}`}
+          aria-hidden="true"
+        >
+          ✨
+        </span>
+        {generating ? 'Generating…' : 'Generate'}
+      </button>
       <button
         className="toolbar-btn toolbar-btn--suggest"
         title="Suggest the next step with AI"

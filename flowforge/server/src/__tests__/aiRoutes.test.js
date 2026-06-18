@@ -62,3 +62,61 @@ describe('POST /api/ai/suggest', () => {
     expect(res.status).toBe(401)
   })
 })
+
+describe('POST /api/ai/generate', () => {
+  let token
+
+  beforeAll(async () => {
+    const res = await request(app)
+      .post('/api/auth/register')
+      .send({ email: 'gen-user@example.com', password: 'password123', displayName: 'Gen' })
+    token = res.body.token
+  })
+
+  beforeEach(() => mockCall.mockReset())
+
+  const graphData = {
+    nodes: [
+      { id: 'trigger', type: 'trigger-webhook', position: { x: 0, y: 0 }, data: { label: 'Hook', config: {} } },
+      { id: 'slack', type: 'action-slack', position: { x: 0, y: 120 }, data: { label: 'Slack', config: {} } },
+    ],
+    edges: [{ id: 'e1', source: 'trigger', target: 'slack', sourceHandle: null }],
+  }
+
+  it('proxies the generated graph from the AI service', async () => {
+    mockCall.mockResolvedValue({ graph_data: graphData })
+
+    const res = await request(app)
+      .post('/api/ai/generate')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ prompt: 'Slack me when a webhook fires' })
+
+    expect(res.status).toBe(200)
+    expect(res.body.graph_data).toEqual(graphData)
+    expect(mockCall).toHaveBeenCalledWith('/generate', { prompt: 'Slack me when a webhook fires' })
+  })
+
+  it('returns 502 when the AI service fails', async () => {
+    mockCall.mockRejectedValue(new Error('The model did not return valid JSON'))
+    const res = await request(app)
+      .post('/api/ai/generate')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ prompt: 'something vague' })
+    expect(res.status).toBe(502)
+    expect(res.body.error).toMatch(/valid JSON/)
+  })
+
+  it('requires a prompt', async () => {
+    const res = await request(app)
+      .post('/api/ai/generate')
+      .set('Authorization', `Bearer ${token}`)
+      .send({})
+    expect(res.status).toBe(400)
+    expect(mockCall).not.toHaveBeenCalled()
+  })
+
+  it('requires authentication', async () => {
+    const res = await request(app).post('/api/ai/generate').send({ prompt: 'hi' })
+    expect(res.status).toBe(401)
+  })
+})

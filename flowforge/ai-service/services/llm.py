@@ -19,15 +19,20 @@ def get_client():
     return _client
 
 
-def chat(prompt, system=None, temperature=0.3):
-    """Run a single-turn chat completion and return the trimmed text."""
+def chat(prompt, system=None, temperature=0.3, model=None):
+    """Run a single-turn chat completion and return the trimmed text.
+
+    `model` lets a caller request a more capable model than the default
+    (e.g. workflow generation needs gpt-4o). When omitted it falls back to the
+    OPENAI_MODEL env var, then gpt-4o-mini.
+    """
     messages = []
     if system:
         messages.append({'role': 'system', 'content': system})
     messages.append({'role': 'user', 'content': prompt})
 
     response = get_client().chat.completions.create(
-        model=os.environ.get('OPENAI_MODEL', 'gpt-4o-mini'),
+        model=model or os.environ.get('OPENAI_MODEL', 'gpt-4o-mini'),
         messages=messages,
         temperature=temperature,
     )

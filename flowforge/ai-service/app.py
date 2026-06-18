@@ -3,6 +3,7 @@ import os
 from flask import Flask, request, jsonify
 from services.suggestion import get_node_suggestions
 from services.nodes import run_llm_prompt, classify_text, extract_fields
+from services.generate import generate_workflow
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -60,6 +61,17 @@ def extract():
         return jsonify({'error': 'text and fields are required'}), 400
     try:
         return jsonify(extract_fields(data['text'], data['fields']))
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/generate', methods=['POST'])
+def generate():
+    data = request.get_json() or {}
+    if not data.get('prompt'):
+        return jsonify({'error': 'prompt is required'}), 400
+    try:
+        return jsonify({'graph_data': generate_workflow(data['prompt'])})
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
