@@ -72,6 +72,23 @@ function resolveTemplates(value, context) {
   return value
 }
 
+// The object trigger nodes emit as their output. Prefer the payload handed in by
+// the caller (a live webhook/replay job), otherwise fall back to the trigger_data
+// persisted on the execution row (how a replay re-runs from the stored input).
+// Manual runs have neither, so they start from {}.
+function resolveTriggerPayload(payload, triggerData) {
+  if (payload && typeof payload === 'object') return payload
+  if (triggerData) {
+    try {
+      const parsed = JSON.parse(triggerData)
+      if (parsed && typeof parsed === 'object') return parsed
+    } catch {
+      /* malformed/legacy trigger_data — fall through to empty payload */
+    }
+  }
+  return {}
+}
+
 function defaultPublish(payload) {
   // Lazy require so engine unit tests never touch Redis
   const redis = require('../config/redis')
@@ -94,14 +111,16 @@ async function runWithRetries(node, config, input) {
 
 async function runExecution(executionId, { publish, payload } = {}) {
   const pub = publish || defaultPublish
-  // Trigger nodes emit this object as their output, so webhook bodies flow into
-  // the graph (e.g. {{triggerNodeId.field}}). Manual runs pass nothing.
-  const triggerPayload = payload && typeof payload === 'object' ? payload : {}
 
   const execution = db.prepare('SELECT * FROM executions WHERE id = ?').get(executionId)
   if (!execution) throw new Error(`Execution ${executionId} not found`)
   const workflow = db.prepare('SELECT * FROM workflows WHERE id = ?').get(execution.workflow_id)
   if (!workflow) throw new Error(`Workflow ${execution.workflow_id} not found`)
+
+  // Trigger nodes emit this object as their output, so webhook bodies (or a
+  // replayed run's stored trigger_data) flow into the graph (e.g.
+  // {{triggerNodeId.field}}). Manual runs start from {}.
+  const triggerPayload = resolveTriggerPayload(payload, execution.trigger_data)
 
   const workflowId = workflow.id
   const { nodes = [], edges = [] } = JSON.parse(workflow.graph_json)

@@ -104,6 +104,40 @@ describe('runExecution', () => {
     expect(kinds[kinds.length - 1]).toBe('execution:completed')
   })
 
+  it('feeds the passed-in trigger payload into trigger-node output', async () => {
+    const graph = {
+      nodes: [
+        node('t1', 'trigger-webhook'),
+        node('o1', 'output-log', { message: 'hi {{t1.name}}' }),
+      ],
+      edges: [edge('t1', 'o1')],
+    }
+    const { execId } = seedWorkflow(graph)
+    await runExecution(execId, { payload: { name: 'Ada' }, publish: () => {} })
+
+    expect(JSON.parse(stepFor(execId, 't1').output_json)).toMatchObject({ triggered: true, name: 'Ada' })
+    expect(JSON.parse(stepFor(execId, 'o1').output_json)).toEqual({ message: 'hi Ada' })
+  })
+
+  it('falls back to the execution row trigger_data when no payload is passed (replay)', async () => {
+    const graph = {
+      nodes: [
+        node('t1', 'trigger-webhook'),
+        node('o1', 'output-log', { message: 'order {{t1.order}}' }),
+      ],
+      edges: [edge('t1', 'o1')],
+    }
+    const { execId } = seedWorkflow(graph)
+    db.prepare('UPDATE executions SET trigger_data = ? WHERE id = ?').run(
+      JSON.stringify({ order: 7 }),
+      execId
+    )
+    await runExecution(execId, { publish: () => {} }) // no payload — engine reads the row
+
+    expect(JSON.parse(stepFor(execId, 't1').output_json)).toMatchObject({ order: 7 })
+    expect(JSON.parse(stepFor(execId, 'o1').output_json)).toEqual({ message: 'order 7' })
+  })
+
   it('skips the branch a condition did not take', async () => {
     const graph = {
       nodes: [

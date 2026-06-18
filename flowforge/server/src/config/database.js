@@ -35,4 +35,13 @@ db.exec(`
     ON execution_steps (execution_id, node_type);
 `)
 
+// Execution replay: trigger_data persists the original trigger payload (webhook
+// body, manual/schedule metadata) as JSON so a past run can be re-run with the
+// identical input; trigger_type records how the run was started
+// ('manual' | 'webhook' | 'schedule' | 'replay'). triggered_by stays the user FK
+// (who, if anyone, started it) — replays carry the user who clicked Replay, so a
+// dedicated trigger_type column marks them without breaking that foreign key.
+ensureColumn('executions', 'trigger_data', 'TEXT')
+ensureColumn('executions', 'trigger_type', 'TEXT')
+
 module.exports = db

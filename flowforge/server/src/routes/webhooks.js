@@ -89,17 +89,21 @@ router.post('/webhooks/:key', webhookLimiter, async (req, res) => {
       return res.status(400).json({ error: 'Workflow has no nodes to execute' })
     }
 
+    // The request body is both the live run's trigger payload and the durable
+    // record persisted on the execution row, so the run can later be replayed
+    // with identical input.
+    const triggerData = req.body && typeof req.body === 'object' ? req.body : {}
     const executionId = uuidv4()
     const now = new Date().toISOString()
     db.prepare(
-      'INSERT INTO executions (id, workflow_id, status, triggered_by, created_at) VALUES (?, ?, ?, ?, ?)'
-    ).run(executionId, workflow.id, 'pending', null, now)
+      'INSERT INTO executions (id, workflow_id, status, triggered_by, trigger_type, trigger_data, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)'
+    ).run(executionId, workflow.id, 'pending', null, 'webhook', JSON.stringify(triggerData), now)
     db.prepare('UPDATE webhooks SET last_triggered_at = ? WHERE id = ?').run(now, webhook.id)
 
     await getExecutionQueue().add({
       executionId,
       workflowId: workflow.id,
-      payload: req.body && typeof req.body === 'object' ? req.body : {},
+      payload: triggerData,
     })
 
     res.status(202).json({ executionId, status: 'pending' })
