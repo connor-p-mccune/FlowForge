@@ -156,6 +156,26 @@ async function runExecution(
   function failExecution(message) {
     updateExecution.run('failed', new Date().toISOString(), new Date().toISOString(), executionId)
     publishExecution('failed', message)
+    logRunActivity('execution.failed', message)
+  }
+
+  // Log a workspace activity event when a top-level run finishes. Skipped for
+  // dry-runs (test mode) and sub-workflow child runs (ancestorWorkflowIds is non-
+  // empty) so the feed shows real, user-facing runs only. Lazy-required like the
+  // Redis publish above so engine unit tests don't pull in the service; logEvent
+  // is itself best-effort and never throws.
+  function logRunActivity(eventType, errorMsg) {
+    if (dryRun || ancestorWorkflowIds.length > 0) return
+    require('./activityService').logEvent(workflow.workspace_id, execution.triggered_by, eventType, {
+      type: 'execution',
+      id: executionId,
+      name: workflow.name,
+      metadata: {
+        workflowId,
+        triggerType: execution.trigger_type,
+        ...(errorMsg ? { error: errorMsg } : {}),
+      },
+    })
   }
 
   updateExecution.run('running', new Date().toISOString(), null, executionId)
@@ -276,6 +296,7 @@ async function runExecution(
 
   updateExecution.run('completed', new Date().toISOString(), new Date().toISOString(), executionId)
   publishExecution('completed')
+  logRunActivity('execution.completed')
 
   // A run's final output: its output-return node's output if it has one, else the
   // last node (in execution order) that produced output. Returned so a parent

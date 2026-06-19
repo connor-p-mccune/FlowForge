@@ -4,6 +4,8 @@
 // persistence is the REST layer's job, and conflict resolution is last-write-
 // wins on the client using the `ts` (sender timestamp) carried on each change.
 
+const db = require('../config/database')
+
 // Snapshot of who is currently in a workflow's room, derived from connected
 // sockets (presence is ephemeral — there is no DB table for it).
 function getActiveUsers(io, workflowId) {
@@ -38,6 +40,22 @@ module.exports = function registerHandlers(socket, io) {
   socket.on('leave-workflow', ({ workflowId }) => {
     socket.leave(`workflow:${workflowId}`)
     socket.to(`workflow:${workflowId}`).emit('user-left', { userId: socket.userId })
+  })
+
+  // The workspace activity feed (workspace:<id> room) streams activity-event to
+  // members viewing it. Membership is verified before joining so a socket can't
+  // subscribe to a workspace the user isn't in. There's no presence/relay here —
+  // the server only pushes (activityService emits); clients never emit into it.
+  socket.on('join-workspace', ({ workspaceId }) => {
+    if (!workspaceId || !socket.userId) return
+    const member = db.prepare(
+      'SELECT 1 FROM workspace_members WHERE workspace_id = ? AND user_id = ?'
+    ).get(workspaceId, socket.userId)
+    if (member) socket.join(`workspace:${workspaceId}`)
+  })
+
+  socket.on('leave-workspace', ({ workspaceId }) => {
+    socket.leave(`workspace:${workspaceId}`)
   })
 
   // socket.to(room) emits to everyone in the room EXCEPT the sender, so the

@@ -4,6 +4,7 @@ const db = require('../config/database')
 const auth = require('../middleware/auth')
 const { validate } = require('../middleware/validate')
 const scheduler = require('../services/scheduler')
+const activityService = require('../services/activityService')
 
 const router = express.Router()
 
@@ -89,6 +90,9 @@ router.post('/workspaces/:wsId/workflows', auth, validate(workflowRule), (req, r
     ).run(id, req.params.wsId, name, description || null, req.user.id, now, now)
 
     const workflow = db.prepare('SELECT * FROM workflows WHERE id = ?').get(id)
+    activityService.logEvent(req.params.wsId, req.user.id, 'workflow.created', {
+      type: 'workflow', id, name: workflow.name,
+    })
     res.status(201).json({ workflow })
   } catch (err) {
     console.error(err)
@@ -218,6 +222,9 @@ router.delete('/workflows/:id', auth, (req, res) => {
     db.prepare('DELETE FROM workflows WHERE id = ?').run(req.params.id)
     // Stop any active cron schedule for this (now-gone) workflow.
     scheduler.unregisterSchedule(req.params.id)
+    activityService.logEvent(workflow.workspace_id, req.user.id, 'workflow.deleted', {
+      type: 'workflow', id: workflow.id, name: workflow.name,
+    })
     res.status(204).end()
   } catch (err) {
     console.error(err)
@@ -309,6 +316,11 @@ router.post('/workflows/:id/deploy', auth, (req, res) => {
     if (scheduleNode) scheduler.registerSchedule(req.params.id, cronExpr)
     else scheduler.unregisterSchedule(req.params.id)
 
+    activityService.logEvent(workflow.workspace_id, req.user.id, 'workflow.deployed', {
+      type: 'workflow', id: workflow.id, name: workflow.name,
+      metadata: { version: version.version },
+    })
+
     res.status(201).json({ version })
   } catch (err) {
     console.error(err)
@@ -376,6 +388,11 @@ router.post('/workflows/:id/versions/:versionId/restore', auth, (req, res) => {
       db.prepare('UPDATE workflows SET graph_json = ?, updated_at = ? WHERE id = ?')
         .run(target.graph_json, now, req.params.id)
     })()
+
+    activityService.logEvent(workflow.workspace_id, req.user.id, 'workflow.restored', {
+      type: 'workflow', id: workflow.id, name: workflow.name,
+      metadata: { version: target.version },
+    })
 
     const updated = db.prepare('SELECT * FROM workflows WHERE id = ?').get(req.params.id)
     res.json({ workflow: updated })
