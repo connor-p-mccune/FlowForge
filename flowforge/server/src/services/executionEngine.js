@@ -18,6 +18,8 @@ const runners = {
   'ai-classify': require('./nodeRunners/classify'),
   'ai-extract': require('./nodeRunners/extract'),
   'output-log': require('./nodeRunners/outputLog'),
+  'output-return': require('./nodeRunners/outputReturn'),
+  'sub-workflow': require('./nodeRunners/subWorkflow'),
 }
 
 const MAX_ATTEMPTS = parseInt(process.env.EXEC_MAX_ATTEMPTS || '3')
@@ -97,13 +99,18 @@ function defaultPublish(payload) {
     .catch((err) => console.error('Failed to publish exec-update:', err.message))
 }
 
-async function runWithRetries(node, config, input, isDryRun) {
+async function runWithRetries(node, config, input, isDryRun, ctx) {
   const runner = getRunner(node.type)
+  // A sub-workflow node runs an entire nested execution that already retries its
+  // own nodes. Retrying it here would re-run the whole sub-workflow on any inner
+  // failure — duplicate side effects and duplicate child execution rows — so it
+  // gets a single attempt; everything else keeps the standard retry-with-backoff.
+  const maxAttempts = node.type === 'sub-workflow' ? 1 : MAX_ATTEMPTS
   for (let attempt = 1; ; attempt++) {
     try {
-      return await runner(config, input, isDryRun)
+      return await runner(config, input, isDryRun, ctx)
     } catch (err) {
-      if (attempt >= MAX_ATTEMPTS) throw err
+      if (attempt >= maxAttempts) throw err
       await sleep(BASE_BACKOFF_MS * 2 ** (attempt - 1))
     }
   }
@@ -112,7 +119,10 @@ async function runWithRetries(node, config, input, isDryRun) {
 // dryRun (test mode): side-effecting node runners (email/Slack/HTTP) skip their
 // external call and instead return what they *would* have sent. Everything else
 // — conditions, transforms, AI nodes — runs for real, so test output is genuine.
-async function runExecution(executionId, { publish, payload, dryRun = false } = {}) {
+async function runExecution(
+  executionId,
+  { publish, payload, dryRun = false, ancestorWorkflowIds = [] } = {}
+) {
   const pub = publish || defaultPublish
 
   const execution = db.prepare('SELECT * FROM executions WHERE id = ?').get(executionId)
@@ -126,6 +136,10 @@ async function runExecution(executionId, { publish, payload, dryRun = false } = 
   const triggerPayload = resolveTriggerPayload(payload, execution.trigger_data)
 
   const workflowId = workflow.id
+  // Workflow ids on the current call stack, including this run's own. Handed to
+  // sub-workflow nodes (via ctx) so they can reject a target already on the stack
+  // — a cycle — before recursing into it.
+  const callStack = [...ancestorWorkflowIds, workflowId]
   const { nodes = [], edges = [] } = JSON.parse(workflow.graph_json)
   const nodeById = Object.fromEntries(nodes.map((n) => [n.id, n]))
 
@@ -224,7 +238,17 @@ async function runExecution(executionId, { publish, payload, dryRun = false } = 
 
     try {
       const config = resolveTemplates(node.data?.config || {}, context)
-      const output = (await runWithRetries(node, config, input, dryRun)) ?? {}
+      // Engine context for runners that need to reach back into the engine (only
+      // sub-workflow does today): the call stack for cycle detection, the parent
+      // execution + node so a spawned child run can be linked back, and the publish
+      // fn so nested events ride the same channel.
+      const ctx = {
+        ancestorWorkflowIds: callStack,
+        parentExecutionId: executionId,
+        parentNodeId: nodeId,
+        publish: pub,
+      }
+      const output = (await runWithRetries(node, config, input, dryRun, ctx)) ?? {}
       context[nodeId] = output
       nodeStatus[nodeId] = 'success'
       updateStep.run(
@@ -252,6 +276,17 @@ async function runExecution(executionId, { publish, payload, dryRun = false } = 
 
   updateExecution.run('completed', new Date().toISOString(), new Date().toISOString(), executionId)
   publishExecution('completed')
+
+  // A run's final output: its output-return node's output if it has one, else the
+  // last node (in execution order) that produced output. Returned so a parent
+  // sub-workflow node can adopt it as that node's own output. The Bull worker and
+  // other callers ignore the return value.
+  const returnId = order.find((id) => nodeById[id]?.type === 'output-return')
+  if (returnId && context[returnId] !== undefined) return context[returnId]
+  for (let i = order.length - 1; i >= 0; i--) {
+    if (context[order[i]] !== undefined) return context[order[i]]
+  }
+  return {}
 }
 
 module.exports = { runExecution, resolveTemplates }

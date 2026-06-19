@@ -41,6 +41,16 @@ db.exec(`
     ON execution_steps (execution_id, node_type);
 `)
 
+// Sub-workflow nodes: a sub-workflow runs another workflow as a step. The child
+// run records which parent execution (parent_execution_id) and which parent node
+// (parent_node_id) spawned it, so GET /api/executions/:id can nest the child's
+// steps under the right step and reconstruct the full call tree. ON DELETE SET
+// NULL so deleting a parent workflow (which cascades its executions) doesn't fail
+// on a child run that still points at one — the child detaches and survives.
+// Added here (idempotent ALTER) so existing databases pick up the columns.
+ensureColumn('executions', 'parent_execution_id', 'TEXT REFERENCES executions(id) ON DELETE SET NULL')
+ensureColumn('executions', 'parent_node_id', 'TEXT')
+
 // Execution replay: trigger_data persists the original trigger payload (webhook
 // body, manual/schedule metadata) as JSON so a past run can be re-run with the
 // identical input; trigger_type records how the run was started

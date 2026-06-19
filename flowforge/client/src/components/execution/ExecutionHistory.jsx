@@ -7,10 +7,28 @@ import { SkeletonRows } from '../Skeleton'
 function parseSteps(rows) {
   return rows.map((r) => ({
     nodeId: r.node_id,
+    type: r.node_type,
     status: r.status,
     output: r.output_json ? JSON.parse(r.output_json) : null,
     error: r.error,
   }))
+}
+
+// Reshape the recursive childExecutions tree from GET /api/executions/:id into a
+// map keyed by the parent step's node id, so StepList can nest each sub-workflow
+// run under the step that spawned it. Recurses for nested sub-workflows.
+function buildChildMap(childExecutions) {
+  const map = {}
+  for (const child of childExecutions || []) {
+    const nodeId = child.execution.parent_node_id
+    if (!nodeId) continue
+    ;(map[nodeId] ||= []).push({
+      execution: child.execution,
+      steps: parseSteps(child.steps),
+      childExecutionsByNode: buildChildMap(child.childExecutions),
+    })
+  }
+  return map
 }
 
 function formatDuration(execution) {
@@ -109,8 +127,12 @@ export default function ExecutionHistory({ workflowId, nodes, autoOpenId }) {
     setError(null)
     setPendingReplay(null)
     try {
-      const { execution, steps } = await apiFetch(`/api/executions/${executionId}`)
-      setSelected({ execution, steps: parseSteps(steps) })
+      const { execution, steps, childExecutions } = await apiFetch(`/api/executions/${executionId}`)
+      setSelected({
+        execution,
+        steps: parseSteps(steps),
+        childExecutionsByNode: buildChildMap(childExecutions),
+      })
     } catch (err) {
       setError(err.message)
     }
@@ -171,7 +193,11 @@ export default function ExecutionHistory({ workflowId, nodes, autoOpenId }) {
             onConfirm={handleReplay}
           />
         )}
-        <StepList steps={selected.steps} nodes={nodes} />
+        <StepList
+          steps={selected.steps}
+          nodes={nodes}
+          childExecutionsByNode={selected.childExecutionsByNode}
+        />
       </div>
     )
   }

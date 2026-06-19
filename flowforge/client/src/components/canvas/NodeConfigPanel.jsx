@@ -1,4 +1,6 @@
+import { useEffect, useState } from 'react'
 import cronstrue from 'cronstrue'
+import { apiFetch } from '../../services/api'
 
 const OPERATORS = [
   { value: 'equals', label: 'equals' },
@@ -25,7 +27,131 @@ function describeCron(expr) {
   }
 }
 
-export default function NodeConfigPanel({ node, onChange, onClose, onDelete }) {
+// Node count of a workflow from its stored graph_json, for the dropdown preview.
+function countNodes(graphJson) {
+  try {
+    const g = JSON.parse(graphJson)
+    return Array.isArray(g.nodes) ? g.nodes.length : 0
+  } catch {
+    return 0
+  }
+}
+
+// Searchable picker for the sub-workflow node's target. Lists the workspace's
+// deployed workflows (a workflow must be deployed to be callable), excluding the
+// current one to avoid the obvious self-reference, and previews each one's node
+// count. Selecting a workflow stores its id (what the runner uses) and name (for
+// the canvas label) on the node config.
+function SubWorkflowConfig({ workspaceId, currentWorkflowId, config, onPick }) {
+  const [workflows, setWorkflows] = useState(null) // null = loading
+  const [error, setError] = useState(null)
+  const [query, setQuery] = useState('')
+
+  useEffect(() => {
+    if (!workspaceId) {
+      setWorkflows([])
+      return
+    }
+    let cancelled = false
+    setWorkflows(null)
+    setError(null)
+    apiFetch(`/api/workspaces/${workspaceId}/workflows`)
+      .then(({ workflows: list }) => {
+        if (cancelled) return
+        const deployed = (list || [])
+          .filter((w) => w.status === 'deployed' && w.id !== currentWorkflowId)
+          .map((w) => ({ id: w.id, name: w.name, nodeCount: countNodes(w.graph_json) }))
+        setWorkflows(deployed)
+      })
+      .catch((err) => {
+        if (!cancelled) setError(err.message)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [workspaceId, currentWorkflowId])
+
+  const selected = workflows?.find((w) => w.id === config.workflowId)
+  const q = query.trim().toLowerCase()
+  const filtered = (workflows || []).filter((w) => w.name.toLowerCase().includes(q))
+
+  return (
+    <div className="subworkflow-config">
+      <span className="config-panel__field-label">Workflow to run</span>
+
+      {selected ? (
+        <div className="subworkflow-config__selected">
+          <span className="subworkflow-config__selected-name">{selected.name}</span>
+          <span className="subworkflow-config__count">{selected.nodeCount} nodes</span>
+        </div>
+      ) : config.workflowId ? (
+        <p className="subworkflow-config__missing">
+          The selected workflow is no longer available (deleted or undeployed). Pick another.
+        </p>
+      ) : (
+        <p className="config-panel__hint">No workflow selected yet — pick one below.</p>
+      )}
+
+      {error && <p className="exec-panel__error">{error}</p>}
+
+      {workflows === null && !error && (
+        <p className="config-panel__hint">Loading workflows…</p>
+      )}
+
+      {workflows !== null && workflows.length === 0 && !error && (
+        <p className="config-panel__hint">
+          No other deployed workflows in this workspace. Deploy a workflow to call it here.
+        </p>
+      )}
+
+      {workflows !== null && workflows.length > 0 && (
+        <>
+          <input
+            className="subworkflow-config__search"
+            type="search"
+            value={query}
+            placeholder="Search workflows…"
+            onChange={(e) => setQuery(e.target.value)}
+          />
+          <ul className="subworkflow-config__list">
+            {filtered.map((w) => (
+              <li key={w.id}>
+                <button
+                  type="button"
+                  className={`subworkflow-config__option${
+                    w.id === config.workflowId ? ' subworkflow-config__option--selected' : ''
+                  }`}
+                  onClick={() => onPick(w)}
+                >
+                  <span className="subworkflow-config__option-name">{w.name}</span>
+                  <span className="subworkflow-config__count">{w.nodeCount} nodes</span>
+                </button>
+              </li>
+            ))}
+            {filtered.length === 0 && (
+              <li className="config-panel__hint">No workflows match “{query}”.</li>
+            )}
+          </ul>
+        </>
+      )}
+
+      <p className="config-panel__hint">
+        The parent passes this node’s input as the sub-workflow’s trigger data and
+        waits for it to finish; its output is available as{' '}
+        <code>{'{{' + 'node-id.field}}'}</code>.
+      </p>
+    </div>
+  )
+}
+
+export default function NodeConfigPanel({
+  node,
+  onChange,
+  onClose,
+  onDelete,
+  workspaceId,
+  currentWorkflowId,
+}) {
   if (!node) return null
 
   const config = node.data.config || {}
@@ -314,6 +440,27 @@ export default function NodeConfigPanel({ node, onChange, onClose, onDelete }) {
               onChange={(e) => setConfig('message', e.target.value)}
             />
           </label>
+        )
+      case 'sub-workflow':
+        return (
+          <SubWorkflowConfig
+            workspaceId={workspaceId}
+            currentWorkflowId={currentWorkflowId}
+            config={config}
+            onPick={(wf) =>
+              onChange(node.id, {
+                config: { ...config, workflowId: wf.id, workflowName: wf.name },
+              })
+            }
+          />
+        )
+      case 'output-return':
+        return (
+          <p className="config-panel__hint">
+            Marks what this workflow returns. Its incoming data becomes the workflow’s
+            final output — and, when this workflow is called by a sub-workflow node,
+            that node’s output.
+          </p>
         )
       default:
         return <p className="config-panel__hint">No configuration for this node type.</p>

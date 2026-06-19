@@ -49,7 +49,9 @@ src/
 │       ├── condition.js
 │       ├── llmPrompt.js
 │       ├── classify.js
-│       └── extract.js
+│       ├── extract.js
+│       ├── outputReturn.js          # marks a workflow's return value
+│       └── subWorkflow.js           # runs another workflow as a step
 ├── socket/
 │   ├── index.js                    # Socket.io server init, JWT auth middleware
 │   └── handlers.js                 # join, leave, node-change, edge-change, cursor-move
@@ -363,6 +365,45 @@ care about `isDryRun` if it has an external side effect.
 The execution row is marked `trigger_type = 'dry-run'` (`triggered_by` stays the
 user FK), which the history UI flags with a "Test" badge. Replaying a dry-run
 stays a dry-run, and dry-run failures don't raise a bell notification.
+
+---
+
+## Sub-workflow nodes
+
+A `sub-workflow` node runs another deployed workflow as a single step, so a
+workflow becomes a reusable building block (define "send alert" once, call it
+from many workflows). Runner: `nodeRunners/subWorkflow.js`; the companion
+`output-return` node (`nodeRunners/outputReturn.js`) marks what a called workflow
+returns.
+
+- **Invocation** — the node's merged input becomes the sub-workflow's *trigger
+  payload*. The runner runs it **synchronously through `runExecution` directly,
+  not the Bull queue**, and adopts the child's final output as this node's output
+  (available downstream as `{{thisNodeId.field}}`). A dry run propagates down so a
+  parent test run never fires real side effects in the sub-workflow.
+- **Final output** — `runExecution` returns the output of the workflow's
+  `output-return` node if it has one, else the last node (in execution order) that
+  produced output. The Bull worker and other callers ignore this return value.
+- **Child executions** — each call inserts a child `executions` row tagged
+  `trigger_type = 'sub-workflow'` with `parent_execution_id` + `parent_node_id`
+  (idempotent ALTER migration in `config/database.js`, `ON DELETE SET NULL` so
+  deleting a parent run doesn't orphan-block the child). The child writes its own
+  `execution_steps`. `GET /api/executions/:id` returns
+  `{ execution, steps, childExecutions }`, where `childExecutions` is the nested
+  call tree (recursive `{ execution, steps, childExecutions }`).
+- **Cycle guard** — the engine threads the call stack of workflow ids through
+  `ctx.ancestorWorkflowIds`; the runner rejects a target already on the stack (a
+  direct self-call or an indirect P→C→P loop) with "Circular workflow reference
+  detected" *before* creating any child row. A sub-workflow node also gets a
+  single attempt (no retry-with-backoff) so an inner failure doesn't re-run the
+  whole nested tree and duplicate its side effects.
+- **Guards** — the target must exist, be `status = 'deployed'`, and live in the
+  caller's workspace (which keeps the whole call tree inside one workspace, so the
+  route's single membership check on the root execution covers it). Tests:
+  `__tests__/subWorkflow.test.js`.
+
+The engine passes a fourth `ctx` argument to runners only sub-workflow uses today;
+all other runners keep the `runner(config, input, isDryRun)` signature.
 
 ---
 
