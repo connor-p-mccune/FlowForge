@@ -8,6 +8,8 @@ export default function CanvasToolbar({
   onSuggest,
   onGenerate,
   onToggleWebhooks,
+  onToggleCommentMode,
+  commentMode,
   onDeploy,
   onToggleHistory,
   running,
@@ -58,6 +60,14 @@ export default function CanvasToolbar({
         onClick={onToggleWebhooks}
       >
         Webhooks
+      </button>
+      <button
+        className={`toolbar-btn toolbar-btn--comment${commentMode ? ' toolbar-btn--active' : ''}`}
+        title="Comment mode — click the canvas to leave a comment (or right-click anywhere)"
+        onClick={onToggleCommentMode}
+        aria-pressed={commentMode}
+      >
+        💬 Comment
       </button>
       <span className="canvas-toolbar__divider" />
       <button

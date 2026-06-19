@@ -49,6 +49,7 @@ app.use('/api', require('./routes/webhooks'))
 app.use('/api', require('./routes/ai'))
 app.use('/api', require('./routes/analytics'))
 app.use('/api', require('./routes/notifications'))
+app.use('/api', require('./routes/comments'))
 
 const { initSocket } = require('./socket')
 const io = initSocket(server)
