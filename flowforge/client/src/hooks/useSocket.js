@@ -9,6 +9,9 @@ const EVENT_MAP = {
   'presence': 'onPresence',
   'user-joined': 'onUserJoined',
   'user-left': 'onUserLeft',
+  'comment-added': 'onCommentAdded',
+  'comment-reply-added': 'onCommentReplyAdded',
+  'comment-resolved': 'onCommentResolved',
 }
 
 // Handlers are kept in a ref so callers can pass fresh closures every render

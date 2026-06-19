@@ -24,6 +24,7 @@ import WebhookPanel from './WebhookPanel'
 import HistoryPanel from './HistoryPanel'
 import ExecutionPanel from '../execution/ExecutionPanel'
 import CursorOverlay from '../collaboration/CursorOverlay'
+import CommentsOverlay from '../collaboration/CommentsOverlay'
 import PresenceBar from '../collaboration/PresenceBar'
 import { NODE_DEFS } from './nodeDefs'
 import { nodeTypes } from './nodeTypes'
@@ -37,7 +38,8 @@ function CanvasInner({ workflowId }) {
   const wrapperRef = useRef(null)
   const [nodes, setNodes, onNodesChange] = useNodesState([])
   const [edges, setEdges, onEdgesChange] = useEdgesState([])
-  const { workflow, saveGraph, loading, deploy, applyWorkflow } = useWorkflow(workflowId, setNodes, setEdges)
+  const { workflow, saveGraph, loading, deploy, applyWorkflow, comments, setComments, viewerIsOwner } =
+    useWorkflow(workflowId, setNodes, setEdges)
   const { screenToFlowPosition, getNode, fitView } = useReactFlow()
   const { user } = useAuth()
 
@@ -145,6 +147,15 @@ function CanvasInner({ workflowId }) {
   const dragEmitRef = useRef({}) // nodeId -> last drag emit ts (throttle)
   const cursorEmitRef = useRef(0)
 
+  // Canvas comments (Figma-style). commentMode flips the canvas into placement
+  // mode (crosshair + click-to-comment); draft holds the pending new-comment
+  // position in flow coords while its composer is open; openCommentId is the
+  // thread whose popover is showing. The comment list + viewerIsOwner come from
+  // useWorkflow; live mutations go through the merge helpers below.
+  const [commentMode, setCommentMode] = useState(false)
+  const [draft, setDraft] = useState(null)
+  const [openCommentId, setOpenCommentId] = useState(null)
+
   const handleRemoteNode = useCallback(
     ({ action, node, ts }) => {
       if (!node?.id) return
@@ -189,11 +200,52 @@ function CanvasInner({ workflowId }) {
     setRemoteCursors((prev) => ({ ...prev, [userId]: { x, y, color, ts: Date.now() } }))
   }, [])
 
+  // Live comment merges. All dedupe by id so a sender receiving its own broadcast
+  // echo (io.to(room) includes the sender) stays idempotent with the optimistic
+  // update it already applied from its own HTTP response.
+  const upsertComment = useCallback(
+    (comment) => {
+      if (!comment?.id) return
+      setComments((prev) => (prev.some((c) => c.id === comment.id) ? prev : [...prev, comment]))
+    },
+    [setComments]
+  )
+
+  const addReplyToComment = useCallback(
+    (reply) => {
+      if (!reply?.comment_id) return
+      setComments((prev) =>
+        prev.map((c) =>
+          c.id === reply.comment_id
+            ? {
+                ...c,
+                replies: (c.replies || []).some((r) => r.id === reply.id)
+                  ? c.replies
+                  : [...(c.replies || []), reply],
+              }
+            : c
+        )
+      )
+    },
+    [setComments]
+  )
+
+  const removeComment = useCallback(
+    (commentId) => {
+      setComments((prev) => prev.filter((c) => c.id !== commentId))
+      setOpenCommentId((cur) => (cur === commentId ? null : cur))
+    },
+    [setComments]
+  )
+
   const socket = useSocket(workflowId, {
     onExecUpdate: handleExecUpdate,
     onRemoteNode: handleRemoteNode,
     onRemoteEdge: handleRemoteEdge,
     onRemoteCursor: handleRemoteCursor,
+    onCommentAdded: ({ comment }) => upsertComment(comment),
+    onCommentReplyAdded: ({ reply }) => addReplyToComment(reply),
+    onCommentResolved: ({ commentId }) => removeComment(commentId),
     onPresence: ({ users }) => setRemoteUsers(users),
     onUserJoined: (u) =>
       setRemoteUsers((prev) => (prev.some((x) => x.userId === u.userId) ? prev : [...prev, u])),
@@ -625,8 +677,84 @@ function CanvasInner({ workflowId }) {
     setNodes((nds) => nds.map((n) => (n.selected ? { ...n, selected: false } : n)))
   }, [setNodes])
 
+  const toggleCommentMode = useCallback(() => {
+    setOpenCommentId(null)
+    setCommentMode((on) => {
+      if (on) setDraft(null) // leaving comment mode cancels a pending draft
+      return !on
+    })
+  }, [])
+
+  // Placing a comment: right-click does it anywhere; a left-click does it only in
+  // comment mode. Either way an open thread closes. These fire only on the canvas
+  // background — React Flow never fires pane events for a click on a node.
+  const handlePaneClick = useCallback(
+    (event) => {
+      setOpenCommentId(null)
+      setDraft(commentMode ? screenToFlowPosition({ x: event.clientX, y: event.clientY }) : null)
+    },
+    [commentMode, screenToFlowPosition]
+  )
+
+  const handlePaneContextMenu = useCallback(
+    (event) => {
+      event.preventDefault()
+      setOpenCommentId(null)
+      setDraft(screenToFlowPosition({ x: event.clientX, y: event.clientY }))
+    },
+    [screenToFlowPosition]
+  )
+
+  const handleSubmitComment = useCallback(
+    async (content) => {
+      if (!draft) return
+      try {
+        const { comment } = await apiFetch(`/api/workflows/${workflowId}/comments`, {
+          method: 'POST',
+          body: { x: draft.x, y: draft.y, content },
+        })
+        upsertComment(comment) // dedupes against the live echo
+        setDraft(null)
+      } catch (err) {
+        toastRef.current.error(`Couldn’t post comment: ${err.message}`)
+      }
+    },
+    [draft, workflowId, upsertComment]
+  )
+
+  const handleReply = useCallback(
+    async (commentId, content) => {
+      try {
+        const { reply } = await apiFetch(`/api/comments/${commentId}/replies`, {
+          method: 'POST',
+          body: { content },
+        })
+        addReplyToComment(reply)
+      } catch (err) {
+        toastRef.current.error(`Couldn’t post reply: ${err.message}`)
+      }
+    },
+    [addReplyToComment]
+  )
+
+  const handleResolve = useCallback(
+    async (commentId) => {
+      try {
+        await apiFetch(`/api/comments/${commentId}/resolve`, { method: 'PUT' })
+        removeComment(commentId)
+      } catch (err) {
+        toastRef.current.error(`Couldn’t resolve this comment: ${err.message}`)
+      }
+    },
+    [removeComment]
+  )
+
   return (
-    <div className="canvas-wrapper" ref={wrapperRef} onMouseMove={handleMouseMove}>
+    <div
+      className={`canvas-wrapper${commentMode ? ' canvas-wrapper--commenting' : ''}`}
+      ref={wrapperRef}
+      onMouseMove={handleMouseMove}
+    >
       <CanvasToolbar
         onAddNode={handleAddNode}
         onRun={handleRun}
@@ -635,6 +763,8 @@ function CanvasInner({ workflowId }) {
         onSuggest={handleSuggest}
         onGenerate={handleOpenGenerate}
         onToggleWebhooks={handleToggleWebhooks}
+        onToggleCommentMode={toggleCommentMode}
+        commentMode={commentMode}
         onDeploy={handleDeploy}
         onToggleHistory={handleToggleHistory}
         running={execution?.status === 'running' || execution?.status === 'pending'}
@@ -656,6 +786,8 @@ function CanvasInner({ workflowId }) {
         onNodesChange={handleNodesChange}
         onEdgesChange={handleEdgesChange}
         onConnect={onConnect}
+        onPaneClick={handlePaneClick}
+        onPaneContextMenu={handlePaneContextMenu}
         nodeTypes={nodeTypes}
         fitView
       >
@@ -681,6 +813,19 @@ function CanvasInner({ workflowId }) {
         </div>
       )}
       <CursorOverlay cursors={remoteCursors} users={remoteUsers} />
+      <CommentsOverlay
+        comments={comments}
+        draft={draft}
+        openCommentId={openCommentId}
+        viewerIsOwner={viewerIsOwner}
+        currentUser={user}
+        onOpenThread={setOpenCommentId}
+        onCloseThread={() => setOpenCommentId(null)}
+        onSubmitDraft={handleSubmitComment}
+        onCancelDraft={() => setDraft(null)}
+        onReply={handleReply}
+        onResolve={handleResolve}
+      />
       <NodeConfigPanel
         node={selectedNode}
         onChange={handleNodeDataChange}

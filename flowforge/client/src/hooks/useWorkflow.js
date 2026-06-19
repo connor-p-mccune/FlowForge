@@ -20,6 +20,12 @@ export function serializeGraph(nodes, edges) {
 export function useWorkflow(workflowId, setNodes, setEdges) {
   const [workflow, setWorkflow] = useState(null)
   const [loading, setLoading] = useState(true)
+  // Canvas comments (Figma-style). Loaded here when the workflow opens; the canvas
+  // owns live mutations (socket events + optimistic add/reply/resolve) through
+  // setComments. viewerIsOwner gates showing the Resolve action on threads the
+  // viewer didn't author — the server still enforces the permission.
+  const [comments, setComments] = useState([])
+  const [viewerIsOwner, setViewerIsOwner] = useState(false)
   const saveTimer = useRef(null)
   const lastSavedRef = useRef(null)
   const lastSaveErrorAt = useRef(0)
@@ -68,6 +74,30 @@ export function useWorkflow(workflowId, setNodes, setEdges) {
       if (saveTimer.current) clearTimeout(saveTimer.current)
     }
   }, [workflowId, applyWorkflow])
+
+  // Load existing (unresolved) comments when the workflow opens. Kept separate
+  // from the graph load so a comments hiccup never blocks the canvas, and reset
+  // when switching workflows.
+  useEffect(() => {
+    if (!workflowId) {
+      setComments([])
+      setViewerIsOwner(false)
+      return
+    }
+    let cancelled = false
+    apiFetch(`/api/workflows/${workflowId}/comments`)
+      .then(({ comments: loaded, viewerIsOwner: owner }) => {
+        if (cancelled) return
+        setComments(loaded || [])
+        setViewerIsOwner(Boolean(owner))
+      })
+      .catch((err) => {
+        if (!cancelled) console.error('Failed to load comments:', err)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [workflowId])
 
   const saveGraph = useCallback(
     (nodes, edges) => {
@@ -121,5 +151,5 @@ export function useWorkflow(workflowId, setNodes, setEdges) {
     [workflowId]
   )
 
-  return { workflow, saveGraph, loading, deploy, applyWorkflow }
+  return { workflow, saveGraph, loading, deploy, applyWorkflow, comments, setComments, viewerIsOwner }
 }
