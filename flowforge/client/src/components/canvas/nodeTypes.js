@@ -6,6 +6,7 @@ import ActionNode from './nodes/ActionNode'
 import ConditionNode from './nodes/ConditionNode'
 import AINode from './nodes/AINode'
 import OutputNode from './nodes/OutputNode'
+import SubWorkflowNode from './nodes/SubWorkflowNode'
 
 export const nodeTypes = {
   'trigger-manual': TriggerNode,
@@ -22,4 +23,5 @@ export const nodeTypes = {
   'ai-extract': AINode,
   'output-log': OutputNode,
   'output-return': OutputNode,
+  'sub-workflow': SubWorkflowNode,
 }

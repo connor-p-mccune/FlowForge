@@ -15,6 +15,28 @@ function getWorkflowForMember(workflowId, userId) {
   return member ? workflow : null
 }
 
+// Build the nested call tree for an execution: for every sub-workflow run it
+// spawned (rows whose parent_execution_id points back here), a recursive
+// { execution, steps, childExecutions } entry, ordered by when each was created.
+// The tree is finite (the engine rejects cyclic references at run time) but a
+// depth cap guards against a pathologically deep chain. No per-child membership
+// check is needed: a sub-workflow always runs in its parent's workspace (enforced
+// in the sub-workflow runner), so the caller's check on the root execution covers
+// the whole tree.
+function buildChildExecutions(parentExecutionId, depth = 0) {
+  if (depth > 25) return []
+  const children = db.prepare(
+    'SELECT * FROM executions WHERE parent_execution_id = ? ORDER BY rowid'
+  ).all(parentExecutionId)
+  return children.map((execution) => ({
+    execution,
+    steps: db.prepare(
+      'SELECT * FROM execution_steps WHERE execution_id = ? ORDER BY rowid'
+    ).all(execution.id),
+    childExecutions: buildChildExecutions(execution.id, depth + 1),
+  }))
+}
+
 // POST /api/workflows/:id/execute — enqueue a run
 router.post('/workflows/:id/execute', auth, async (req, res) => {
   try {
@@ -106,7 +128,10 @@ router.get('/executions/:id', auth, (req, res) => {
     const steps = db.prepare(
       'SELECT * FROM execution_steps WHERE execution_id = ? ORDER BY rowid'
     ).all(execution.id)
-    res.json({ execution, steps })
+    // Sub-workflow runs spawned by this execution, nested so the UI can trace the
+    // full call tree. Empty for the common case (no sub-workflow nodes).
+    const childExecutions = buildChildExecutions(execution.id)
+    res.json({ execution, steps, childExecutions })
   } catch (err) {
     console.error(err)
     res.status(500).json({ error: 'Internal server error' })

@@ -374,6 +374,26 @@ html, body, #root {
   border-color: #374151;
 }
 
+.node--subworkflow {
+  border-color: #14b8a6;
+  background: #f0fdfa;
+}
+
+.node--subworkflow.node--selected {
+  border-color: #0d9488;
+}
+
+.node__subworkflow-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.node__icon {
+  flex: none;
+  color: #0d9488;
+}
+
 .node__label {
   font-weight: 600;
   color: #1a1a1a;
@@ -750,6 +770,7 @@ html, body, #root {
 .toolbar-btn--condition { border-color: #f59e0b; background: #fffbeb; color: #b45309; }
 .toolbar-btn--ai { border-color: #a855f7; background: #faf5ff; color: #7e22ce; }
 .toolbar-btn--output { border-color: #6b7280; background: #f9fafb; color: #374151; }
+.toolbar-btn--subworkflow { border-color: #14b8a6; background: #f0fdfa; color: #0f766e; }
 
 /* Node config panel */
 .config-panel {
@@ -1222,6 +1243,7 @@ html, body, #root {
 .step {
   display: flex;
   align-items: baseline;
+  flex-wrap: wrap;
   gap: 10px;
   padding: 6px 8px;
   border: 1px solid #f0f0f0;
@@ -1252,6 +1274,128 @@ html, body, #root {
   overflow-x: auto;
   max-height: 120px;
   overflow-y: auto;
+}
+
+/* Nested sub-workflow runs inside a step (History detail call tree) */
+.step__subworkflows {
+  flex-basis: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 6px;
+  /* indent + accent rail so a child run reads as "inside" this step */
+  margin-left: 6px;
+  padding-left: 10px;
+  border-left: 2px solid #99f6e4;
+}
+
+.step__subworkflow-summary {
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #0f766e;
+}
+
+.step__subworkflow-body {
+  margin-top: 6px;
+}
+
+/* Sub-workflow node config: searchable picker of deployable workflows */
+.config-panel__field-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: #555;
+}
+
+.subworkflow-config {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.subworkflow-config__selected {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 10px;
+  border: 1px solid #99f6e4;
+  background: #f0fdfa;
+  border-radius: 6px;
+}
+
+.subworkflow-config__selected-name {
+  font-weight: 600;
+  color: #0f766e;
+}
+
+.subworkflow-config__missing {
+  font-size: 12px;
+  color: #b45309;
+}
+
+.subworkflow-config__search {
+  padding: 7px 9px;
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+  font-size: 13px;
+  font-family: inherit;
+  outline: none;
+}
+
+.subworkflow-config__search:focus {
+  border-color: #4f46e5;
+}
+
+.subworkflow-config__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 220px;
+  overflow-y: auto;
+}
+
+.subworkflow-config__option {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 7px 9px;
+  border: 1px solid #e5e7eb;
+  background: #fff;
+  border-radius: 6px;
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.subworkflow-config__option:hover {
+  border-color: #14b8a6;
+  background: #f0fdfa;
+}
+
+.subworkflow-config__option--selected {
+  border-color: #14b8a6;
+  background: #ccfbf1;
+}
+
+.subworkflow-config__option-name {
+  font-weight: 600;
+  color: #1a1a1a;
+}
+
+.subworkflow-config__count {
+  flex: none;
+  font-size: 11px;
+  color: #0f766e;
+  white-space: nowrap;
 }
 
 /* Execution history */

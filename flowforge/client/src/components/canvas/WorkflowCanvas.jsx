@@ -686,6 +686,8 @@ function CanvasInner({ workflowId }) {
         onChange={handleNodeDataChange}
         onClose={handleClosePanel}
         onDelete={handleDeleteNode}
+        workspaceId={workflow?.workspace_id}
+        currentWorkflowId={workflowId}
       />
       {suggestions !== null && (
         <SuggestionsPanel

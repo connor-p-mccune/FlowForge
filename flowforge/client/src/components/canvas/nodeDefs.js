@@ -66,6 +66,19 @@ export const NODE_DEFS = {
     subtype: 'log',
     config: { message: '' },
   },
+  'output-return': {
+    label: 'Return Output',
+    subtype: 'return',
+    config: {},
+  },
+  // Sub-workflow: runs another deployed workflow as a step. workflowId is the
+  // target (the only field the runner reads); workflowName is denormalized purely
+  // for the canvas label and is refreshed from the live list in the config panel.
+  'sub-workflow': {
+    label: 'Sub-workflow',
+    subtype: 'sub-workflow',
+    config: { workflowId: '', workflowName: '' },
+  },
 }
 
 export const TOOLBAR_BUTTONS = [
@@ -82,4 +95,6 @@ export const TOOLBAR_BUTTONS = [
   { type: 'ai-classify', label: 'Classify', className: 'toolbar-btn--ai' },
   { type: 'ai-extract', label: 'Extract', className: 'toolbar-btn--ai' },
   { type: 'output-log', label: 'Output', className: 'toolbar-btn--output' },
+  { type: 'output-return', label: 'Return', className: 'toolbar-btn--output' },
+  { type: 'sub-workflow', label: 'Sub-workflow', className: 'toolbar-btn--subworkflow' },
 ]
