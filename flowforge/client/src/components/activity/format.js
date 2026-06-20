@@ -61,6 +61,7 @@ export function formatEvent(event) {
   const meta = event.metadata || {}
   switch (event.event_type) {
     case 'workflow.created': return `created workflow ${name}`
+    case 'workflow.updated': return `edited workflow ${name}`
     case 'workflow.deployed':
       return meta.version ? `deployed ${name} (v${meta.version})` : `deployed ${name}`
     case 'workflow.deleted': return `deleted workflow ${name}`

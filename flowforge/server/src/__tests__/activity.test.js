@@ -91,6 +91,49 @@ describe('activity is logged by real actions', () => {
   })
 })
 
+describe('workflow edits log a coalesced workflow.updated event', () => {
+  const updatedEntries = (feed) =>
+    feed.body.activity.filter((e) => e.event_type === 'workflow.updated')
+
+  it('logs workflow.updated on a graph save', async () => {
+    const res = await authed('put', `/api/workflows/${wfId}/graph`, ownerToken)
+      .send({ nodes: [], edges: [] })
+    expect(res.status).toBe(200)
+
+    const feed = await authed('get', `/api/workspaces/${wsId}/activity?category=workflows`, ownerToken)
+    const updated = updatedEntries(feed)
+    expect(updated).toHaveLength(1)
+    expect(updated[0]).toMatchObject({
+      event_type: 'workflow.updated',
+      entity_type: 'workflow',
+      entity_id: wfId,
+      entity_name: 'Webhook Alerter',
+      actor_id: ownerId,
+    })
+  })
+
+  it('coalesces a burst of edits into the one entry', async () => {
+    for (let i = 0; i < 4; i++) {
+      const res = await authed('put', `/api/workflows/${wfId}/graph`, ownerToken)
+        .send({ nodes: [], edges: [] })
+      expect(res.status).toBe(200)
+    }
+    const feed = await authed('get', `/api/workspaces/${wsId}/activity?category=workflows`, ownerToken)
+    expect(updatedEntries(feed)).toHaveLength(1) // still one, not five
+  })
+
+  it('a rename coalesces too and refreshes the entry name', async () => {
+    const res = await authed('put', `/api/workflows/${wfId}`, ownerToken)
+      .send({ name: 'Renamed Flow' })
+    expect(res.status).toBe(200)
+
+    const feed = await authed('get', `/api/workspaces/${wsId}/activity?category=workflows`, ownerToken)
+    const updated = updatedEntries(feed)
+    expect(updated).toHaveLength(1)
+    expect(updated[0].entity_name).toBe('Renamed Flow')
+  })
+})
+
 describe('GET /workspaces/:id/activity — auth & pagination', () => {
   it('requires auth', async () => {
     const res = await request(app).get(`/api/workspaces/${wsId}/activity`)

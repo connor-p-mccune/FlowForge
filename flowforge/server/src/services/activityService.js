@@ -2,7 +2,7 @@
 // of truth read by GET /api/workspaces/:id/activity) and pushes it live over
 // Socket.io to the workspace room — workspace:<id>, which a client joins from the
 // activity page (see socket/handlers.js). Callers: the workflow/workspace routes
-// (create/deploy/delete/restore, member invite/remove) and the execution engine
+// (create/update/deploy/delete/restore, member invite/remove) and the execution engine
 // (run completed/failed). The canvas-comments feature (built in parallel) calls
 // logEvent with 'comment.added' / 'comment.resolved' once its routes exist.
 
@@ -34,11 +34,37 @@ function init(socketIo) {
 //   eventType    e.g. 'workflow.deployed', 'execution.failed', 'member.invited'
 //   entity       { type, id, name, metadata } — all optional; metadata is any
 //                JSON-serialisable object, stored as a JSON string
+//   options      { coalesceWindowMs } — when >0, a repeat of the same
+//                actor+event+entity within that window bumps the existing entry
+//                (and skips the emit) instead of appending a new one
 //
 // Best-effort and self-contained: any failure is logged and swallowed so activity
 // logging can never break the action that triggered it.
-function logEvent(workspaceId, actorId, eventType, entity = {}) {
+function logEvent(workspaceId, actorId, eventType, entity = {}, options = {}) {
   try {
+    // Coalesce a burst of the same event into one feed entry. When
+    // options.coalesceWindowMs is set and this same actor already logged this
+    // event for the same entity within that window, bump the existing row's
+    // timestamp (and refresh its name/metadata) instead of inserting a new row,
+    // and skip the live emit — the entry already streamed in on the first event.
+    // Needs a concrete actor + entity id to key on; otherwise it's a plain insert.
+    if (options.coalesceWindowMs > 0 && actorId != null && entity.id != null) {
+      const since = new Date(Date.now() - options.coalesceWindowMs).toISOString()
+      const recent = db.prepare(
+        `SELECT id FROM activity_events
+          WHERE workspace_id = ? AND actor_id = ? AND event_type = ? AND entity_id = ?
+            AND created_at >= ?
+          ORDER BY created_at DESC, id DESC LIMIT 1`
+      ).get(workspaceId, actorId, eventType, entity.id, since)
+      if (recent) {
+        const bumpMeta = entity.metadata != null ? JSON.stringify(entity.metadata) : null
+        db.prepare(
+          'UPDATE activity_events SET created_at = ?, entity_name = ?, metadata = ? WHERE id = ?'
+        ).run(new Date().toISOString(), entity.name ?? null, bumpMeta, recent.id)
+        return null
+      }
+    }
+
     const id = uuidv4()
     const createdAt = new Date().toISOString()
     const metadataJson = entity.metadata != null ? JSON.stringify(entity.metadata) : null
