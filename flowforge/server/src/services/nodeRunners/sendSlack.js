@@ -1,7 +1,10 @@
+const { safeFetch } = require('../ssrfGuard')
+
 // Posts a message to a Slack incoming webhook.
 // config: { webhookUrl, text } — text supports {{node-id.field}} templates,
 // which the execution engine resolves before this runner is called.
 // isDryRun (test mode): skip the POST and report what would have been sent.
+// webhookUrl is a user-supplied URL, so the POST goes through the SSRF guard.
 module.exports = async function runSendSlack(config, input, isDryRun) {
   const { webhookUrl, text } = config
   if (!webhookUrl) throw new Error('Slack node: webhookUrl is required')
@@ -15,7 +18,7 @@ module.exports = async function runSendSlack(config, input, isDryRun) {
     return { dryRun: true, wouldHaveSent: { channel: webhookUrl, message } }
   }
 
-  const res = await fetch(webhookUrl, {
+  const res = await safeFetch(webhookUrl, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ text: message }),

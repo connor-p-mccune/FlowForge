@@ -31,7 +31,7 @@ function shouldSkip() {
   return false
 }
 
-function makeLimiter({ windowMs, max, message }) {
+function makeLimiter({ windowMs, max, message, keyGenerator }) {
   return rateLimit({
     windowMs,
     limit: max,
@@ -39,6 +39,8 @@ function makeLimiter({ windowMs, max, message }) {
     legacyHeaders: false, // drop deprecated X-RateLimit-* headers
     message: { error: message }, // keep the app-wide { error } JSON shape on 429
     skip: shouldSkip,
+    // Per-route override — the AI limiter keys off the authenticated user, not IP.
+    ...(keyGenerator ? { keyGenerator } : {}),
   })
 }
 
@@ -63,4 +65,16 @@ const webhookLimiter = makeLimiter({
   message: 'Webhook rate limit exceeded. Slow down.',
 })
 
-module.exports = { loginLimiter, registerLimiter, webhookLimiter, shouldSkip }
+// AI endpoints (/api/ai/*) proxy to the Python service and ultimately to a paid
+// LLM API, so an authenticated user hammering them runs up real cost. Keyed off
+// the authenticated user id (these routes sit behind `auth`) rather than IP, so
+// one user behind a shared NAT can't exhaust everyone's budget. Default 30/min,
+// env-tunable via AI_RATE_LIMIT_MAX / AI_RATE_LIMIT_WINDOW_MS.
+const aiLimiter = makeLimiter({
+  windowMs: positiveInt(process.env.AI_RATE_LIMIT_WINDOW_MS, ONE_MIN_MS),
+  max: positiveInt(process.env.AI_RATE_LIMIT_MAX, 30),
+  message: 'AI request rate limit exceeded. Please slow down.',
+  keyGenerator: (req) => req.user?.id || req.ip,
+})
+
+module.exports = { loginLimiter, registerLimiter, webhookLimiter, aiLimiter, shouldSkip }

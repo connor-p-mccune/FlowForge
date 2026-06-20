@@ -23,7 +23,8 @@ Bull worker. The notable trust boundaries and the threats against them:
 | T4 | **Cross-origin / browser attacks** | A malicious site calls the API with a victim's session, or injects content. | **Mitigated** — CORS allow-list, security headers, tokens in `Authorization` (not cookies). |
 | T5 | **SQL injection** | User input reaches a SQL query. | **Mitigated** — all queries use `better-sqlite3` prepared statements. |
 | T6 | **Resource exhaustion / DoS** | Oversized request bodies or enormous graphs. | **Mitigated** — body cap + per-field/array size limits. |
-| T7 | **Server-Side Request Forgery (SSRF)** | The `action-http` node fetches a user-supplied URL server-side, reaching internal services or cloud metadata. | **Known gap — deferred** (see T7 in *Deferred*). |
+| T7 | **Server-Side Request Forgery (SSRF)** | The `action-http` / `action-slack` nodes fetch a user-supplied URL server-side, reaching internal services or cloud metadata. | **Mitigated** — scheme + private/reserved-IP egress guard on both nodes (DNS-rebinding residual noted in *Deferred*). |
+| T8 | **Real-time data exposure / tampering** | An authenticated user joins another workspace's workflow room over Socket.io to read live execution data, comments, and edits, or to inject collaboration events. | **Mitigated** — workflow-room membership check + relay gating. |
 
 ---
 
@@ -57,6 +58,8 @@ inert).
 ### Authentication & passwords (T2)
 
 - Passwords hashed with **bcrypt** (cost factor 10) — `routes/auth.js`.
+- Registration enforces a **minimum password length of 8** (the `validate` schema
+  in `routes/auth.js`), in addition to the existing ≤ 200 cap.
 - Auth via **JWT** (HS256) signed with `JWT_SECRET`, **`expiresIn: '7d'`**.
 - Tokens are sent in the `Authorization: Bearer` header (not cookies), which
   sidesteps CSRF on the API.
@@ -76,9 +79,11 @@ IP-based limits via `express-rate-limit` (`middleware/rateLimit.js`). On exceed:
 | `POST /api/auth/login` | 5 / 15 min / IP | Brute-force / credential stuffing |
 | `POST /api/auth/register` | 5 / 15 min / IP | Signup spam |
 | `POST /api/webhooks/:key` | 60 / min / IP | Webhook abuse / floods |
+| `POST /api/ai/suggest`, `/api/ai/generate` | 30 / min / **user** | LLM cost abuse (keyed off the authenticated user, not IP) |
 
 All limits are env-tunable (`AUTH_RATE_LIMIT_MAX`, `AUTH_RATE_LIMIT_WINDOW_MS`,
-`WEBHOOK_RATE_LIMIT_MAX`, `WEBHOOK_RATE_LIMIT_WINDOW_MS`). In production
+`WEBHOOK_RATE_LIMIT_MAX`, `WEBHOOK_RATE_LIMIT_WINDOW_MS`, `AI_RATE_LIMIT_MAX`,
+`AI_RATE_LIMIT_WINDOW_MS`). In production
 `index.js` sets `trust proxy = 1` so limits key off the real client IP behind
 Railway's proxy (one hop only — `X-Forwarded-For` cannot be spoofed). Tested in
 `server/src/__tests__/rateLimit.test.js`.
@@ -128,6 +133,36 @@ All database access uses `better-sqlite3` **prepared statements** with bound
 parameters. No user input is interpolated into SQL strings anywhere in the
 codebase.
 
+### Server-side request forgery (SSRF) egress guard (T7)
+
+The two node runners that fetch a **user-supplied URL** — `action-http`
+(`nodeRunners/httpRequest.js`) and `action-slack` (`nodeRunners/sendSlack.js`) —
+route the request through `services/ssrfGuard.js`, which:
+
+- restricts the scheme to `http`/`https`;
+- resolves the hostname and **rejects any address in a private, loopback,
+  link-local, CGNAT, or reserved range** (IPv4 and IPv6, including IPv4-mapped and
+  NAT64 forms), so `169.254.169.254` (cloud metadata), `127.0.0.1`,
+  `10/172.16/192.168`, and the internal `redis`/`ai-service` hosts are unreachable;
+- re-runs the check on **every redirect hop**, so a public URL can't 30x-redirect
+  the server onto an internal address.
+
+Enforced in dev/prod; skipped under `NODE_ENV=test` unless `ENABLE_SSRF_GUARD=true`
+(the runner suites hit `127.0.0.1` servers). Tested in `__tests__/ssrfGuard.test.js`.
+A residual DNS-rebinding window remains — see *Deferred*.
+
+### Real-time (Socket.io) authorization (T8)
+
+The Socket.io connection is JWT-authenticated in the handshake, but that only
+proves *who* a socket is. Joining a workflow room (`workflow:<id>`) — which carries
+live execution outputs, graph edits, comments, and presence — is additionally
+gated on **workspace membership** in `socket/handlers.js`, mirroring the REST layer
+(which 404s a non-member on every workflow route). The relay events
+(`node-change`/`edge-change`/`cursor-move`) only fire for a room the socket has
+actually joined, so a socket cannot inject collaboration events into a workflow it
+has no access to. The personal `user:<id>` room is derived from the verified token,
+so a socket can only ever join its own. Tested in `__tests__/socketHandlers.test.js`.
+
 ---
 
 ## Deferred / future work
@@ -162,38 +197,43 @@ key** (`crypto.randomBytes(24).toString('base64url')`) and rate-limited at
   `webhooks` table, verify `HMAC-SHA256(body, secret)` in constant time, and keep
   the current key check as a first factor.
 
-### T7 — SSRF protection on the HTTP node *(known gap)*
+### T7 — SSRF: DNS-rebinding residual + egress allowlist *(partial — decision recorded)*
 
-The `action-http` node (`services/nodeRunners/httpRequest.js`) performs a
-server-side `fetch` to a **user-supplied URL** with no allow/deny list. A user
-can therefore make the server request internal-only addresses — cloud metadata
-(`169.254.169.254`), `localhost`, or the internal `redis` / `ai-service` hosts.
+`action-http` and `action-slack` are now guarded (see *Implemented controls →
+SSRF egress guard*): scheme restriction + private/reserved-IP rejection on the
+resolved address, re-checked per redirect hop. Two hardening steps remain:
 
-- **Suggested mitigation:** resolve the hostname and reject private, loopback,
-  and link-local IP ranges (with DNS-rebinding protection — re-validate the IP
-  actually connected to), restrict to `http`/`https`, and consider an
-  egress allowlist. Optionally route node HTTP through a locked-down proxy.
-- **Interim:** deploy the worker with no network route to internal services it
-  doesn't need.
+- **DNS-rebinding window:** the guard resolves DNS, validates, then `fetch`
+  resolves again — a narrow TOCTOU an attacker-controlled resolver could exploit.
+  Closing it needs connection-level IP pinning (a custom `undici` dispatcher that
+  validates the address actually connected to). `undici` isn't currently a
+  dependency, so this was deferred to avoid adding one for the MVP.
+- **Egress allowlist:** for defence in depth, also deploy the worker with no
+  network route to internal services it doesn't need, and/or front node HTTP with
+  an allowlist proxy.
 
-### Password strength policy
+### Password strength policy *(partial)*
 
-Passwords are length-capped (≤ 200) but have **no minimum length or complexity
-requirement**. Consider a minimum length (e.g. ≥ 8) and a breached-password check
-before launch.
+Registration now enforces a **minimum length of 8** (alongside the ≤ 200 cap).
+Still deferred: a complexity policy and a breached-password (k-anonymity / HIBP)
+check before handling sensitive data.
 
 ### Dependency advisories
 
-`npm audit` currently reports 5 advisories, all in **transitive** dependencies.
-Real exposure is low today, but they should be triaged:
+`npm audit fix` (non-breaking) has been applied to both `server` and `client`,
+bumping the Socket.io transport's `ws` to a patched **8.21.0** — closing the
+reachable memory-exhaustion DoS (GHSA-96hv-2xvq-fx4p). What remains needs
+**breaking** major upgrades and is low real-exposure here:
 
 | Package | Severity | Real exposure here | Fix |
 |---------|----------|--------------------|-----|
-| `nodemailer` | high/mod | Low — the `sendEmail` node is **simulated** (no SMTP wired). Address before enabling real email. | `nodemailer@8` (breaking) |
-| `tar` → `@mapbox/node-pre-gyp` | high | Low — build-time only (better-sqlite3 native build), not a runtime path. | `npm audit fix` (non-breaking) |
-| `uuid` (<11.1.1, via `bull` + direct) | moderate | Not exploitable — we use `uuidv4()` without the `buf` argument. | `uuid@14` (breaking) |
+| `nodemailer` | high | Low — the `sendEmail` node is **simulated** (no SMTP wired). Address before enabling real email. | `nodemailer@8` (breaking) |
+| `tar` → `@mapbox/node-pre-gyp` | high | Low — build-time only (better-sqlite3 native build), not a runtime path. | breaking transitive bump |
+| `uuid` (<11.1.1, via `bull` + `node-cron`) | moderate | Not exploitable — we use `uuidv4()` without the `buf` argument. | `uuid@14` (breaking) |
+| `vitest` / `vite` chain (client) | critical/high | **Dev/test only** — not in the production bundle. | `vitest@3` (breaking) |
 
-Do not run `npm audit fix --force` blindly — the breaking upgrades need testing.
+Do not run `npm audit fix --force` blindly — the breaking upgrades need testing. A
+non-blocking `npm audit` step in CI would catch future drift.
 
 ---
 

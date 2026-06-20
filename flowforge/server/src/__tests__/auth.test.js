@@ -21,11 +21,11 @@ describe('POST /api/auth/register', () => {
   it('returns 409 on duplicate email', async () => {
     await request(app)
       .post('/api/auth/register')
-      .send({ email: 'bob@example.com', password: 'pass', displayName: 'Bob' })
+      .send({ email: 'bob@example.com', password: 'password1', displayName: 'Bob' })
 
     const res = await request(app)
       .post('/api/auth/register')
-      .send({ email: 'bob@example.com', password: 'pass', displayName: 'Bob' })
+      .send({ email: 'bob@example.com', password: 'password1', displayName: 'Bob' })
     expect(res.status).toBe(409)
     expect(res.body.error).toMatch(/already in use/i)
   })
@@ -36,19 +36,27 @@ describe('POST /api/auth/register', () => {
       .send({ email: 'nope@example.com' })
     expect(res.status).toBe(400)
   })
+
+  it('rejects a password shorter than the minimum length', async () => {
+    const res = await request(app)
+      .post('/api/auth/register')
+      .send({ email: 'shortpw@example.com', password: 'short', displayName: 'Shorty' })
+    expect(res.status).toBe(400)
+    expect(res.body.error).toMatch(/at least 8 characters/i)
+  })
 })
 
 describe('POST /api/auth/login', () => {
   beforeAll(async () => {
     await request(app)
       .post('/api/auth/register')
-      .send({ email: 'carol@example.com', password: 'secret', displayName: 'Carol' })
+      .send({ email: 'carol@example.com', password: 'secret12', displayName: 'Carol' })
   })
 
   it('returns token on valid credentials', async () => {
     const res = await request(app)
       .post('/api/auth/login')
-      .send({ email: 'carol@example.com', password: 'secret' })
+      .send({ email: 'carol@example.com', password: 'secret12' })
     expect(res.status).toBe(200)
     expect(res.body.token).toBeDefined()
     expect(res.body.user.email).toBe('carol@example.com')
@@ -76,7 +84,7 @@ describe('GET /api/auth/me', () => {
   beforeAll(async () => {
     const res = await request(app)
       .post('/api/auth/register')
-      .send({ email: 'dave@example.com', password: 'pass', displayName: 'Dave' })
+      .send({ email: 'dave@example.com', password: 'password1', displayName: 'Dave' })
     token = res.body.token
   })
 

@@ -1,6 +1,7 @@
 const express = require('express')
 const auth = require('../middleware/auth')
 const { validate } = require('../middleware/validate')
+const { aiLimiter } = require('../middleware/rateLimit')
 const { callAiService } = require('../services/aiClient')
 
 const router = express.Router()
@@ -9,6 +10,7 @@ const router = express.Router()
 router.post(
   '/ai/suggest',
   auth,
+  aiLimiter,
   validate({
     nodes: { type: 'array', maxItems: 2000 },
     edges: { type: 'array', maxItems: 5000 },
@@ -31,6 +33,7 @@ router.post(
 router.post(
   '/ai/generate',
   auth,
+  aiLimiter,
   validate({ prompt: { required: true, type: 'string', maxLength: 2000 } }),
   async (req, res) => {
     try {

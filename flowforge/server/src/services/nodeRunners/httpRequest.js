@@ -1,3 +1,5 @@
+const { safeFetch } = require('../ssrfGuard')
+
 // isDryRun (test mode): build the request as normal but, instead of sending it,
 // report the method/url/headers/body that would have gone out.
 module.exports = async function runHttpRequest(config, _input, isDryRun) {
@@ -29,7 +31,7 @@ module.exports = async function runHttpRequest(config, _input, isDryRun) {
     }
   }
 
-  const res = await fetch(url, options)
+  const res = await safeFetch(url, options)
   const text = await res.text()
   let data
   try {

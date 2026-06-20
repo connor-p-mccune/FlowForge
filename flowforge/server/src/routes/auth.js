@@ -29,7 +29,7 @@ router.post(
   registerLimiter,
   validate({
     email: { required: true, type: 'string', maxLength: 320, pattern: EMAIL_PATTERN, patternMessage: 'email is invalid' },
-    password: { required: true, type: 'string', maxLength: 200 },
+    password: { required: true, type: 'string', minLength: 8, maxLength: 200 },
     displayName: { required: true, type: 'string', maxLength: 100 },
   }),
   async (req, res) => {
