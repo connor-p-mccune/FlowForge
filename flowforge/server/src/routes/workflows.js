@@ -8,6 +8,12 @@ const activityService = require('../services/activityService')
 
 const router = express.Router()
 
+// Workflow edits (rename + graph saves) collapse into a single "edited" activity
+// entry per actor per workflow within this window, so a sustained editing session
+// doesn't flood the feed. Env-tunable (ms) like the other limits; default 5 min.
+const COALESCE_RAW = Number(process.env.ACTIVITY_EDIT_COALESCE_MS)
+const EDIT_COALESCE_MS = Number.isFinite(COALESCE_RAW) ? COALESCE_RAW : 5 * 60 * 1000
+
 // Pull a workflow's `trigger-schedule` node (if any) out of its stored graph, so
 // deploy/archive can activate or clear its cron schedule. Tolerates bad JSON.
 function findScheduleNode(workflow) {
@@ -185,6 +191,9 @@ router.put('/workflows/:id', auth, validate(workflowRule), (req, res) => {
     ).run(name, description ?? workflow.description, now, req.params.id)
 
     const updated = db.prepare('SELECT * FROM workflows WHERE id = ?').get(req.params.id)
+    activityService.logEvent(workflow.workspace_id, req.user.id, 'workflow.updated', {
+      type: 'workflow', id: workflow.id, name: updated.name,
+    }, { coalesceWindowMs: EDIT_COALESCE_MS })
     res.json({ workflow: updated })
   } catch (err) {
     console.error(err)
@@ -206,6 +215,9 @@ router.put('/workflows/:id/graph', auth, validate(graphRule), (req, res) => {
       'UPDATE workflows SET graph_json = ?, updated_at = ? WHERE id = ?'
     ).run(graphJson, now, req.params.id)
 
+    activityService.logEvent(workflow.workspace_id, req.user.id, 'workflow.updated', {
+      type: 'workflow', id: workflow.id, name: workflow.name,
+    }, { coalesceWindowMs: EDIT_COALESCE_MS })
     res.json({ ok: true })
   } catch (err) {
     console.error(err)

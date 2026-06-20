@@ -19,6 +19,8 @@ describe('formatEvent', () => {
   it('maps each event type to a human-readable phrase', () => {
     expect(formatEvent({ ...base, event_type: 'workflow.created' }))
       .toBe('created workflow Webhook Alerter')
+    expect(formatEvent({ ...base, event_type: 'workflow.updated' }))
+      .toBe('edited workflow Webhook Alerter')
     expect(formatEvent({ ...base, event_type: 'workflow.deployed', metadata: { version: 2 } }))
       .toBe('deployed Webhook Alerter (v2)')
     expect(formatEvent({ ...base, event_type: 'workflow.deployed' }))
