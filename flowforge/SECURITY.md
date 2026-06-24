@@ -5,7 +5,7 @@ Security Hardening** pass: the threat model, the controls that are implemented,
 and the items that are deliberately deferred (with rationale).
 
 It is a living document — update it whenever a control is added, changed, or a
-deferred item is picked up. The Phase 7 checklist lives in the root `CLAUDE.md`.
+deferred item is picked up.
 
 ---
 

@@ -32,7 +32,7 @@ services:
     environment:
       - OPENAI_API_KEY=${OPENAI_API_KEY}
     # Internal-only: reached by the server over the compose network. Not
-    # published to the host (see ai-service/CLAUDE.md).
+    # published to the host.
 
   redis:
     image: redis:7-alpine

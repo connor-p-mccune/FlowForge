@@ -66,9 +66,6 @@ a Bull job → the worker runs the execution engine → each step publishes an
 `exec-update` over Redis pub/sub → the Socket.io layer relays it to everyone in
 the workflow's room → the UI updates live.
 
-Per-service docs live in `client/CLAUDE.md`, `server/CLAUDE.md`, and
-`ai-service/CLAUDE.md`. Project-wide conventions are in the root `CLAUDE.md`.
-
 ---
 
 ## Prerequisites

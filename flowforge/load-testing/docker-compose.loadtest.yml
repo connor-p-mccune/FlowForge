@@ -4,7 +4,7 @@
 #   docker compose -f docker-compose.yml -f load-testing/docker-compose.loadtest.yml up -d --build
 #
 # It changes nothing about the app's behavior except the rate-limit knobs, which
-# are the documented test-only exception (see LOAD_TESTING.md / Phase 9 in CLAUDE.md).
+# are the documented test-only exception (see LOAD_TESTING.md).
 services:
   server:
     environment:
