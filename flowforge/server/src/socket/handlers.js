@@ -116,7 +116,11 @@ module.exports = function registerHandlers(socket, io) {
     })
   })
 
-  socket.on('disconnect', () => {
+  // Use `disconnecting`, not `disconnect`: Socket.io empties socket.rooms before
+  // the `disconnect` event fires, so a `disconnect` handler would see no rooms and
+  // never tell collaborators the user left. At `disconnecting` the rooms are still
+  // joined, so we can broadcast user-left to each workflow room the socket is in.
+  socket.on('disconnecting', () => {
     for (const room of socket.rooms) {
       if (room.startsWith('workflow:')) {
         socket.to(room).emit('user-left', { userId: socket.userId })

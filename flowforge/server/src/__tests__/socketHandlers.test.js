@@ -130,3 +130,23 @@ describe('socket relay events require room membership', () => {
     expect(roomEmits.some((e) => e.event === 'remote-edge')).toBe(false)
   })
 })
+
+describe('socket disconnect announces departure', () => {
+  // Regression: must listen on `disconnecting`, not `disconnect`. Socket.io clears
+  // socket.rooms before `disconnect` fires, so a `disconnect` handler would iterate
+  // an empty set and never broadcast user-left. `disconnecting` still has the rooms.
+  it('broadcasts user-left to each joined workflow room on disconnecting', () => {
+    const { socket, handlers, roomEmits } = makeSocket(memberId)
+    registerHandlers(socket, makeIo())
+
+    expect(typeof handlers['disconnecting']).toBe('function')
+    expect(handlers['disconnect']).toBeUndefined()
+
+    handlers['join-workflow']({ workflowId })
+    handlers['disconnecting']()
+
+    expect(roomEmits).toContainEqual(
+      expect.objectContaining({ room, event: 'user-left', payload: { userId: memberId } })
+    )
+  })
+})
