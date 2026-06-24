@@ -83,6 +83,22 @@ module.exports = function registerHandlers(socket, io) {
     socket.to(`workflow:${workflowId}`).emit('user-left', { userId: socket.userId })
   })
 
+  // The workspace activity feed (workspace:<id> room) streams activity-event to
+  // members viewing it. Membership is verified before joining so a socket can't
+  // subscribe to a workspace the user isn't in. There's no presence/relay here —
+  // the server only pushes (activityService emits); clients never emit into it.
+  socket.on('join-workspace', ({ workspaceId }) => {
+    if (!workspaceId || !socket.userId) return
+    const member = db.prepare(
+      'SELECT 1 FROM workspace_members WHERE workspace_id = ? AND user_id = ?'
+    ).get(workspaceId, socket.userId)
+    if (member) socket.join(`workspace:${workspaceId}`)
+  })
+
+  socket.on('leave-workspace', ({ workspaceId }) => {
+    socket.leave(`workspace:${workspaceId}`)
+  })
+
   // socket.to(room) emits to everyone in the room EXCEPT the sender, so the
   // originating client keeps its own optimistic update and never echoes itself.
   // Each relay first confirms the sender is actually in the room (see inRoom).

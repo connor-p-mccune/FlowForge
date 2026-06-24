@@ -163,3 +163,28 @@ CREATE INDEX IF NOT EXISTS idx_canvas_comments_workflow
   ON canvas_comments (workflow_id, is_resolved);
 CREATE INDEX IF NOT EXISTS idx_canvas_comment_replies_comment
   ON canvas_comment_replies (comment_id, created_at);
+
+-- Workspace activity feed: an append-only, chronological log of significant
+-- actions in a workspace (workflow created/deployed/deleted/restored, execution
+-- completed/failed, member invited/removed, comment added/resolved). Written by
+-- services/activityService.js, which also emits each row live over Socket.io to
+-- the workspace room (workspace:<id>). entity_name is denormalised so a row still
+-- reads correctly after its entity is deleted; metadata is optional JSON. actor_id
+-- is nullable + ON DELETE SET NULL (system/webhook actors, or a since-deleted user)
+-- and LEFT JOINed to users for the display name. created_at is an ISO-8601 string
+-- so the GET ?before=<ts> keyset cursor compares lexicographically.
+CREATE TABLE IF NOT EXISTS activity_events (
+  id           TEXT PRIMARY KEY,
+  workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+  actor_id     TEXT REFERENCES users(id) ON DELETE SET NULL,
+  event_type   TEXT NOT NULL,
+  entity_type  TEXT,
+  entity_id    TEXT,
+  entity_name  TEXT,
+  metadata     TEXT,
+  created_at   TEXT NOT NULL
+);
+
+-- The feed pages newest-first within a workspace (and filters by event_type prefix).
+CREATE INDEX IF NOT EXISTS idx_activity_workspace_created
+  ON activity_events (workspace_id, created_at DESC, id DESC);

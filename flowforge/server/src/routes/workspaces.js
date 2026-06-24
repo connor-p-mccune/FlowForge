@@ -4,6 +4,7 @@ const db = require('../config/database')
 const auth = require('../middleware/auth')
 const { validate, EMAIL_PATTERN } = require('../middleware/validate')
 const { createNotification } = require('../services/notificationService')
+const activityService = require('../services/activityService')
 
 const router = express.Router()
 
@@ -122,6 +123,10 @@ router.post(
         link: '/',
       })
 
+      activityService.logEvent(req.params.id, req.user.id, 'member.invited', {
+        type: 'member', id: invitee.id, name: invitee.display_name,
+      })
+
       res.status(201).json({ member: { userId: invitee.id, role: 'member' } })
     } catch (err) {
       console.error(err)
@@ -129,6 +134,48 @@ router.post(
     }
   }
 )
+
+// DELETE /api/workspaces/:id/members/:userId — remove a member. Owner-only, and
+// the workspace must keep at least one owner (you can't remove the last owner).
+router.delete('/workspaces/:id/members/:userId', auth, (req, res) => {
+  try {
+    const requester = db.prepare(
+      "SELECT 1 FROM workspace_members WHERE workspace_id = ? AND user_id = ? AND role = 'owner'"
+    ).get(req.params.id, req.user.id)
+    if (!requester) return res.status(403).json({ error: 'Not authorized' })
+
+    const target = db.prepare(
+      `SELECT m.role, u.id AS user_id, u.display_name
+         FROM workspace_members m
+         JOIN users u ON u.id = m.user_id
+        WHERE m.workspace_id = ? AND m.user_id = ?`
+    ).get(req.params.id, req.params.userId)
+    if (!target) return res.status(404).json({ error: 'Member not found' })
+
+    // Don't strand the workspace: refuse to remove its last owner.
+    if (target.role === 'owner') {
+      const { owners } = db.prepare(
+        "SELECT COUNT(*) AS owners FROM workspace_members WHERE workspace_id = ? AND role = 'owner'"
+      ).get(req.params.id)
+      if (owners <= 1) {
+        return res.status(400).json({ error: 'Cannot remove the last owner' })
+      }
+    }
+
+    db.prepare(
+      'DELETE FROM workspace_members WHERE workspace_id = ? AND user_id = ?'
+    ).run(req.params.id, req.params.userId)
+
+    activityService.logEvent(req.params.id, req.user.id, 'member.removed', {
+      type: 'member', id: target.user_id, name: target.display_name,
+    })
+
+    res.status(204).end()
+  } catch (err) {
+    console.error(err)
+    res.status(500).json({ error: 'Internal server error' })
+  }
+})
 
 router.delete('/workspaces/:id', auth, (req, res) => {
   try {

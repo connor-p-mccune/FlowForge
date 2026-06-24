@@ -4,6 +4,7 @@ import RegisterPage from './components/auth/RegisterPage'
 import ProtectedRoute from './components/auth/ProtectedRoute'
 import DashboardPage from './components/dashboard/DashboardPage'
 import AnalyticsPage from './components/analytics/AnalyticsPage'
+import ActivityPage from './components/activity/ActivityPage'
 import SettingsPage from './components/settings/SettingsPage'
 import WorkflowCanvas from './components/canvas/WorkflowCanvas'
 import AppShell from './components/layout/AppShell'
@@ -28,6 +29,15 @@ function AnalyticsRoute() {
   )
 }
 
+function ActivityRoute() {
+  const { wsId } = useParams()
+  return (
+    <AppShell>
+      <ActivityPage workspaceId={wsId} />
+    </AppShell>
+  )
+}
+
 export default function App() {
   return (
     <ErrorBoundary>
@@ -40,6 +50,7 @@ export default function App() {
               <Route path="/" element={<DashboardPage />} />
               <Route path="/workflow/:id" element={<WorkflowPage />} />
               <Route path="/workspace/:wsId/analytics" element={<AnalyticsRoute />} />
+              <Route path="/workspace/:wsId/activity" element={<ActivityRoute />} />
               <Route
                 path="/settings"
                 element={
