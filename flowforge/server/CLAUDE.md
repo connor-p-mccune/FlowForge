@@ -213,12 +213,14 @@ the app-wide `{ error }` JSON shape and emits `RateLimit-*` headers.
 | `loginLimiter`   | `POST /api/auth/login`                   | 5 / 15 min / IP     | Brute-force / credential stuffing |
 | `registerLimiter`| `POST /api/auth/register`                | 5 / 15 min / IP     | Signup spam                   |
 | `webhookLimiter` | `POST /api/webhooks/:key` (public trigger)| 60 / min / IP      | Abuse / accidental floods     |
+| `aiLimiter`      | `POST /api/ai/suggest`, `/api/ai/generate` | 30 / min / user   | LLM cost abuse (keyed off the authed user) |
 
 Login and register each have their own independent counter (not a shared pool).
 
 **Tuning** — every limit is env-overridable:
 `AUTH_RATE_LIMIT_MAX`, `AUTH_RATE_LIMIT_WINDOW_MS`,
-`WEBHOOK_RATE_LIMIT_MAX`, `WEBHOOK_RATE_LIMIT_WINDOW_MS`.
+`WEBHOOK_RATE_LIMIT_MAX`, `WEBHOOK_RATE_LIMIT_WINDOW_MS`,
+`AI_RATE_LIMIT_MAX`, `AI_RATE_LIMIT_WINDOW_MS`.
 
 **Proxies** — `index.js` sets `trust proxy = 1` in production so limits key off
 the real client IP behind Railway's proxy (scoped to one hop, so `X-Forwarded-For`
@@ -267,6 +269,12 @@ function initSocket(httpServer) {
 // socket/handlers.js
 module.exports = function registerHandlers(socket, io) {
   socket.on('join-workflow', ({ workflowId }) => {
+    // Authorization: refuse rooms whose workspace the user isn't a member of
+    // (mirrors the REST membership check). Without this any authenticated socket
+    // could read another workspace's live exec data / comments / edits.
+    if (!canAccessWorkflow(workflowId, socket.userId)) {
+      return socket.emit('workflow-access-denied', { workflowId })
+    }
     socket.join(`workflow:${workflowId}`)
     // Tell the new user who else is here
     socket.emit('presence', { users: getActiveUsers(io, workflowId) })
@@ -302,6 +310,12 @@ module.exports = function registerHandlers(socket, io) {
   })
 }
 ```
+
+**Authorization:** `join-workflow` checks workspace membership before joining the
+room (`canAccessWorkflow`), and the relay handlers (`node-change`/`edge-change`/
+`cursor-move`) only forward to a room the socket has actually joined — so a socket
+can neither read from nor inject into a workflow it has no access to. The personal
+`user:<id>` room is derived from the verified JWT. Tests: `__tests__/socketHandlers.test.js`.
 
 To emit from the execution worker (different process), use the Redis pub/sub adapter:
 ```javascript

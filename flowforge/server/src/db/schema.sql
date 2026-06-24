@@ -129,3 +129,37 @@ CREATE TABLE IF NOT EXISTS notifications (
 -- The bell lists a user's newest notifications and counts unread ones.
 CREATE INDEX IF NOT EXISTS idx_notifications_user_created
   ON notifications (user_id, created_at);
+
+-- Figma-style canvas comments. A comment is a discussion thread pinned to a
+-- flow-coordinate (x, y) on a workflow's canvas; its messages live in
+-- canvas_comment_replies (the first reply is the opening comment, written in the
+-- same transaction that creates the comment). Delivered live over Socket.io to the
+-- workflow room (workflow:<id>) as comment-added / comment-reply-added /
+-- comment-resolved — these rows are the source of truth, so a missed live emit
+-- self-heals on the next GET. Resolved threads (is_resolved = 1) are hidden from
+-- the canvas. author_id is nullable + LEFT JOINed for display so deleting a user
+-- doesn't drop their comments.
+CREATE TABLE IF NOT EXISTS canvas_comments (
+  id          TEXT PRIMARY KEY,
+  workflow_id TEXT NOT NULL REFERENCES workflows(id) ON DELETE CASCADE,
+  author_id   TEXT REFERENCES users(id),
+  x           REAL NOT NULL,
+  y           REAL NOT NULL,
+  is_resolved INTEGER NOT NULL DEFAULT 0,
+  created_at  TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS canvas_comment_replies (
+  id         TEXT PRIMARY KEY,
+  comment_id TEXT NOT NULL REFERENCES canvas_comments(id) ON DELETE CASCADE,
+  author_id  TEXT REFERENCES users(id),
+  content    TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- GET /comments lists a workflow's unresolved threads; replies are fetched per
+-- thread in created order.
+CREATE INDEX IF NOT EXISTS idx_canvas_comments_workflow
+  ON canvas_comments (workflow_id, is_resolved);
+CREATE INDEX IF NOT EXISTS idx_canvas_comment_replies_comment
+  ON canvas_comment_replies (comment_id, created_at);
