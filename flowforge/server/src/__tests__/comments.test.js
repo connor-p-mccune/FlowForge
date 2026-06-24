@@ -143,4 +143,32 @@ describe('canvas comments', () => {
     ).toBe(404)
     expect((await authed(request(app).put(`/api/comments/does-not-exist/resolve`), ownerToken)).status).toBe(404)
   })
+
+  // Cross-feature wiring: a comment add/resolve must surface in the workspace
+  // activity feed (the feed ships a Comments filter that's otherwise dead).
+  it('records comment.added / comment.resolved in the workspace activity feed', async () => {
+    const activityFor = (eventType, entityId) =>
+      db
+        .prepare(
+          `SELECT * FROM activity_events
+            WHERE workspace_id = ? AND event_type = ? AND entity_id = ?`
+        )
+        .get(workspaceId, eventType, entityId)
+
+    const created = await postComment(ownerToken, { x: 7, y: 8, content: 'log me to the feed' })
+    const commentId = created.body.comment.id
+
+    const added = activityFor('comment.added', commentId)
+    expect(added).toMatchObject({
+      actor_id: ownerId,
+      entity_type: 'comment',
+      entity_name: 'Commented Flow',
+    })
+    expect(JSON.parse(added.metadata)).toMatchObject({ workflowId })
+
+    await authed(request(app).put(`/api/comments/${commentId}/resolve`), ownerToken)
+    const resolved = activityFor('comment.resolved', commentId)
+    expect(resolved).toMatchObject({ actor_id: ownerId, entity_type: 'comment' })
+    expect(JSON.parse(resolved.metadata)).toMatchObject({ workflowId })
+  })
 })

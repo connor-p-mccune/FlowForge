@@ -2,6 +2,7 @@ const express = require('express')
 const { v4: uuidv4 } = require('uuid')
 const db = require('../config/database')
 const auth = require('../middleware/auth')
+const activityService = require('../services/activityService')
 
 const router = express.Router()
 
@@ -25,7 +26,7 @@ function commentContext(commentId) {
   const comment = db.prepare('SELECT * FROM canvas_comments WHERE id = ?').get(commentId)
   if (!comment) return null
   const workflow = db
-    .prepare('SELECT id, workspace_id FROM workflows WHERE id = ?')
+    .prepare('SELECT id, workspace_id, name FROM workflows WHERE id = ?')
     .get(comment.workflow_id)
   return workflow ? { comment, workflow } : null
 }
@@ -133,7 +134,7 @@ router.get('/workflows/:id/comments', auth, (req, res) => {
 router.post('/workflows/:id/comments', auth, (req, res) => {
   try {
     const workflow = db
-      .prepare('SELECT id, workspace_id FROM workflows WHERE id = ?')
+      .prepare('SELECT id, workspace_id, name FROM workflows WHERE id = ?')
       .get(req.params.id)
     if (!workflow) return res.status(404).json({ error: 'Workflow not found' })
     if (!membership(workflow.workspace_id, req.user.id)) {
@@ -163,6 +164,13 @@ router.post('/workflows/:id/comments', auth, (req, res) => {
     const comment = loadComment(commentId)
     const io = req.app.get('io')
     if (io) io.to(`workflow:${workflow.id}`).emit('comment-added', { comment })
+    // Surface the comment in the workspace activity feed (best-effort). entity_name
+    // is the workflow so the row reads "commented on <workflow>"; metadata.workflowId
+    // lets the feed link back to the canvas.
+    activityService.logEvent(workflow.workspace_id, req.user.id, 'comment.added', {
+      type: 'comment', id: commentId, name: workflow.name,
+      metadata: { workflowId: workflow.id },
+    })
     res.status(201).json({ comment })
   } catch (err) {
     console.error(err)
@@ -219,6 +227,10 @@ router.put('/comments/:id/resolve', auth, (req, res) => {
     db.prepare('UPDATE canvas_comments SET is_resolved = 1 WHERE id = ?').run(ctx.comment.id)
     const io = req.app.get('io')
     if (io) io.to(`workflow:${ctx.workflow.id}`).emit('comment-resolved', { commentId: ctx.comment.id })
+    activityService.logEvent(ctx.workflow.workspace_id, req.user.id, 'comment.resolved', {
+      type: 'comment', id: ctx.comment.id, name: ctx.workflow.name,
+      metadata: { workflowId: ctx.workflow.id },
+    })
     res.json({ commentId: ctx.comment.id })
   } catch (err) {
     console.error(err)
