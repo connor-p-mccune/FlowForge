@@ -28,6 +28,7 @@ import CommentsOverlay from '../collaboration/CommentsOverlay'
 import PresenceBar from '../collaboration/PresenceBar'
 import { NODE_DEFS } from './nodeDefs'
 import { nodeTypes } from './nodeTypes'
+import { layoutGraph } from '../../utils/autoLayout'
 
 // Shown for any generation failure — the model may have returned something
 // unusable, the prompt may be too vague, or the AI service may be unreachable.
@@ -517,6 +518,21 @@ function CanvasInner({ workflowId }) {
 
   const handleAddNode = useCallback((type) => addNodeOfType(type), [addNodeOfType])
 
+  // Tidy: re-arrange the graph into clean layers (layered DAG layout), then
+  // broadcast every node that actually moved so collaborators see the same
+  // arrangement, and frame the result.
+  const handleAutoLayout = useCallback(() => {
+    if (nodes.length === 0) return
+    const laidOut = layoutGraph(nodes, edges)
+    const moved = laidOut.filter((n, i) => {
+      const prev = nodes[i].position
+      return prev.x !== n.position.x || prev.y !== n.position.y
+    })
+    setNodes(laidOut)
+    for (const n of moved) emitNodeChange('update', { id: n.id, position: n.position })
+    setTimeout(() => fitView({ padding: 0.2, duration: 300 }), 60)
+  }, [nodes, edges, setNodes, emitNodeChange, fitView])
+
   const handleSuggest = useCallback(async () => {
     setWebhookOpen(false)
     setHistoryOpen(false)
@@ -765,6 +781,7 @@ function CanvasInner({ workflowId }) {
         onToggleWebhooks={handleToggleWebhooks}
         onToggleCommentMode={toggleCommentMode}
         commentMode={commentMode}
+        onAutoLayout={handleAutoLayout}
         onDeploy={handleDeploy}
         onToggleHistory={handleToggleHistory}
         running={execution?.status === 'running' || execution?.status === 'pending'}

@@ -4255,3 +4255,6 @@ html, body, #root {
 @media (prefers-reduced-motion: reduce) {
   .palette__backdrop, .palette { animation: none; }
 }
+
+/* Tidy (auto-layout) toolbar button */
+.toolbar-btn--tidy { border-color: #8b5cf6; background: #f5f3ff; color: #6d28d9; }

@@ -10,6 +10,7 @@ export default function CanvasToolbar({
   onToggleWebhooks,
   onToggleCommentMode,
   commentMode,
+  onAutoLayout,
   onDeploy,
   onToggleHistory,
   running,
@@ -68,6 +69,13 @@ export default function CanvasToolbar({
         aria-pressed={commentMode}
       >
         💬 Comment
+      </button>
+      <button
+        className="toolbar-btn toolbar-btn--tidy"
+        title="Tidy — auto-arrange nodes into clean layers"
+        onClick={onAutoLayout}
+      >
+        ▦ Tidy
       </button>
       <span className="canvas-toolbar__divider" />
       <button
