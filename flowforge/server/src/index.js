@@ -52,6 +52,10 @@ app.use('/api', require('./routes/notifications'))
 app.use('/api', require('./routes/comments'))
 app.use('/api', require('./routes/activity'))
 app.use('/api', require('./routes/secrets'))
+app.use('/api', require('./routes/tokens'))
+// Public, token-authenticated REST API for external integrations. Mounted
+// before the /api 404 catch-all below like everything else.
+app.use('/api/v1', require('./routes/publicApi'))
 
 const { initSocket } = require('./socket')
 const io = initSocket(server)

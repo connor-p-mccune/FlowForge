@@ -77,4 +77,15 @@ const aiLimiter = makeLimiter({
   keyGenerator: (req) => req.user?.id || req.ip,
 })
 
-module.exports = { loginLimiter, registerLimiter, webhookLimiter, aiLimiter, shouldSkip }
+// Public API (/api/v1) — keyed off the presented bearer credential rather than
+// IP so each token gets its own budget (and one busy integration behind a NAT
+// can't starve another). Falls back to IP for unauthenticated probes. Default
+// 120/min, env-tunable like the rest.
+const publicApiLimiter = makeLimiter({
+  windowMs: positiveInt(process.env.PUBLIC_API_RATE_LIMIT_WINDOW_MS, ONE_MIN_MS),
+  max: positiveInt(process.env.PUBLIC_API_RATE_LIMIT_MAX, 120),
+  message: 'API rate limit exceeded. Slow down.',
+  keyGenerator: (req) => req.headers.authorization || req.ip,
+})
+
+module.exports = { loginLimiter, registerLimiter, webhookLimiter, aiLimiter, publicApiLimiter, shouldSkip }

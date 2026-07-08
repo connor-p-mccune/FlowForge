@@ -164,6 +164,29 @@ CREATE INDEX IF NOT EXISTS idx_canvas_comments_workflow
 CREATE INDEX IF NOT EXISTS idx_canvas_comment_replies_comment
   ON canvas_comment_replies (comment_id, created_at);
 
+-- Personal access tokens for the public REST API (/api/v1). Only a SHA-256
+-- hash of the token is stored — the full value (ffp_<40 hex>) is shown once at
+-- creation and cannot be recovered. token_prefix keeps the first characters
+-- for display so a user can tell tokens apart. scopes is a JSON array
+-- (subset of ["trigger","read"]); revocation keeps the row (revoked_at set)
+-- as an audit trail rather than deleting it.
+CREATE TABLE IF NOT EXISTS api_tokens (
+  id           TEXT PRIMARY KEY,
+  user_id      TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  name         TEXT NOT NULL,
+  token_prefix TEXT NOT NULL,
+  token_hash   TEXT UNIQUE NOT NULL,
+  scopes       TEXT NOT NULL,
+  last_used_at TEXT,
+  expires_at   TEXT,
+  revoked_at   TEXT,
+  created_at   TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- The settings page lists a user's tokens newest-first.
+CREATE INDEX IF NOT EXISTS idx_api_tokens_user_created
+  ON api_tokens (user_id, created_at);
+
 -- Workspace secrets: named credentials (API keys, tokens) referenced from node
 -- configs as {{secrets.NAME}}. value_encrypted is AES-256-GCM ciphertext (see
 -- services/secretVault.js) — plaintext never touches the database, and the API
