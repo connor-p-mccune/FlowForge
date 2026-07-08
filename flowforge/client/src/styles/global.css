@@ -3971,3 +3971,118 @@ html, body, #root {
   border: 1px dashed #ddd;
   border-radius: 12px;
 }
+
+/* API tokens (settings section) */
+.tokens__reveal {
+  margin-top: 12px;
+  padding: 14px 16px;
+  background: #f0fdf4;
+  border: 1px solid #bbf7d0;
+  border-radius: 10px;
+}
+
+.tokens__reveal-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: #166534;
+}
+
+.tokens__reveal-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+  flex-wrap: wrap;
+}
+
+.tokens__reveal-value {
+  flex: 1;
+  min-width: 240px;
+  padding: 8px 10px;
+  background: #fff;
+  border: 1px solid #d1fae5;
+  border-radius: 8px;
+  font-size: 12px;
+  word-break: break-all;
+  user-select: all;
+}
+
+.tokens__scopes {
+  border: 1px solid #e5e5e5;
+  border-radius: 8px;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.tokens__scopes-legend {
+  font-size: 12px;
+  font-weight: 600;
+  color: #555;
+  padding: 0 4px;
+}
+
+.tokens__scope {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.tokens__scope-label { font-weight: 600; color: #333; }
+.tokens__scope-hint { color: #999; font-size: 12px; }
+
+.tokens__list {
+  list-style: none;
+  margin-top: 16px;
+  border-top: 1px solid #f0f0f0;
+}
+
+.tokens__item {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 12px 0;
+  border-bottom: 1px solid #f0f0f0;
+  flex-wrap: wrap;
+}
+
+.tokens__item-main {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 220px;
+}
+
+.tokens__name { font-size: 13px; font-weight: 700; color: #1a1a1a; }
+
+.tokens__prefix {
+  font-size: 12px;
+  color: #777;
+  background: #f5f5f5;
+  border-radius: 4px;
+  padding: 1px 6px;
+}
+
+.tokens__badge {
+  font-size: 11px;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 999px;
+}
+
+.tokens__badge--active { background: #dcfce7; color: #166534; }
+.tokens__badge--revoked { background: #fee2e2; color: #b42318; }
+
+.tokens__item-meta {
+  display: flex;
+  gap: 12px;
+  flex: 1;
+  font-size: 12px;
+  color: #999;
+  flex-wrap: wrap;
+}
+
+.tokens__revoke { margin-left: auto; }

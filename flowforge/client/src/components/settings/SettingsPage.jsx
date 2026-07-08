@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { apiFetch } from '../../services/api'
 import TwoFactorSetup from './TwoFactorSetup'
+import ApiTokensSection from './ApiTokensSection'
 
 // Account settings. For now this is the home of the Security section, where a
 // user enables or disables TOTP two-factor authentication. The live 2FA status
@@ -192,6 +193,8 @@ export default function SettingsPage() {
           </div>
         )}
       </section>
+
+      <ApiTokensSection />
 
       {showSetup && <TwoFactorSetup onClose={closeSetup} onCompleted={completeSetup} />}
     </div>
