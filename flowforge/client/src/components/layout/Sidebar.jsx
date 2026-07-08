@@ -21,6 +21,7 @@ export default function Sidebar({ open = false, onNavigate }) {
   const { id: currentWorkflowId, wsId: routeWorkspaceId } = useParams()
   const onAnalytics = location.pathname.endsWith('/analytics')
   const onActivity = location.pathname.endsWith('/activity')
+  const onSecrets = location.pathname.endsWith('/secrets')
 
   const [workspaces, setWorkspaces] = useState([])
   const [activeWorkspaceId, setActiveWorkspaceId] = useState(null)
@@ -98,9 +99,10 @@ export default function Sidebar({ open = false, onNavigate }) {
 
   function handleSelectWorkspace(id) {
     setActiveWorkspaceId(id)
-    // Keep the analytics/activity view in sync when switching workspaces.
+    // Keep the analytics/activity/secrets view in sync when switching workspaces.
     if (onAnalytics) navigate(`/workspace/${id}/analytics`)
     else if (onActivity) navigate(`/workspace/${id}/activity`)
+    else if (onSecrets) navigate(`/workspace/${id}/secrets`)
   }
 
   async function handleCreateWorkspace(e) {
@@ -274,6 +276,14 @@ export default function Sidebar({ open = false, onNavigate }) {
             onClick={() => { navigate(`/workspace/${activeWorkspaceId}/activity`); onNavigate?.() }}
           >
             <span aria-hidden="true">📜</span> Activity
+          </button>
+        )}
+        {activeWorkspaceId && (
+          <button
+            className={`sidebar__nav-link${onSecrets ? ' sidebar__nav-link--active' : ''}`}
+            onClick={() => { navigate(`/workspace/${activeWorkspaceId}/secrets`); onNavigate?.() }}
+          >
+            <span aria-hidden="true">🔑</span> Secrets
           </button>
         )}
       </div>

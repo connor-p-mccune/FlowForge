@@ -249,6 +249,11 @@ export default function NodeConfigPanel({
                 onChange={(e) => setConfig('body', e.target.value)}
               />
             </label>
+            <p className="config-panel__hint">
+              Need an API key? Store it once in the workspace’s Secrets page and
+              reference it here as <code>{'{{secrets.NAME}}'}</code> — it stays out
+              of the graph and is masked in run logs.
+            </p>
           </>
         )
       case 'action-delay':
