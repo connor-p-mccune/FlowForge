@@ -25,6 +25,8 @@ Bull worker. The notable trust boundaries and the threats against them:
 | T6 | **Resource exhaustion / DoS** | Oversized request bodies or enormous graphs. | **Mitigated** — body cap + per-field/array size limits. |
 | T7 | **Server-Side Request Forgery (SSRF)** | The `action-http` / `action-slack` nodes fetch a user-supplied URL server-side, reaching internal services or cloud metadata. | **Mitigated** — scheme + private/reserved-IP egress guard on both nodes (DNS-rebinding residual noted in *Deferred*). |
 | T8 | **Real-time data exposure / tampering** | An authenticated user joins another workspace's workflow room over Socket.io to read live execution data, comments, and edits, or to inject collaboration events. | **Mitigated** — workflow-room membership check + relay gating. |
+| T9 | **Credential theft from stored workflows** | API keys pasted into node configs land in `graph_json`, execution step logs, and exports — one database leak exposes every integration. | **Mitigated** — encrypted workspace secrets + log redaction (see below). |
+| T10 | **API token compromise** | A personal access token for the public `/api/v1` API leaks (CI logs, dotfiles) and is replayed. | **Mitigated** — hash-only storage, scopes, expiry, revocation, per-token rate limit. |
 
 ---
 
@@ -80,6 +82,7 @@ IP-based limits via `express-rate-limit` (`middleware/rateLimit.js`). On exceed:
 | `POST /api/auth/register` | 5 / 15 min / IP | Signup spam |
 | `POST /api/webhooks/:key` | 60 / min / IP | Webhook abuse / floods |
 | `POST /api/ai/suggest`, `/api/ai/generate` | 30 / min / **user** | LLM cost abuse (keyed off the authenticated user, not IP) |
+| `/api/v1/*` (public API) | 120 / min / **token** | Runaway integrations (keyed off the presented bearer credential) |
 
 All limits are env-tunable (`AUTH_RATE_LIMIT_MAX`, `AUTH_RATE_LIMIT_WINDOW_MS`,
 `WEBHOOK_RATE_LIMIT_MAX`, `WEBHOOK_RATE_LIMIT_WINDOW_MS`, `AI_RATE_LIMIT_MAX`,
@@ -150,6 +153,42 @@ route the request through `services/ssrfGuard.js`, which:
 Enforced in dev/prod; skipped under `NODE_ENV=test` unless `ENABLE_SSRF_GUARD=true`
 (the runner suites hit `127.0.0.1` servers). Tested in `__tests__/ssrfGuard.test.js`.
 A residual DNS-rebinding window remains — see *Deferred*.
+
+### Encrypted workspace secrets (T9)
+
+Workspace secrets (`routes/secrets.js` + `services/secretVault.js`) give node
+configs a safe place for credentials, referenced as `{{secrets.NAME}}`:
+
+- **AES-256-GCM at rest** — values are encrypted before insert (key derived via
+  scrypt from `SECRETS_ENCRYPTION_KEY`, falling back to `JWT_SECRET`); GCM's
+  auth tag makes tampered rows fail closed instead of decrypting to garbage.
+- **Write-only API** — list endpoints return names + metadata; a value can be
+  rotated or deleted but never read back. Writes are workspace-owner-only.
+- **Run-log redaction** — the execution engine decrypts just-in-time, resolves
+  templates through a scope that never enters the shared node context, and
+  scrubs the plaintext (and its JSON-escaped form) from persisted step
+  input/output, published Socket.io events, and error messages. Downstream
+  nodes still receive real values in memory.
+
+Tested in `__tests__/secretVault.test.js` and `__tests__/secrets.test.js`
+(including an end-to-end engine leak check).
+
+### Personal access tokens & public API (T10)
+
+The public `/api/v1` surface (`routes/publicApi.js`) authenticates with
+personal access tokens (`services/apiTokens.js`, `middleware/tokenAuth.js`):
+
+- **Hash-only storage** — only the SHA-256 of the token is persisted; the full
+  value appears once, at mint time. A display prefix identifies tokens in the UI.
+- **Scopes** (`trigger`, `read`), optional **expiry** (1–365 days), and
+  **revocation** (row kept as an audit trail, `last_used_at` stamped per use).
+- **Credential isolation** — session JWTs are rejected on `/api/v1` and API
+  tokens on the session API, so an automation token can never reach account
+  endpoints (password, 2FA), and vice versa.
+- **Authorization parity** — a token acts as its owner; every route re-checks
+  workspace membership, and missing/forbidden both read as 404.
+
+Tested in `__tests__/apiTokens.test.js`.
 
 ### Real-time (Socket.io) authorization (T8)
 

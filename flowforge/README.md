@@ -22,13 +22,23 @@ order while streaming live progress back to every collaborator on the canvas.
 
 ## Features
 
-- **Drag-and-drop canvas** — build workflows visually with React Flow.
-- **Rich node library** — manual & webhook triggers; HTTP request, delay, email,
-  Slack, and transform actions; branching conditions; AI prompt / classify /
-  extract nodes; and log outputs.
+- **Drag-and-drop canvas** — build workflows visually with React Flow, with
+  one-click **auto-layout** ("Tidy") that arranges the graph into clean layers.
+- **Rich node library** — manual, webhook & schedule triggers; HTTP request,
+  delay, email, Slack, and transform actions; branching conditions; AI prompt /
+  classify / extract nodes; log outputs; **sub-workflows** (call a workflow as a
+  step) and **for-each** (fan a workflow out over a list).
 - **Execution engine** — parses the graph into a DAG, runs nodes in topological
   order, resolves `{{node-id.field}}` templates between steps, retries failures
   with backoff, and records every step.
+- **Encrypted secrets** — store API keys once per workspace (AES-256-GCM at
+  rest), reference them as `{{secrets.NAME}}`, and they're masked in run logs.
+  Values are write-only: rotate or delete, never read back.
+- **Public REST API** — trigger workflows and poll runs from CI or scripts via
+  `/api/v1`, authenticated with scoped, expiring personal access tokens (hash-only
+  storage). See [docs/API.md](./docs/API.md).
+- **Command palette** — `Ctrl/⌘-K` fuzzy-jumps to any workflow, page, or action
+  across every workspace.
 - **Live execution streaming** — step-by-step status updates pushed to the UI
   over WebSockets as a run progresses.
 - **Real-time collaboration** — multiple people edit the same workflow at once
@@ -110,6 +120,7 @@ Copy `.env.example` to `.env` before running. **Never commit `.env`.**
 | `OPENAI_API_KEY`  | yes\*    | OpenAI key for AI suggestions & AI nodes               |
 | `VITE_API_URL`    | yes      | Browser-facing server URL (baked into the client build)|
 | `AI_SERVICE_URL`  | no       | Server → AI service URL (defaults to the compose host) |
+| `SECRETS_ENCRYPTION_KEY` | no | Dedicated key material for workspace-secret encryption (falls back to `JWT_SECRET`) |
 
 \* The app runs without it, but any AI node or the Suggest button will error
 until a valid key is set.
@@ -139,6 +150,12 @@ SMTP_USER=        SMTP_PASS=         EMAIL_FROM=flowforge@example.com
 5. **Run** with the ▶ button and watch steps stream into the execution panel.
 6. **Webhooks:** open the Webhooks panel to mint a public trigger URL.
 7. **Collaborate:** share the workflow URL — edits, cursors, and runs sync live.
+8. **Secrets:** store API keys under the workspace's Secrets page and reference
+   them anywhere as `{{secrets.NAME}}` — they stay encrypted and out of run logs.
+9. **Automate externally:** mint an API token in Settings and trigger runs from
+   scripts via `POST /api/v1/workflows/:id/trigger` ([docs](./docs/API.md)).
+10. **Navigate fast:** press `Ctrl/⌘-K` for the command palette, and use ▦ Tidy
+    to auto-arrange a messy canvas.
 
 ---
 
@@ -213,6 +230,7 @@ flowforge/
 ├── client/        React + Vite frontend (served by nginx in prod)
 ├── server/        Express API, Socket.io, Bull worker, SQLite
 ├── ai-service/    Flask microservice for LLM-backed features
+├── docs/          API reference (public REST API)
 ├── docker-compose.yml
 ├── .env.example
 ├── .env.production.example
