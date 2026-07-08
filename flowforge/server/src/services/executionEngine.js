@@ -21,6 +21,7 @@ const runners = {
   'output-log': require('./nodeRunners/outputLog'),
   'output-return': require('./nodeRunners/outputReturn'),
   'sub-workflow': require('./nodeRunners/subWorkflow'),
+  'for-each': require('./nodeRunners/forEach'),
 }
 
 const MAX_ATTEMPTS = parseInt(process.env.EXEC_MAX_ATTEMPTS || '3')
@@ -159,11 +160,13 @@ function defaultPublish(payload) {
 
 async function runWithRetries(node, config, input, isDryRun, ctx) {
   const runner = getRunner(node.type)
-  // A sub-workflow node runs an entire nested execution that already retries its
-  // own nodes. Retrying it here would re-run the whole sub-workflow on any inner
-  // failure — duplicate side effects and duplicate child execution rows — so it
-  // gets a single attempt; everything else keeps the standard retry-with-backoff.
-  const maxAttempts = node.type === 'sub-workflow' ? 1 : MAX_ATTEMPTS
+  // Sub-workflow and for-each nodes run entire nested executions that already
+  // retry their own nodes. Retrying them here would re-run whole sub-workflows
+  // on any inner failure — duplicate side effects and duplicate child execution
+  // rows — so they get a single attempt; everything else keeps the standard
+  // retry-with-backoff.
+  const nested = node.type === 'sub-workflow' || node.type === 'for-each'
+  const maxAttempts = nested ? 1 : MAX_ATTEMPTS
   for (let attempt = 1; ; attempt++) {
     try {
       return await runner(config, input, isDryRun, ctx)

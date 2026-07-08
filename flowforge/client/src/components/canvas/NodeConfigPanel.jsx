@@ -459,6 +459,45 @@ export default function NodeConfigPanel({
             }
           />
         )
+      case 'for-each':
+        return (
+          <>
+            <label className="config-panel__field">
+              <span>Items (array — supports {'{{node-id.field}}'})</span>
+              <textarea
+                rows={3}
+                value={config.items || ''}
+                placeholder={'{{node-id.users}}  or  ["a", "b", "c"]'}
+                onChange={(e) => setConfig('items', e.target.value)}
+              />
+            </label>
+            <SubWorkflowConfig
+              workspaceId={workspaceId}
+              currentWorkflowId={currentWorkflowId}
+              config={config}
+              onPick={(wf) =>
+                onChange(node.id, {
+                  config: { ...config, workflowId: wf.id, workflowName: wf.name },
+                })
+              }
+            />
+            <label className="config-panel__checkbox">
+              <input
+                type="checkbox"
+                checked={Boolean(config.continueOnError)}
+                onChange={(e) => setConfig('continueOnError', e.target.checked)}
+              />
+              <span>Continue on error — record failed items and keep going</span>
+            </label>
+            <p className="config-panel__hint">
+              Runs the workflow once per item (sequentially, max 100). Each run
+              receives <code>{'{{trigger-id.item}}'}</code>,{' '}
+              <code>{'{{trigger-id.index}}'}</code>, and{' '}
+              <code>{'{{trigger-id.total}}'}</code>; results aggregate as{' '}
+              <code>{'{{' + node.id + '.results}}'}</code>.
+            </p>
+          </>
+        )
       case 'output-return':
         return (
           <p className="config-panel__hint">

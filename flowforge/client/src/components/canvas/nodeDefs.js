@@ -79,6 +79,14 @@ export const NODE_DEFS = {
     subtype: 'sub-workflow',
     config: { workflowId: '', workflowName: '' },
   },
+  // For-each: runs a deployed workflow once per item of a list. items is a
+  // template resolving to an array (or literal JSON); each iteration receives
+  // { item, index, total } as its trigger payload.
+  'for-each': {
+    label: 'For Each',
+    subtype: 'for-each',
+    config: { items: '', workflowId: '', workflowName: '', continueOnError: false },
+  },
 }
 
 export const TOOLBAR_BUTTONS = [
@@ -97,4 +105,5 @@ export const TOOLBAR_BUTTONS = [
   { type: 'output-log', label: 'Output', className: 'toolbar-btn--output' },
   { type: 'output-return', label: 'Return', className: 'toolbar-btn--output' },
   { type: 'sub-workflow', label: 'Sub-workflow', className: 'toolbar-btn--subworkflow' },
+  { type: 'for-each', label: 'For Each', className: 'toolbar-btn--foreach' },
 ]

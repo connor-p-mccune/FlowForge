@@ -7,6 +7,7 @@ import ConditionNode from './nodes/ConditionNode'
 import AINode from './nodes/AINode'
 import OutputNode from './nodes/OutputNode'
 import SubWorkflowNode from './nodes/SubWorkflowNode'
+import ForEachNode from './nodes/ForEachNode'
 
 export const nodeTypes = {
   'trigger-manual': TriggerNode,
@@ -24,4 +25,5 @@ export const nodeTypes = {
   'output-log': OutputNode,
   'output-return': OutputNode,
   'sub-workflow': SubWorkflowNode,
+  'for-each': ForEachNode,
 }
