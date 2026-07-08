@@ -51,6 +51,7 @@ app.use('/api', require('./routes/analytics'))
 app.use('/api', require('./routes/notifications'))
 app.use('/api', require('./routes/comments'))
 app.use('/api', require('./routes/activity'))
+app.use('/api', require('./routes/secrets'))
 
 const { initSocket } = require('./socket')
 const io = initSocket(server)

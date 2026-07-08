@@ -6,6 +6,7 @@
 const { v4: uuidv4 } = require('uuid')
 const db = require('../config/database')
 const { buildAdjacency, topoSort } = require('./dagParser')
+const { decryptSecret } = require('./secretVault')
 
 const runners = {
   'action-http': require('./nodeRunners/httpRequest'),
@@ -91,6 +92,63 @@ function resolveTriggerPayload(payload, triggerData) {
   return {}
 }
 
+// Decrypt a workspace's secrets into a plain { NAME: value } map for template
+// resolution. A row that fails to decrypt (rotated key, corrupted value) is
+// skipped with a log line rather than failing the run — its references then
+// resolve like any other missing placeholder.
+function loadWorkspaceSecrets(workspaceId) {
+  const rows = db.prepare(
+    'SELECT name, value_encrypted FROM workspace_secrets WHERE workspace_id = ?'
+  ).all(workspaceId)
+  const secrets = {}
+  for (const row of rows) {
+    try {
+      secrets[row.name] = decryptSecret(row.value_encrypted)
+    } catch (err) {
+      console.error(`Skipping secret "${row.name}": ${err.message}`)
+    }
+  }
+  return secrets
+}
+
+const REDACTED = '••••••'
+
+// Build a scrubber that masks every secret value inside a string. Applied to
+// everything that leaves engine memory — persisted step input/output JSON,
+// published step events, and error messages — so a secret used by a node (or
+// echoed back by an API it called) never lands in the database or the UI, while
+// downstream nodes still receive the real value via the in-memory context.
+// Values shorter than 4 chars are left alone: masking e.g. "1" would corrupt
+// unrelated output far more than it protects.
+function buildRedactor(secretValues) {
+  const values = new Set()
+  for (const v of secretValues) {
+    if (typeof v !== 'string' || v.length < 4) continue
+    values.add(v)
+    // Secrets containing quotes/backslashes appear JSON-escaped inside the
+    // serialized step rows — scrub that form too.
+    const escaped = JSON.stringify(v).slice(1, -1)
+    if (escaped !== v) values.add(escaped)
+  }
+  if (values.size === 0) return (str) => str
+  return (str) => {
+    if (typeof str !== 'string') return str
+    let out = str
+    for (const v of values) out = out.split(v).join(REDACTED)
+    return out
+  }
+}
+
+// Deep-copy a JSON-ish value with every string passed through the redactor.
+function redactDeep(value, redact) {
+  if (typeof value === 'string') return redact(value)
+  if (Array.isArray(value)) return value.map((v) => redactDeep(v, redact))
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(Object.entries(value).map(([k, v]) => [k, redactDeep(v, redact)]))
+  }
+  return value
+}
+
 function defaultPublish(payload) {
   // Lazy require so engine unit tests never touch Redis
   const redis = require('../config/redis')
@@ -140,6 +198,12 @@ async function runExecution(
   // sub-workflow nodes (via ctx) so they can reject a target already on the stack
   // — a cycle — before recursing into it.
   const callStack = [...ancestorWorkflowIds, workflowId]
+
+  // Workspace secrets, decrypted just for this run. Node configs reference them
+  // as {{secrets.NAME}}; the map lives only in engine memory, and the redactor
+  // scrubs the plaintext from everything persisted or published below.
+  const secrets = loadWorkspaceSecrets(workflow.workspace_id)
+  const redact = buildRedactor(Object.values(secrets))
   const { nodes = [], edges = [] } = JSON.parse(workflow.graph_json)
   const nodeById = Object.fromEntries(nodes.map((n) => [n.id, n]))
 
@@ -154,9 +218,10 @@ async function runExecution(
   }
 
   function failExecution(message) {
+    const safeMessage = redact(message)
     updateExecution.run('failed', new Date().toISOString(), new Date().toISOString(), executionId)
-    publishExecution('failed', message)
-    logRunActivity('execution.failed', message)
+    publishExecution('failed', safeMessage)
+    logRunActivity('execution.failed', safeMessage)
   }
 
   // Log a workspace activity event when a top-level run finishes. Skipped for
@@ -217,8 +282,8 @@ async function runExecution(
       stepId: stepIdByNode[nodeId],
       nodeId,
       status,
-      output: extra.output ?? null,
-      error: extra.error ?? null,
+      output: extra.output != null ? redactDeep(extra.output, redact) : null,
+      error: extra.error != null ? redact(extra.error) : null,
     })
   }
 
@@ -253,11 +318,14 @@ async function runExecution(
     const baseInput = node.type.startsWith('trigger-') ? { ...triggerPayload } : {}
     const input = Object.assign(baseInput, ...activeIncoming.map((e) => context[e.source] || {}))
 
-    updateStep.run('running', JSON.stringify(input), null, null, now(), null, stepIdByNode[nodeId])
+    updateStep.run('running', redact(JSON.stringify(input)), null, null, now(), null, stepIdByNode[nodeId])
     publishStep(nodeId, 'running')
 
     try {
-      const config = resolveTemplates(node.data?.config || {}, context)
+      // Config templates resolve against upstream outputs plus the decrypted
+      // secrets map ({{secrets.NAME}}). Secrets ride only through this scope —
+      // never through context — so they can't leak into a later node's input.
+      const config = resolveTemplates(node.data?.config || {}, { ...context, secrets })
       // Engine context for runners that need to reach back into the engine (only
       // sub-workflow does today): the call stack for cycle detection, the parent
       // execution + node so a spawned child run can be linked back, and the publish
@@ -272,14 +340,14 @@ async function runExecution(
       context[nodeId] = output
       nodeStatus[nodeId] = 'success'
       updateStep.run(
-        'succeeded', JSON.stringify(input), JSON.stringify(output), null,
+        'succeeded', redact(JSON.stringify(input)), redact(JSON.stringify(output)), null,
         now(), now(), stepIdByNode[nodeId]
       )
       publishStep(nodeId, 'succeeded', { output })
     } catch (err) {
       nodeStatus[nodeId] = 'failed'
       updateStep.run(
-        'failed', JSON.stringify(input), null, err.message,
+        'failed', redact(JSON.stringify(input)), null, redact(err.message),
         now(), now(), stepIdByNode[nodeId]
       )
       publishStep(nodeId, 'failed', { error: err.message })

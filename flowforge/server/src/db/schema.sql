@@ -164,6 +164,25 @@ CREATE INDEX IF NOT EXISTS idx_canvas_comments_workflow
 CREATE INDEX IF NOT EXISTS idx_canvas_comment_replies_comment
   ON canvas_comment_replies (comment_id, created_at);
 
+-- Workspace secrets: named credentials (API keys, tokens) referenced from node
+-- configs as {{secrets.NAME}}. value_encrypted is AES-256-GCM ciphertext (see
+-- services/secretVault.js) — plaintext never touches the database, and the API
+-- never returns a value after it is written (list endpoints expose names +
+-- metadata only). The execution engine decrypts just-in-time at run start and
+-- redacts the plaintext from persisted step logs and published events. Writes
+-- are workspace-owner-only; created_by is kept for the audit trail (LEFT JOINed
+-- for display so a deleted user doesn't drop the row).
+CREATE TABLE IF NOT EXISTS workspace_secrets (
+  id              TEXT PRIMARY KEY,
+  workspace_id    TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+  name            TEXT NOT NULL,
+  value_encrypted TEXT NOT NULL,
+  created_by      TEXT REFERENCES users(id),
+  created_at      TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at      TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE (workspace_id, name)
+);
+
 -- Workspace activity feed: an append-only, chronological log of significant
 -- actions in a workspace (workflow created/deployed/deleted/restored, execution
 -- completed/failed, member invited/removed, comment added/resolved). Written by
