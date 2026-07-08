@@ -3,7 +3,11 @@ import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../../hooks/useAuth'
 import NotificationBell from '../notifications/NotificationBell'
 
-export default function Header({ onToggleSidebar }) {
+// True on Apple platforms, where the palette shortcut reads ⌘K instead of Ctrl+K.
+const IS_MAC =
+  typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform || '')
+
+export default function Header({ onToggleSidebar, onOpenSearch }) {
   const { user, logout } = useAuth()
   const navigate = useNavigate()
   const [menuOpen, setMenuOpen] = useState(false)
@@ -34,6 +38,16 @@ export default function Header({ onToggleSidebar }) {
         <span className="header__logo">FlowForge</span>
       </div>
       <div className="header__right">
+        {user && onOpenSearch && (
+          <button
+            className="header__search"
+            onClick={onOpenSearch}
+            title="Search workflows and pages"
+          >
+            <span aria-hidden="true">🔍</span> Search
+            <kbd className="header__search-kbd">{IS_MAC ? '⌘K' : 'Ctrl K'}</kbd>
+          </button>
+        )}
         {user && <NotificationBell />}
         {user ? (
           <div className="header__user-menu">
