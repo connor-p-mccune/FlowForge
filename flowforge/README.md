@@ -1,5 +1,7 @@
 # FlowForge
 
+[![CI](https://github.com/connor-p-mccune/FlowForge/actions/workflows/ci.yml/badge.svg)](https://github.com/connor-p-mccune/FlowForge/actions/workflows/ci.yml)
+
 **Visual workflow automation builder with real-time collaboration.**
 
 FlowForge lets you build automations on a drag-and-drop canvas: drop nodes
