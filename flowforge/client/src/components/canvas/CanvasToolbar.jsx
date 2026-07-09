@@ -11,6 +11,8 @@ export default function CanvasToolbar({
   onToggleCommentMode,
   commentMode,
   onAutoLayout,
+  onToggleIssues,
+  issuesOpen,
   onDeploy,
   onToggleHistory,
   running,
@@ -76,6 +78,14 @@ export default function CanvasToolbar({
         onClick={onAutoLayout}
       >
         ▦ Tidy
+      </button>
+      <button
+        className={`toolbar-btn toolbar-btn--issues${issuesOpen ? ' toolbar-btn--active' : ''}`}
+        title="Check this workflow for problems before running it"
+        onClick={onToggleIssues}
+        aria-pressed={issuesOpen}
+      >
+        🔎 Issues
       </button>
       <span className="canvas-toolbar__divider" />
       <button

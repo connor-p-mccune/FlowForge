@@ -22,6 +22,7 @@ import SuggestionsPanel from './SuggestionsPanel'
 import GenerateModal from './GenerateModal'
 import WebhookPanel from './WebhookPanel'
 import HistoryPanel from './HistoryPanel'
+import IssuesPanel from './IssuesPanel'
 import ExecutionPanel from '../execution/ExecutionPanel'
 import CursorOverlay from '../collaboration/CursorOverlay'
 import CommentsOverlay from '../collaboration/CommentsOverlay'
@@ -41,7 +42,7 @@ function CanvasInner({ workflowId }) {
   const [edges, setEdges, onEdgesChange] = useEdgesState([])
   const { workflow, saveGraph, loading, deploy, applyWorkflow, comments, setComments, viewerIsOwner } =
     useWorkflow(workflowId, setNodes, setEdges)
-  const { screenToFlowPosition, getNode, fitView } = useReactFlow()
+  const { screenToFlowPosition, getNode, fitView, setCenter } = useReactFlow()
   const { user } = useAuth()
 
   // Toast (kept in a ref so the socket/exec callbacks below need no deps churn).
@@ -80,6 +81,9 @@ function CanvasInner({ workflowId }) {
   const [generating, setGenerating] = useState(false)
   const [generateError, setGenerateError] = useState(null)
   const [pendingGraph, setPendingGraph] = useState(null) // graph awaiting replace-confirm
+
+  // Lint results for the live canvas (Issues panel)
+  const [issuesOpen, setIssuesOpen] = useState(false)
 
   // Version history (deploy / restore)
   const [historyOpen, setHistoryOpen] = useState(false)
@@ -387,7 +391,8 @@ function CanvasInner({ workflowId }) {
   }, [deploy, nodes, edges])
 
   // The right-side panels (history / webhooks / suggestions) share screen space,
-  // so opening one closes the others.
+  // so opening one closes the others. The Issues panel lives on the left and
+  // coexists with the config panel, but still yields to the big right drawers.
   const handleToggleHistory = useCallback(() => {
     setHistoryOpen((v) => !v)
     setWebhookOpen(false)
@@ -399,6 +404,26 @@ function CanvasInner({ workflowId }) {
     setHistoryOpen(false)
     setSuggestions(null)
   }, [])
+
+  const handleToggleIssues = useCallback(() => setIssuesOpen((v) => !v), [])
+
+  // Clicking an issue selects the offending node (opening its config panel)
+  // and pans the viewport to it.
+  const handleSelectIssueNode = useCallback(
+    (nodeId) => {
+      setNodes((nds) => nds.map((n) => ({ ...n, selected: n.id === nodeId })))
+      const target = getNode(nodeId)
+      if (target) {
+        const w = target.width || 160
+        const h = target.height || 60
+        setCenter(target.position.x + w / 2, target.position.y + h / 2, {
+          zoom: 1.1,
+          duration: 300,
+        })
+      }
+    },
+    [setNodes, getNode, setCenter]
+  )
 
   // After a restore the server has already swapped the live graph; load it onto
   // the canvas (which also resyncs the auto-save baseline) and close the drawer.
@@ -799,6 +824,8 @@ function CanvasInner({ workflowId }) {
         onToggleCommentMode={toggleCommentMode}
         commentMode={commentMode}
         onAutoLayout={handleAutoLayout}
+        onToggleIssues={handleToggleIssues}
+        issuesOpen={issuesOpen}
         onDeploy={handleDeploy}
         onToggleHistory={handleToggleHistory}
         running={execution?.status === 'running' || execution?.status === 'pending'}
@@ -897,6 +924,15 @@ function CanvasInner({ workflowId }) {
         open={webhookOpen}
         onClose={() => setWebhookOpen(false)}
       />
+      {issuesOpen && (
+        <IssuesPanel
+          workflowId={workflowId}
+          nodes={nodes}
+          edges={edges}
+          onClose={() => setIssuesOpen(false)}
+          onSelectNode={handleSelectIssueNode}
+        />
+      )}
       <HistoryPanel
         workflowId={workflowId}
         open={historyOpen}

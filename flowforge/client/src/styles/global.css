@@ -1096,6 +1096,126 @@ html, body, #root {
 }
 
 /* Webhook management panel */
+/* Issues (lint) panel — left-anchored so it can stay open while clicking an
+   issue opens the node's config panel on the right. */
+.issues-panel {
+  position: absolute;
+  top: 64px;
+  left: 16px;
+  width: 320px;
+  max-height: calc(100% - 96px);
+  overflow-y: auto;
+  background: #fff;
+  border: 1px solid #e5e5e5;
+  border-radius: 10px;
+  box-shadow: 0 6px 24px rgba(0,0,0,0.12);
+  z-index: 25;
+  animation: config-panel-slide 0.18s ease-out;
+}
+
+.issues-panel__header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  border-bottom: 1px solid #eee;
+}
+
+.issues-panel__title {
+  font-weight: 600;
+  font-size: 13px;
+}
+
+.issues-panel__counts {
+  display: inline-flex;
+  gap: 6px;
+  margin-left: auto;
+}
+
+.issues-panel__count {
+  font-size: 11px;
+  font-weight: 600;
+  border-radius: 999px;
+  padding: 1px 8px;
+}
+
+.issues-panel__count--error { background: #fee2e2; color: #b91c1c; }
+.issues-panel__count--warning { background: #fef3c7; color: #b45309; }
+
+.issues-panel__close {
+  background: none;
+  border: none;
+  font-size: 16px;
+  cursor: pointer;
+  color: #888;
+  margin-left: 4px;
+}
+
+.issues-panel__body {
+  padding: 8px 12px 12px;
+}
+
+.issues-panel__hint {
+  color: #777;
+  font-size: 12px;
+  padding: 6px 0;
+}
+
+.issues-panel__error {
+  color: #b91c1c;
+  font-size: 12px;
+  padding: 6px 0;
+}
+
+.issues-panel__clean {
+  color: #15803d;
+  font-size: 13px;
+  padding: 8px 0;
+}
+
+.issues-list {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.issues-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  width: 100%;
+  text-align: left;
+  font-size: 12.5px;
+  line-height: 1.4;
+  color: #333;
+  background: #fafafa;
+  border: 1px solid #eee;
+  border-radius: 8px;
+  padding: 8px 10px;
+}
+
+.issues-item--error { border-left: 3px solid #dc2626; }
+.issues-item--warning { border-left: 3px solid #d97706; }
+
+.issues-item--clickable {
+  cursor: pointer;
+}
+
+.issues-item--clickable:hover {
+  background: #f0f0ff;
+  border-color: #c7d2fe;
+}
+
+.issues-item__icon {
+  flex-shrink: 0;
+  font-size: 12px;
+}
+
+.issues-item__message {
+  flex: 1;
+}
+
 .webhook-panel {
   position: absolute;
   top: 64px;

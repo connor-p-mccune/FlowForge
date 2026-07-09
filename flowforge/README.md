@@ -39,6 +39,10 @@ order while streaming live progress back to every collaborator on the canvas.
 - **Public REST API** — trigger workflows and poll runs from CI or scripts via
   `/api/v1`, authenticated with scoped, expiring personal access tokens (hash-only
   storage). See [docs/API.md](./docs/API.md).
+- **Workflow linter** — one click checks the canvas before you run it: cycles,
+  dead branches, missing config, references to nodes that aren't upstream,
+  unknown `{{secrets.*}}` names, undeployed sub-workflow targets. Click an
+  issue to jump to the offending node.
 - **Command palette** — `Ctrl/⌘-K` fuzzy-jumps to any workflow, page, or action
   across every workspace.
 - **Live execution streaming** — step-by-step status updates pushed to the UI
