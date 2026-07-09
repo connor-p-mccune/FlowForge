@@ -132,7 +132,14 @@ router.get('/executions/:id', auth, (req, res) => {
     // Sub-workflow runs spawned by this execution, nested so the UI can trace the
     // full call tree. Empty for the common case (no sub-workflow nodes).
     const childExecutions = buildChildExecutions(execution.id)
-    res.json({ execution, steps, childExecutions })
+    // Approval requests this run filed (approval nodes), so the run detail can
+    // show who decided what — or offer approve/reject while one is pending.
+    const approvals = db.prepare(
+      `SELECT a.*, u.display_name AS responded_by_name
+         FROM execution_approvals a LEFT JOIN users u ON u.id = a.responded_by
+        WHERE a.execution_id = ? ORDER BY a.requested_at`
+    ).all(execution.id)
+    res.json({ execution, steps, childExecutions, approvals })
   } catch (err) {
     console.error(err)
     res.status(500).json({ error: 'Internal server error' })
