@@ -60,6 +60,12 @@ ensureColumn('executions', 'parent_node_id', 'TEXT')
 ensureColumn('executions', 'trigger_data', 'TEXT')
 ensureColumn('executions', 'trigger_type', 'TEXT')
 
+// Run cancellation: cancel_requested is the cooperative stop flag. The cancel
+// routes set it; the engine polls it between node settlements and winds the run
+// down ('cancelled' status) at the next scheduling round. A run cancelled while
+// still queued is finalized directly by the route, and the worker skips it.
+ensureColumn('executions', 'cancel_requested', 'INTEGER NOT NULL DEFAULT 0')
+
 // Two-factor authentication (TOTP). Optional, opt-in per user. totp_enabled stays
 // 0 until the user verifies a code from their authenticator, so a half-finished
 // setup never locks them out of login. totp_backup_codes is a JSON array of

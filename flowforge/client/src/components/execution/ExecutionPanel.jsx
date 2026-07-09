@@ -57,11 +57,16 @@ export function StepList({ steps, nodes, childExecutionsByNode }) {
   )
 }
 
-export default function ExecutionPanel({ open, onClose, execution, steps, nodes, workflowId, initialHistoryExecId }) {
+export default function ExecutionPanel({ open, onClose, execution, steps, nodes, workflowId, initialHistoryExecId, onCancel }) {
   // Arriving via a notification deep link opens straight to the run's history.
   const [tab, setTab] = useState(initialHistoryExecId ? 'history' : 'live')
 
   if (!open) return null
+
+  const cancellable =
+    Boolean(onCancel) &&
+    execution?.id &&
+    (execution.status === 'pending' || execution.status === 'running')
 
   return (
     <div className="exec-panel">
@@ -84,6 +89,15 @@ export default function ExecutionPanel({ open, onClose, execution, steps, nodes,
           <span className={`status-badge status-badge--${execution.status}`}>
             {execution.status}
           </span>
+        )}
+        {tab === 'live' && cancellable && (
+          <button
+            className="exec-panel__stop"
+            title="Stop this run — the node in flight finishes, the rest is skipped"
+            onClick={onCancel}
+          >
+            ■ Stop
+          </button>
         )}
         <button className="exec-panel__close" title="Close" onClick={onClose}>×</button>
       </div>

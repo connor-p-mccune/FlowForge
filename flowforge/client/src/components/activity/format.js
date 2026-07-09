@@ -69,6 +69,7 @@ export function formatEvent(event) {
       return meta.version ? `restored ${name} to v${meta.version}` : `restored ${name}`
     case 'execution.completed': return `ran ${name}`
     case 'execution.failed': return `ran ${name} — failed`
+    case 'execution.cancelled': return `stopped a run of ${name}`
     case 'member.invited': return `added ${name} to the workspace`
     case 'member.removed': return `removed ${name} from the workspace`
     case 'comment.added': return `commented on ${name}`

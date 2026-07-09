@@ -109,7 +109,11 @@ function CanvasInner({ workflowId }) {
       if (payload.executionId === executionIdRef.current) {
         setExecution((prev) => {
           // never let a late "running" overwrite a terminal state
-          if (prev && ['completed', 'failed'].includes(prev.status) && payload.status === 'running') {
+          if (
+            prev &&
+            ['completed', 'failed', 'cancelled'].includes(prev.status) &&
+            payload.status === 'running'
+          ) {
             return prev
           }
           return { id: payload.executionId, status: payload.status, error: payload.error }
@@ -352,6 +356,19 @@ function CanvasInner({ workflowId }) {
     }
     setExecPanelOpen(true)
   }, [workflowId])
+
+  // Stop the current run. Cooperative: the engine finishes the node in flight,
+  // then skips the rest — the 'cancelled' status arrives over the socket like
+  // any other execution update.
+  const handleCancelRun = useCallback(async () => {
+    const id = executionIdRef.current
+    if (!id) return
+    try {
+      await apiFetch(`/api/executions/${id}/cancel`, { method: 'POST' })
+    } catch (err) {
+      toastRef.current.error(`Couldn’t stop this run: ${err.message}`)
+    }
+  }, [])
 
   // Deploy the current canvas as a new version, then nudge the history drawer to
   // refresh if it's open so the new version appears.
@@ -895,6 +912,7 @@ function CanvasInner({ workflowId }) {
         nodes={nodes}
         workflowId={workflowId}
         initialHistoryExecId={deepLinkExecId}
+        onCancel={handleCancelRun}
       />
     </div>
   )

@@ -198,6 +198,9 @@ async function runExecution(
 
   const execution = db.prepare('SELECT * FROM executions WHERE id = ?').get(executionId)
   if (!execution) throw new Error(`Execution ${executionId} not found`)
+  // Cancelled while still queued: the cancel route already finalized the row,
+  // so the job is a no-op — don't resurrect it into 'running'.
+  if (execution.status === 'cancelled') return {}
   const workflow = db.prepare('SELECT * FROM workflows WHERE id = ?').get(execution.workflow_id)
   if (!workflow) throw new Error(`Workflow ${execution.workflow_id} not found`)
 
@@ -342,6 +345,13 @@ async function runExecution(
   const inFlight = new Map() // nodeId -> settling promise (never rejects)
   let failure = null // first { node, err }, wins the run's error message
 
+  // Cooperative cancellation: the cancel route flips cancel_requested on the
+  // row; we poll it once per scheduling round (i.e. every time a node settles)
+  // and wind the run down instead of launching anything further. A node that is
+  // already in flight always runs to completion — cancellation is inter-node.
+  const cancelCheck = db.prepare('SELECT cancel_requested FROM executions WHERE id = ?')
+  let cancelled = false
+
   function launchNode(nodeId) {
     const node = nodeById[nodeId]
     // Input = merged outputs of all active upstream nodes. Trigger (source)
@@ -425,6 +435,10 @@ async function runExecution(
   }
 
   while (unscheduled.length > 0 || inFlight.size > 0) {
+    if (cancelCheck.get(executionId)?.cancel_requested) {
+      cancelled = true
+      break
+    }
     scheduleRound()
     if (failure) break
     if (inFlight.size === 0) {
@@ -436,16 +450,25 @@ async function runExecution(
     await Promise.race(inFlight.values())
   }
 
-  // Let in-flight siblings of a failed node finish and record their results.
+  // Let in-flight siblings of a failed/cancelled run finish and record results.
   if (inFlight.size > 0) await Promise.all([...inFlight.values()])
 
   if (failure) {
-    // Everything that never launched is skipped, then the run fails.
+    // Everything that never launched is skipped, then the run fails. A failure
+    // takes precedence over a concurrent cancel request — it says more.
     for (const nodeId of unscheduled) skipNode(nodeId)
     failExecution(
       `Node "${failure.node.data?.label || failure.node.id}" failed: ${failure.err.message}`
     )
     return
+  }
+
+  if (cancelled) {
+    for (const nodeId of unscheduled) skipNode(nodeId)
+    updateExecution.run('cancelled', now(), now(), executionId)
+    publishExecution('cancelled')
+    logRunActivity('execution.cancelled')
+    return {}
   }
 
   updateExecution.run('completed', new Date().toISOString(), new Date().toISOString(), executionId)

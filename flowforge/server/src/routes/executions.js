@@ -3,6 +3,7 @@ const { v4: uuidv4 } = require('uuid')
 const db = require('../config/database')
 const auth = require('../middleware/auth')
 const { getExecutionQueue } = require('../config/queue')
+const { requestCancel } = require('../services/executionControl')
 
 const router = express.Router()
 
@@ -132,6 +133,30 @@ router.get('/executions/:id', auth, (req, res) => {
     // full call tree. Empty for the common case (no sub-workflow nodes).
     const childExecutions = buildChildExecutions(execution.id)
     res.json({ execution, steps, childExecutions })
+  } catch (err) {
+    console.error(err)
+    res.status(500).json({ error: 'Internal server error' })
+  }
+})
+
+// POST /api/executions/:id/cancel — stop a queued or running execution. Queued
+// runs are finalized immediately; running ones are wound down cooperatively by
+// the engine at its next scheduling round (an in-flight node always finishes —
+// cancellation never tears a node down mid-call). 409 once the run is over.
+router.post('/executions/:id/cancel', auth, (req, res) => {
+  try {
+    const execution = db.prepare('SELECT * FROM executions WHERE id = ?').get(req.params.id)
+    if (!execution) return res.status(404).json({ error: 'Execution not found' })
+    if (!getWorkflowForMember(execution.workflow_id, req.user.id)) {
+      return res.status(404).json({ error: 'Execution not found' })
+    }
+
+    const { outcome } = requestCancel(execution)
+    if (outcome === 'finished') {
+      return res.status(409).json({ error: `Execution already ${execution.status}` })
+    }
+    const updated = db.prepare('SELECT * FROM executions WHERE id = ?').get(execution.id)
+    res.status(202).json({ execution: updated })
   } catch (err) {
     console.error(err)
     res.status(500).json({ error: 'Internal server error' })

@@ -15,6 +15,7 @@ const db = require('../config/database')
 const tokenAuth = require('../middleware/tokenAuth')
 const { publicApiLimiter } = require('../middleware/rateLimit')
 const { getExecutionQueue } = require('../config/queue')
+const { requestCancel } = require('../services/executionControl')
 
 const router = express.Router()
 
@@ -106,6 +107,32 @@ router.get('/executions/:id', tokenAuth('read'), (req, res) => {
         finishedAt: execution.finished_at,
       },
       steps,
+    })
+  } catch (err) {
+    console.error(err)
+    res.status(500).json({ error: 'Internal server error' })
+  }
+})
+
+// POST /api/v1/executions/:id/cancel — stop a queued or running run. Requires
+// the trigger scope (it changes run state, like starting one does). Queued runs
+// finalize immediately; running ones wind down at the engine's next scheduling
+// round. 409 once the run has already finished.
+router.post('/executions/:id/cancel', tokenAuth('trigger'), (req, res) => {
+  try {
+    const execution = db.prepare('SELECT * FROM executions WHERE id = ?').get(req.params.id)
+    if (!execution) return res.status(404).json({ error: 'Execution not found' })
+    if (!getWorkflowForMember(execution.workflow_id, req.user.id)) {
+      return res.status(404).json({ error: 'Execution not found' })
+    }
+
+    const { outcome } = requestCancel(execution)
+    if (outcome === 'finished') {
+      return res.status(409).json({ error: `Execution already ${execution.status}` })
+    }
+    res.status(202).json({
+      execution: { id: execution.id, workflowId: execution.workflow_id, status: outcome === 'cancelled' ? 'cancelled' : 'running' },
+      cancelling: outcome === 'cancelling',
     })
   } catch (err) {
     console.error(err)

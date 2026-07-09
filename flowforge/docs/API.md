@@ -118,11 +118,35 @@ Response `200`:
 }
 ```
 
-`execution.status` progresses `pending → running → completed | failed`.
-Step inputs/outputs have workspace-secret values already redacted by the
-execution engine before persistence.
+`execution.status` progresses `pending → running → completed | failed |
+cancelled`. Step inputs/outputs have workspace-secret values already redacted
+by the execution engine before persistence.
 
 Requires the `read` scope.
+
+### Cancel an execution
+
+```bash
+curl -s -X POST https://your-flowforge-host/api/v1/executions/e57a…/cancel \
+  -H "Authorization: Bearer $FLOWFORGE_TOKEN"
+```
+
+Response `202`:
+
+```json
+{
+  "execution": { "id": "e57a…", "workflowId": "6f0c…", "status": "cancelled" },
+  "cancelling": false
+}
+```
+
+A run that is still queued is cancelled immediately. A run already executing is
+stopped **cooperatively**: the node currently in flight finishes, everything
+not yet started is skipped, and the run finalizes as `cancelled` (the response
+then carries `"cancelling": true` while that happens — keep polling the
+execution to observe the terminal status).
+
+Requires the `trigger` scope. Returns `409` if the run has already finished.
 
 ## Errors
 
