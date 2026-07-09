@@ -8,7 +8,8 @@ services:
     ports:
       - "5173:80"
     depends_on:
-      - server
+      server:
+        condition: service_healthy
 
   server:
     build: ./server
@@ -24,8 +25,18 @@ services:
       - AI_SERVICE_URL=http://ai-service:5000
       - PORT=3001
     depends_on:
-      - redis
-      - ai-service
+      redis:
+        condition: service_healthy
+      ai-service:
+        condition: service_healthy
+    # The deep readiness probe exercises SQLite and Redis, so "healthy" here
+    # means "actually able to serve and run workflows", not just "listening".
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:3001/api/health/ready || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
 
   ai-service:
     build: ./ai-service
@@ -33,10 +44,22 @@ services:
       - OPENAI_API_KEY=${OPENAI_API_KEY}
     # Internal-only: reached by the server over the compose network. Not
     # published to the host.
+    # python:slim ships neither curl nor wget — probe with the stdlib.
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:5000/health')"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
 
   redis:
     image: redis:7-alpine
     # Internal-only: Bull job queue + Socket.io pub/sub for the server.
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
 
 volumes:
   db-data:
