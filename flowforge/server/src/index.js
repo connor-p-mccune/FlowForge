@@ -36,6 +36,11 @@ app.use(cors({ origin: corsOrigins, credentials: corsOrigins !== '*' }))
 // are the largest legitimate body, and 2mb covers very large graphs.
 app.use(express.json({ limit: '2mb' }))
 
+// Prometheus instrumentation: every response is counted and timed against its
+// matched route pattern (bounded label cardinality). Scraped at GET /metrics.
+const metrics = require('./services/metrics')
+app.use(metrics.httpMetricsMiddleware)
+
 // Populate the built-in workflow templates on first run. Idempotent: only seeds
 // when the templates table is empty, so admin edits/removals survive restarts.
 require('./db/templates').seedTemplates(require('./config/database'))
@@ -75,6 +80,62 @@ if (process.env.NODE_ENV !== 'test') {
 }
 
 app.get('/api/health', (req, res) => res.json({ status: 'ok' }))
+
+// Readiness probe: verifies the process can actually serve traffic — SQLite
+// reachable and Redis answering — and 503s otherwise, so an orchestrator can
+// hold traffic (or restart the container) instead of routing into failures.
+// The Redis ping is raced against a timeout because ioredis with
+// maxRetriesPerRequest: null queues commands indefinitely while disconnected.
+const withTimeout = (promise, ms) =>
+  new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error('timeout')), ms)
+    promise.then(
+      (value) => {
+        clearTimeout(timer)
+        resolve(value)
+      },
+      (err) => {
+        clearTimeout(timer)
+        reject(err)
+      }
+    )
+  })
+
+app.get('/api/health/ready', async (req, res) => {
+  const checks = { database: 'ok', redis: 'ok' }
+  try {
+    require('./config/database').prepare('SELECT 1').get()
+  } catch {
+    checks.database = 'error'
+  }
+  try {
+    const pong = await withTimeout(require('./config/redis').ping(), 2000)
+    if (pong !== 'PONG') checks.redis = 'error'
+  } catch {
+    checks.redis = 'error'
+  }
+  const ready = Object.values(checks).every((v) => v === 'ok')
+  res.status(ready ? 200 : 503).json({ status: ready ? 'ready' : 'degraded', checks })
+})
+
+// Prometheus scrape endpoint (text exposition format). Not under /api on
+// purpose — it's infrastructure, not product surface. Optionally guarded by a
+// bearer METRICS_TOKEN for deployments where the port is reachable publicly.
+metrics.registerCollector(async () => {
+  const counts = await require('./config/queue').getExecutionQueue().getJobCounts()
+  for (const [state, n] of Object.entries(counts || {})) {
+    metrics.queueJobs.set({ state }, n)
+  }
+})
+
+app.get('/metrics', async (req, res) => {
+  const token = process.env.METRICS_TOKEN
+  if (token && req.headers.authorization !== `Bearer ${token}`) {
+    return res.status(401).json({ error: 'Unauthorized' })
+  }
+  res.set('Content-Type', 'text/plain; version=0.0.4; charset=utf-8')
+  res.send(await metrics.renderPrometheus())
+})
 
 // Unknown API routes get a JSON 404 (not Express's default HTML page).
 app.use('/api', (req, res) => res.status(404).json({ error: 'Not found' }))

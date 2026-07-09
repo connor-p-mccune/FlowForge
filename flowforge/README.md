@@ -58,6 +58,10 @@ order while streaming live progress back to every collaborator on the canvas.
 - **AI suggestions** — ask the assistant for sensible next nodes based on the
   current graph.
 - **Workspaces & auth** — JWT auth, per-user workspaces, and workflow CRUD.
+- **Observability** — a zero-dependency Prometheus exporter at `/metrics`
+  (request rates/latency by route, run outcomes and durations, queue depth,
+  process stats) plus a deep readiness probe at `/api/health/ready` that
+  verifies SQLite and Redis before reporting healthy.
 - **Polish** — input validation, loading skeletons, empty states, toast
   notifications, an error boundary, and a responsive, collapsible sidebar.
 
@@ -131,6 +135,8 @@ Copy `.env.example` to `.env` before running. **Never commit `.env`.**
 | `VITE_API_URL`    | yes      | Browser-facing server URL (baked into the client build)|
 | `AI_SERVICE_URL`  | no       | Server → AI service URL (defaults to the compose host) |
 | `SECRETS_ENCRYPTION_KEY` | no | Dedicated key material for workspace-secret encryption (falls back to `JWT_SECRET`) |
+| `EXEC_MAX_PARALLEL` | no     | Max concurrently-executing nodes per run (default 4; 1 = sequential) |
+| `METRICS_TOKEN`   | no       | Bearer token guarding `GET /metrics` (unguarded when unset) |
 
 \* The app runs without it, but any AI node or the Suggest button will error
 until a valid key is set.

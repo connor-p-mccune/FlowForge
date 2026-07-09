@@ -9,6 +9,7 @@ const { v4: uuidv4 } = require('uuid')
 const db = require('../config/database')
 const { buildAdjacency, topoSort } = require('./dagParser')
 const { decryptSecret } = require('./secretVault')
+const { recordExecution } = require('./metrics')
 
 const runners = {
   'action-http': require('./nodeRunners/httpRequest'),
@@ -215,6 +216,13 @@ async function runExecution(
   // — a cycle — before recursing into it.
   const callStack = [...ancestorWorkflowIds, workflowId]
 
+  // Observability: every terminal state reports its status and wall time to
+  // the /metrics registry. nested marks sub-workflow child runs.
+  const runStartedMs = Date.now()
+  const isNested = ancestorWorkflowIds.length > 0
+  const recordTerminal = (status) =>
+    recordExecution(status, (Date.now() - runStartedMs) / 1000, { nested: isNested })
+
   // Workspace secrets, decrypted just for this run. Node configs reference them
   // as {{secrets.NAME}}; the map lives only in engine memory, and the redactor
   // scrubs the plaintext from everything persisted or published below.
@@ -238,6 +246,7 @@ async function runExecution(
     updateExecution.run('failed', new Date().toISOString(), new Date().toISOString(), executionId)
     publishExecution('failed', safeMessage)
     logRunActivity('execution.failed', safeMessage)
+    recordTerminal('failed')
   }
 
   // Log a workspace activity event when a top-level run finishes. Skipped for
@@ -468,12 +477,14 @@ async function runExecution(
     updateExecution.run('cancelled', now(), now(), executionId)
     publishExecution('cancelled')
     logRunActivity('execution.cancelled')
+    recordTerminal('cancelled')
     return {}
   }
 
   updateExecution.run('completed', new Date().toISOString(), new Date().toISOString(), executionId)
   publishExecution('completed')
   logRunActivity('execution.completed')
+  recordTerminal('completed')
 
   // A run's final output: its output-return node's output if it has one, else the
   // last node (in execution order) that produced output. Returned so a parent
