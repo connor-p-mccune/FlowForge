@@ -96,6 +96,37 @@ a Bull job → the worker runs the execution engine → each step publishes an
 `exec-update` over Redis pub/sub → the Socket.io layer relays it to everyone in
 the workflow's room → the UI updates live.
 
+```mermaid
+flowchart LR
+    subgraph Browser
+        UI[React canvas]
+    end
+    subgraph server["server (Node)"]
+        API[Express REST]
+        WS[Socket.io]
+        Worker[Bull worker]
+        Engine[Execution engine<br/>parallel DAG scheduler]
+    end
+    AI["ai-service (Flask)"]
+    R[(Redis)]
+    DB[(SQLite)]
+
+    UI -- REST --> API
+    UI <-- live updates --> WS
+    API -- enqueue run --> R
+    R -- job --> Worker
+    Worker --> Engine
+    Engine -- steps --> DB
+    Engine -- exec-update --> R
+    R -- pub/sub --> WS
+    Engine -- AI nodes --> AI
+    API --> DB
+```
+
+Operational surface: liveness at `GET /api/health`, deep readiness (SQLite +
+Redis exercised) at `GET /api/health/ready`, and Prometheus metrics at
+`GET /metrics`.
+
 ---
 
 ## Prerequisites
@@ -168,16 +199,27 @@ SMTP_USER=        SMTP_PASS=         EMAIL_FROM=flowforge@example.com
 2. **Create a workflow** with the `+` button in the sidebar.
 3. **Add nodes** from the canvas toolbar and drag between handles to connect them.
 4. **Configure** a node by selecting it and editing the side panel. Reference an
-   upstream node's output anywhere with `{{node-id.field}}`.
-5. **Run** with the ▶ button and watch steps stream into the execution panel.
-6. **Webhooks:** open the Webhooks panel to mint a public trigger URL.
-7. **Collaborate:** share the workflow URL — edits, cursors, and runs sync live.
-8. **Secrets:** store API keys under the workspace's Secrets page and reference
+   upstream node's output anywhere with `{{node-id.field}}` — the panel's
+   **Insert data from upstream** section lists what's available and copies
+   references for you.
+5. **Check** the workflow with 🔎 Issues — the linter flags anything that would
+   fail before you run it; click a finding to jump to the node.
+6. **Run** with the ▶ button and watch steps stream into the execution panel;
+   **Stop** cancels a run cooperatively. In run history, flip to the
+   **Timeline** view to see a Gantt chart of where the time went.
+7. **Webhooks:** open the Webhooks panel to mint a public trigger URL.
+8. **Collaborate:** share the workflow URL — edits, cursors, and runs sync live,
+   and `Ctrl/⌘-Z` undo/redo keeps everyone converged.
+9. **Secrets:** store API keys under the workspace's Secrets page and reference
    them anywhere as `{{secrets.NAME}}` — they stay encrypted and out of run logs.
-9. **Automate externally:** mint an API token in Settings and trigger runs from
-   scripts via `POST /api/v1/workflows/:id/trigger` ([docs](./docs/API.md)).
-10. **Navigate fast:** press `Ctrl/⌘-K` for the command palette, and use ▦ Tidy
-    to auto-arrange a messy canvas.
+10. **Automate externally:** mint an API token in Settings and trigger runs from
+    scripts via `POST /api/v1/workflows/:id/trigger` ([docs](./docs/API.md),
+    [OpenAPI](./docs/API.md#machine-readable-spec)).
+11. **Navigate fast:** press `Ctrl/⌘-K` for the command palette, ▦ Tidy to
+    auto-arrange a messy canvas, `Ctrl/⌘-D` to duplicate a node, and the
+    minimap to move around large graphs.
+12. **Ship safely:** 🚀 Deploy snapshots a version; the History drawer previews,
+    **diffs against the live canvas**, and restores any of them.
 
 ---
 

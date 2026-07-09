@@ -27,6 +27,7 @@ Bull worker. The notable trust boundaries and the threats against them:
 | T8 | **Real-time data exposure / tampering** | An authenticated user joins another workspace's workflow room over Socket.io to read live execution data, comments, and edits, or to inject collaboration events. | **Mitigated** — workflow-room membership check + relay gating. |
 | T9 | **Credential theft from stored workflows** | API keys pasted into node configs land in `graph_json`, execution step logs, and exports — one database leak exposes every integration. | **Mitigated** — encrypted workspace secrets + log redaction (see below). |
 | T10 | **API token compromise** | A personal access token for the public `/api/v1` API leaks (CI logs, dotfiles) and is replayed. | **Mitigated** — hash-only storage, scopes, expiry, revocation, per-token rate limit. |
+| T11 | **Operational-data disclosure via metrics** | `GET /metrics` (Prometheus) exposes traffic patterns and run volumes to anyone who can reach the port. | **Mitigated** — metric labels are route *patterns* (never resource ids or user data), and setting `METRICS_TOKEN` gates scrapes behind a bearer token; recommended whenever the server has a public domain. |
 
 ---
 

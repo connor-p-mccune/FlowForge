@@ -43,7 +43,13 @@ You don't need to edit code to deploy — these are already done:
 - **Redis clients** set `family: 0` so Railway's IPv6-only private network resolves.
 - **`client`** reads every API/WebSocket URL from `VITE_API_URL` (one variable).
 - **`client/vercel.json`** adds the SPA rewrite so deep links (`/workflow/:id`) work.
-- **Health checks:** server `GET /api/health`, ai-service `GET /health`.
+- **Health checks:** server `GET /api/health` (liveness) and
+  `GET /api/health/ready` (deep readiness — verifies SQLite and Redis; point
+  the platform health check here so traffic waits for actual readiness),
+  ai-service `GET /health`.
+- **Monitoring:** Prometheus metrics at server `GET /metrics`. Set
+  `METRICS_TOKEN` on the server to require a bearer token — do this whenever
+  the server has a public domain.
 - **`railway.json`** in each service pins the Docker builder + health check.
 
 Env var names are documented in [`.env.production.example`](./.env.production.example).
@@ -119,9 +125,13 @@ Env var names are documented in [`.env.production.example`](./.env.production.ex
 Railway deploys on push. Once both services are green:
 
 ```bash
-# Server health (public):
+# Server liveness (public):
 curl https://<your-server-domain>/api/health
 # -> {"status":"ok"}
+
+# Deep readiness — proves SQLite and Redis, not just the port:
+curl https://<your-server-domain>/api/health/ready
+# -> {"status":"ready","checks":{"database":"ok","redis":"ok"}}
 ```
 
 The ai-service has no public URL by design — confirm it's healthy from its Railway
@@ -258,6 +268,8 @@ WebSocket-handshake checks pass.
 | `PORT` | auto | injected by Railway |
 | `NODE_ENV` | baked | `production` (in Dockerfile) |
 | `SMTP_*`, `EMAIL_FROM` | optional | enables real email; otherwise sends are simulated |
+| `METRICS_TOKEN` | recommended | bearer token guarding `GET /metrics` on a public domain |
+| `EXEC_MAX_PARALLEL` | optional | concurrent nodes per run (default 4) |
 
 ### ai-service (Railway)
 | Variable | Required | Example / notes |
