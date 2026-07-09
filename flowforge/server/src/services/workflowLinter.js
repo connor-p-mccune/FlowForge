@@ -114,6 +114,33 @@ function lintNodeConfig(node, { workflowTargets }) {
         )
       }
       break
+    case 'approval': {
+      // Invalid values don't fail the run — the runner falls back to its
+      // defaults — but silently waiting 60 minutes when the author typed "5m"
+      // is exactly the kind of surprise a lint pass exists to catch.
+      const timeout = config.timeoutMinutes
+      if (!isBlank(timeout) && (!Number.isFinite(Number(timeout)) || Number(timeout) <= 0)) {
+        issues.push(
+          issue(
+            'warning',
+            'invalid-config',
+            `${name}: the timeout must be a positive number of minutes — the 60-minute default applies`,
+            node.id
+          )
+        )
+      }
+      if (!isBlank(config.onTimeout) && !['reject', 'fail'].includes(config.onTimeout)) {
+        issues.push(
+          issue(
+            'warning',
+            'invalid-config',
+            `${name}: on-timeout must be "reject" or "fail" — defaulting to reject`,
+            node.id
+          )
+        )
+      }
+      break
+    }
     case 'transform':
       if (isBlank(config.template)) {
         issues.push(
@@ -257,10 +284,16 @@ function lintGraph({ nodes = [], edges = [] } = {}, { secretNames, workflowTarge
     }
   }
 
-  // Condition nodes route on their true/false handles; a missing side means
-  // one outcome silently ends the flow.
+  // Branching nodes route on their two source handles (condition: true/false,
+  // approval: approved/rejected); a missing side means one outcome silently
+  // ends the flow.
+  const BRANCH_NAMES = {
+    condition: { true: 'true', false: 'false' },
+    approval: { true: 'approved', false: 'rejected' },
+  }
   for (const node of nodes) {
-    if (node.type !== 'condition') continue
+    const branchNames = BRANCH_NAMES[node.type]
+    if (!branchNames) continue
     const handles = new Set(
       validEdges.filter((e) => e.source === node.id).map((e) => e.sourceHandle)
     )
@@ -270,7 +303,7 @@ function lintGraph({ nodes = [], edges = [] } = {}, { secretNames, workflowTarge
         issue(
           'warning',
           'unwired-branch',
-          `${label(node)}: the ${missing[0]} branch is not connected`,
+          `${label(node)}: the ${branchNames[missing[0]]} branch is not connected`,
           node.id
         )
       )
@@ -279,7 +312,9 @@ function lintGraph({ nodes = [], edges = [] } = {}, { secretNames, workflowTarge
         issue(
           'warning',
           'unwired-branch',
-          `${label(node)}: neither branch is connected — the result is never used`,
+          `${label(node)}: neither branch is connected — the ${
+            node.type === 'approval' ? 'decision' : 'result'
+          } is never used`,
           node.id
         )
       )

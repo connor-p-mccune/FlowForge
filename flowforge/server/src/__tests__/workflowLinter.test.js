@@ -166,6 +166,52 @@ describe('lintGraph', () => {
     expect(issues.find((i) => i.code === 'unwired-branch').message).toMatch(/false branch/)
   })
 
+  it('warns about half-wired approval branches with approved/rejected names', () => {
+    const graph = {
+      nodes: [
+        node('t1', 'trigger-manual'),
+        node('gate', 'approval', { message: 'Ship it?' }),
+        node('yes', 'output-log', {}),
+      ],
+      edges: [edge('t1', 'gate'), edge('gate', 'yes', 'true')],
+    }
+    const issues = lintGraph(graph)
+    expect(issues.find((i) => i.code === 'unwired-branch')).toMatchObject({
+      nodeId: 'gate',
+      severity: 'warning',
+    })
+    expect(issues.find((i) => i.code === 'unwired-branch').message).toMatch(/rejected branch/)
+  })
+
+  it('warns about invalid approval timeout and on-timeout values', () => {
+    const graph = {
+      nodes: [
+        node('t1', 'trigger-manual'),
+        node('gate', 'approval', { timeoutMinutes: '-5', onTimeout: 'explode' }),
+        node('yes', 'output-log', {}),
+        node('no', 'output-log', {}),
+      ],
+      edges: [
+        edge('t1', 'gate'),
+        edge('gate', 'yes', 'true'),
+        edge('gate', 'no', 'false'),
+      ],
+    }
+    const issues = lintGraph(graph)
+    const invalid = issues.filter((i) => i.code === 'invalid-config')
+    expect(invalid).toHaveLength(2)
+    expect(invalid.every((i) => i.severity === 'warning' && i.nodeId === 'gate')).toBe(true)
+
+    // Valid config raises neither.
+    const ok = lintGraph({
+      ...graph,
+      nodes: graph.nodes.map((n) =>
+        n.id === 'gate' ? node('gate', 'approval', { timeoutMinutes: 30, onTimeout: 'fail' }) : n
+      ),
+    })
+    expect(codes(ok)).not.toContain('invalid-config')
+  })
+
   it('sorts errors before warnings', () => {
     const graph = {
       nodes: [
