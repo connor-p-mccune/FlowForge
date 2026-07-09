@@ -28,9 +28,11 @@ order while streaming live progress back to every collaborator on the canvas.
   delay, email, Slack, and transform actions; branching conditions; AI prompt /
   classify / extract nodes; log outputs; **sub-workflows** (call a workflow as a
   step) and **for-each** (fan a workflow out over a list).
-- **Execution engine** — parses the graph into a DAG, runs nodes in topological
-  order, resolves `{{node-id.field}}` templates between steps, retries failures
-  with backoff, and records every step.
+- **Execution engine** — parses the graph into a DAG and schedules it with a
+  ready-set scheduler: independent branches run **in parallel** (bounded by
+  `EXEC_MAX_PARALLEL`), joins wait for every upstream branch, `{{node-id.field}}`
+  templates resolve between steps, failures retry with backoff, and every step
+  is recorded.
 - **Encrypted secrets** — store API keys once per workspace (AES-256-GCM at
   rest), reference them as `{{secrets.NAME}}`, and they're masked in run logs.
   Values are write-only: rotate or delete, never read back.

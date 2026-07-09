@@ -1,5 +1,7 @@
-// Execution engine: parses the workflow graph into a DAG, runs each node in
-// topological order, resolves {{node-id.field}} templates from the execution
+// Execution engine: parses the workflow graph into a DAG and runs it with a
+// ready-set scheduler — a node becomes runnable once every upstream node has
+// settled, and independent branches run concurrently (bounded by
+// EXEC_MAX_PARALLEL). Resolves {{node-id.field}} templates from the execution
 // context, retries failures with exponential backoff, records every step in
 // execution_steps, and publishes exec-update events (Redis pub/sub by default).
 
@@ -26,6 +28,14 @@ const runners = {
 
 const MAX_ATTEMPTS = parseInt(process.env.EXEC_MAX_ATTEMPTS || '3')
 const BASE_BACKOFF_MS = parseInt(process.env.EXEC_RETRY_BASE_MS || '500')
+
+// How many nodes of one run may execute at the same time. Independent branches
+// (e.g. the two sides of a diamond) run concurrently up to this cap; 1 restores
+// strictly sequential execution. Read per-run so tests can vary it.
+function maxParallel() {
+  const n = parseInt(process.env.EXEC_MAX_PARALLEL || '4', 10)
+  return Number.isFinite(n) && n >= 1 ? n : 4
+}
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms))
@@ -291,15 +301,20 @@ async function runExecution(
   }
 
   const context = {} // nodeId -> output object
-  const nodeStatus = {} // nodeId -> 'success' | 'failed' | 'skipped'
+  const nodeStatus = {} // nodeId -> 'success' | 'failed' | 'skipped' (settled nodes only)
+  const now = () => new Date().toISOString()
 
-  for (let i = 0; i < order.length; i++) {
-    const nodeId = order[i]
-    const node = nodeById[nodeId]
-    const now = () => new Date().toISOString()
+  const incomingByNode = {}
+  for (const nodeId of order) incomingByNode[nodeId] = []
+  for (const e of edges) {
+    if (incomingByNode[e.target]) incomingByNode[e.target].push(e)
+  }
 
-    const incoming = edges.filter((e) => e.target === nodeId)
-    const activeIncoming = incoming.filter((e) => {
+  // Upstream edges whose source succeeded and — for condition sources — whose
+  // handle matches the branch the condition took. Only meaningful once every
+  // upstream node has settled.
+  function activeIncomingFor(nodeId) {
+    return incomingByNode[nodeId].filter((e) => {
       if (nodeStatus[e.source] !== 'success') return false
       const sourceNode = nodeById[e.source]
       // Condition nodes only activate the matching true/false branch
@@ -308,61 +323,129 @@ async function runExecution(
       }
       return true
     })
+  }
 
-    if (incoming.length > 0 && activeIncoming.length === 0) {
-      nodeStatus[nodeId] = 'skipped'
-      updateStep.run('skipped', null, null, null, now(), now(), stepIdByNode[nodeId])
-      publishStep(nodeId, 'skipped')
-      continue
-    }
+  function skipNode(nodeId) {
+    nodeStatus[nodeId] = 'skipped'
+    updateStep.run('skipped', null, null, null, now(), now(), stepIdByNode[nodeId])
+    publishStep(nodeId, 'skipped')
+  }
 
+  // Ready-set scheduler: a node is ready once all of its upstream nodes have
+  // settled (succeeded / failed / skipped). Ready nodes with no active upstream
+  // edge are skipped immediately (which can cascade); the rest launch
+  // concurrently up to the parallelism cap. On the first failure the scheduler
+  // stops launching, lets in-flight nodes settle, then skips whatever never ran
+  // — so parallel siblings finish and record their results, but the run fails.
+  const cap = maxParallel()
+  const unscheduled = [...order] // not yet launched or skipped, topo order
+  const inFlight = new Map() // nodeId -> settling promise (never rejects)
+  let failure = null // first { node, err }, wins the run's error message
+
+  function launchNode(nodeId) {
+    const node = nodeById[nodeId]
     // Input = merged outputs of all active upstream nodes. Trigger (source)
     // nodes start from the run's trigger payload instead of an empty object.
     const baseInput = node.type.startsWith('trigger-') ? { ...triggerPayload } : {}
-    const input = Object.assign(baseInput, ...activeIncoming.map((e) => context[e.source] || {}))
+    const input = Object.assign(
+      baseInput,
+      ...activeIncomingFor(nodeId).map((e) => context[e.source] || {})
+    )
 
     updateStep.run('running', redact(JSON.stringify(input)), null, null, now(), null, stepIdByNode[nodeId])
     publishStep(nodeId, 'running')
 
-    try {
-      // Config templates resolve against upstream outputs plus the decrypted
-      // secrets map ({{secrets.NAME}}). Secrets ride only through this scope —
-      // never through context — so they can't leak into a later node's input.
-      const config = resolveTemplates(node.data?.config || {}, { ...context, secrets })
-      // Engine context for runners that need to reach back into the engine (only
-      // sub-workflow does today): the call stack for cycle detection, the parent
-      // execution + node so a spawned child run can be linked back, and the publish
-      // fn so nested events ride the same channel.
-      const ctx = {
-        ancestorWorkflowIds: callStack,
-        parentExecutionId: executionId,
-        parentNodeId: nodeId,
-        publish: pub,
+    const task = (async () => {
+      try {
+        // Config templates resolve against upstream outputs plus the decrypted
+        // secrets map ({{secrets.NAME}}). Secrets ride only through this scope —
+        // never through context — so they can't leak into a later node's input.
+        const config = resolveTemplates(node.data?.config || {}, { ...context, secrets })
+        // Engine context for runners that need to reach back into the engine (only
+        // sub-workflow does today): the call stack for cycle detection, the parent
+        // execution + node so a spawned child run can be linked back, and the publish
+        // fn so nested events ride the same channel.
+        const ctx = {
+          ancestorWorkflowIds: callStack,
+          parentExecutionId: executionId,
+          parentNodeId: nodeId,
+          publish: pub,
+        }
+        const output = (await runWithRetries(node, config, input, dryRun, ctx)) ?? {}
+        context[nodeId] = output
+        nodeStatus[nodeId] = 'success'
+        updateStep.run(
+          'succeeded', redact(JSON.stringify(input)), redact(JSON.stringify(output)), null,
+          now(), now(), stepIdByNode[nodeId]
+        )
+        publishStep(nodeId, 'succeeded', { output })
+      } catch (err) {
+        nodeStatus[nodeId] = 'failed'
+        updateStep.run(
+          'failed', redact(JSON.stringify(input)), null, redact(err.message),
+          now(), now(), stepIdByNode[nodeId]
+        )
+        publishStep(nodeId, 'failed', { error: err.message })
+        if (!failure) failure = { node, err }
+      } finally {
+        inFlight.delete(nodeId)
       }
-      const output = (await runWithRetries(node, config, input, dryRun, ctx)) ?? {}
-      context[nodeId] = output
-      nodeStatus[nodeId] = 'success'
-      updateStep.run(
-        'succeeded', redact(JSON.stringify(input)), redact(JSON.stringify(output)), null,
-        now(), now(), stepIdByNode[nodeId]
-      )
-      publishStep(nodeId, 'succeeded', { output })
-    } catch (err) {
-      nodeStatus[nodeId] = 'failed'
-      updateStep.run(
-        'failed', redact(JSON.stringify(input)), null, redact(err.message),
-        now(), now(), stepIdByNode[nodeId]
-      )
-      publishStep(nodeId, 'failed', { error: err.message })
+    })()
+    inFlight.set(nodeId, task)
+  }
 
-      // Mark everything downstream as skipped and fail the run
-      for (const remainingId of order.slice(i + 1)) {
-        updateStep.run('skipped', null, null, null, now(), now(), stepIdByNode[remainingId])
-        publishStep(remainingId, 'skipped')
+  // One synchronous pass: settle every skippable ready node (looping because a
+  // skip can make a downstream node ready-and-skippable) and launch ready
+  // runnable nodes while capacity allows.
+  function scheduleRound() {
+    let progressed = true
+    while (progressed && !failure) {
+      progressed = false
+      for (let i = 0; i < unscheduled.length; ) {
+        const nodeId = unscheduled[i]
+        const ready = incomingByNode[nodeId].every((e) => nodeStatus[e.source] !== undefined)
+        if (!ready) {
+          i++
+          continue
+        }
+        const incoming = incomingByNode[nodeId]
+        if (incoming.length > 0 && activeIncomingFor(nodeId).length === 0) {
+          unscheduled.splice(i, 1)
+          skipNode(nodeId)
+          progressed = true
+        } else if (inFlight.size < cap) {
+          unscheduled.splice(i, 1)
+          launchNode(nodeId)
+          progressed = true
+        } else {
+          i++
+        }
       }
-      failExecution(`Node "${node.data?.label || nodeId}" failed: ${err.message}`)
-      return
     }
+  }
+
+  while (unscheduled.length > 0 || inFlight.size > 0) {
+    scheduleRound()
+    if (failure) break
+    if (inFlight.size === 0) {
+      // Nothing running and nothing schedulable: with a valid DAG this only
+      // means everything is settled.
+      break
+    }
+    // Wait for any in-flight node to settle, then reschedule.
+    await Promise.race(inFlight.values())
+  }
+
+  // Let in-flight siblings of a failed node finish and record their results.
+  if (inFlight.size > 0) await Promise.all([...inFlight.values()])
+
+  if (failure) {
+    // Everything that never launched is skipped, then the run fails.
+    for (const nodeId of unscheduled) skipNode(nodeId)
+    failExecution(
+      `Node "${failure.node.data?.label || failure.node.id}" failed: ${failure.err.message}`
+    )
+    return
   }
 
   updateExecution.run('completed', new Date().toISOString(), new Date().toISOString(), executionId)
