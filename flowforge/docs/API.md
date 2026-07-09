@@ -31,6 +31,16 @@ Session JWTs are **not** accepted on `/api/v1`, and API tokens are not
 accepted on the session API — a leaked automation token never grants access to
 account settings.
 
+## Machine-readable spec
+
+The full API is described by an OpenAPI 3.0 document at
+`GET /api/v1/openapi.json` (no token required). Import it into Postman,
+Insomnia, or a client generator:
+
+```bash
+curl -s https://your-flowforge-host/api/v1/openapi.json -o flowforge-openapi.json
+```
+
 ## Rate limits
 
 `/api/v1` is limited per token (default 120 requests/minute). A `429` response

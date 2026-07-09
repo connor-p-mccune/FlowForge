@@ -21,6 +21,12 @@ const router = express.Router()
 
 router.use(publicApiLimiter)
 
+// Machine-readable description of this API. Unauthenticated on purpose — the
+// spec documents shapes, not data — so tooling can fetch it without a token.
+router.get('/openapi.json', (req, res) => {
+  res.json(require('../docs/openapi'))
+})
+
 function getWorkflowForMember(workflowId, userId) {
   const workflow = db.prepare('SELECT * FROM workflows WHERE id = ?').get(workflowId)
   if (!workflow) return null
