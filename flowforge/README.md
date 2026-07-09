@@ -129,6 +129,10 @@ Operational surface: liveness at `GET /api/health`, deep readiness (SQLite +
 Redis exercised) at `GET /api/health/ready`, and Prometheus metrics at
 `GET /metrics`.
 
+For the design decisions behind all of this — the parallel scheduler, the
+redaction pipeline, the collaboration model, the linter, the metrics design —
+see **[docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md)**.
+
 ---
 
 ## Prerequisites
@@ -296,7 +300,7 @@ flowforge/
 ├── client/        React + Vite frontend (served by nginx in prod)
 ├── server/        Express API, Socket.io, Bull worker, SQLite
 ├── ai-service/    Flask microservice for LLM-backed features
-├── docs/          API reference (public REST API)
+├── docs/          API reference + architecture deep dive
 ├── docker-compose.yml
 ├── .env.example
 ├── .env.production.example

@@ -1,0 +1,244 @@
+# FlowForge architecture
+
+A deep dive into the design decisions behind FlowForge. The
+[README](../README.md) covers what the product does and how to run it; this
+document covers **how it works and why it's built this way**. File paths are
+relative to `flowforge/`.
+
+- [The execution engine](#the-execution-engine)
+- [Real-time collaboration](#real-time-collaboration)
+- [Jobs and reliability](#jobs-and-reliability)
+- [Static analysis (the linter)](#static-analysis-the-linter)
+- [Security architecture](#security-architecture)
+- [Observability](#observability)
+- [Persistence](#persistence)
+- [Testing strategy](#testing-strategy)
+
+---
+
+## The execution engine
+
+`server/src/services/executionEngine.js` is the heart of the system: it turns
+a canvas graph into a run.
+
+### Ready-set scheduling, not a sequential walk
+
+The graph is first validated with Kahn's algorithm (`dagParser.js`) — if a
+topological order doesn't exist, the graph has a cycle and the run fails
+before any node executes. But the engine does **not** execute that order
+sequentially. Instead it runs a ready-set scheduler:
+
+- A node becomes *ready* once **every** upstream node has settled
+  (succeeded / failed / skipped).
+- Ready nodes whose upstream edges are all inactive are **skipped
+  immediately** — and because a skip settles the node, skips cascade through
+  dead branches synchronously, without occupying an execution slot.
+- The remaining ready nodes launch concurrently, bounded by
+  `EXEC_MAX_PARALLEL` (default 4; `1` restores strictly sequential order).
+- When nothing can launch, the scheduler awaits `Promise.race` over the
+  in-flight set and re-runs the round when any node settles.
+
+An edge is *active* when its source succeeded — and, for condition nodes,
+when the edge's handle (`true`/`false`) matches the branch the condition
+took. A join node's input is the merged output of all of its active upstream
+edges, so a diamond's two branches genuinely run in parallel and merge at
+the join.
+
+### Failure semantics
+
+On the first node failure the scheduler stops launching, lets in-flight
+siblings **settle and record their results** (they are never torn down
+mid-call — an HTTP request that was already sent should record what
+happened), then marks everything unlaunched as skipped and fails the run
+with the originating node's error. Node-level retries (exponential backoff,
+`EXEC_MAX_ATTEMPTS`) happen inside the node's slot; sub-workflow and
+for-each nodes get a single attempt because they run whole nested executions
+that already retry their own nodes — retrying the wrapper would duplicate
+side effects.
+
+### Cooperative cancellation
+
+`POST /api/executions/:id/cancel` flips a `cancel_requested` flag on the run
+row. The scheduler polls the flag once per round — i.e. every time a node
+settles — and winds down exactly like a failure, except the terminal status
+is `cancelled`. Cancellation is deliberately **inter-node**: a node in
+flight always finishes, because interrupting a half-sent email or HTTP call
+would leave the outside world in an unknown state. A run cancelled while
+still queued is finalized by the route itself, and the worker drops the job
+when it sees the terminal status — so cancel wins the race against pickup.
+
+### Templates, secrets, and redaction
+
+Node configs reference upstream outputs as `{{node-id.field}}` and workspace
+secrets as `{{secrets.NAME}}`. Three properties matter:
+
+1. **No evaluation.** Template resolution is a pure lookup — there is no
+   `eval`, `new Function`, or `vm` anywhere in the server.
+2. **Secrets never enter the context.** They are decrypted (AES-256-GCM,
+   `secretVault.js`) into a map that exists only for the duration of config
+   resolution — a secret can flow *into* a node's config but never rides
+   node outputs into a later node's persisted input.
+3. **Everything persisted is redacted.** A redactor built from the run's
+   secret values (including their JSON-escaped forms) scrubs step
+   inputs/outputs, published events, and error messages — so a secret echoed
+   back by a third-party API still never lands in the database or the UI.
+
+### Sub-workflows and for-each
+
+A sub-workflow node runs another workflow synchronously through the same
+engine, linked to the parent via `parent_execution_id`/`parent_node_id` so
+the run detail view can reconstruct the full call tree. Cycles are rejected
+up front by carrying the workflow-id call stack through the engine context.
+Workspace boundaries are enforced at the runner (a sub-workflow always runs
+in its parent's workspace), which is what lets `GET /api/executions/:id`
+authorize the whole tree with a single membership check. For-each fans a
+workflow out over a list sequentially — deliberate, because iterations
+usually hit the same external API — with a cap (`FOREACH_MAX_ITEMS`) and an
+opt-in continue-on-error mode.
+
+---
+
+## Real-time collaboration
+
+Socket.io connections authenticate in the handshake (JWT verified before any
+handler is registered) and join per-workflow rooms after a membership check.
+Within a room:
+
+- **Edits are last-write-wins.** Every node/edge change carries a timestamp;
+  a client drops remote changes older than its latest local edit to the same
+  element. Cursor positions are throttled client-side (50ms) and stale
+  cursors are garbage-collected.
+- **Execution events ride Redis pub/sub.** The engine publishes
+  `exec-update` events; the Socket.io layer relays them to the workflow's
+  room. This decouples the worker from connected sockets — the run publishes
+  identically whether zero or ten people are watching.
+- **Undo/redo converges rather than forks.** History is snapshot-based
+  (debounced, bounded at 50 entries). Applying a step diffs the target
+  snapshot against the live graph and broadcasts each difference through the
+  same channel as live edits — so peers apply the undo as ordinary changes
+  under the same LWW rules. The trade-off is explicit: remote edits are part
+  of local history, and undoing past them reverts them everywhere.
+- **Self-healing state.** Comments, notifications, and activity events are
+  written to SQLite first and emitted live second; a missed emit heals on
+  the next fetch because the row is the source of truth.
+
+---
+
+## Jobs and reliability
+
+Runs execute in a Bull worker (Redis-backed) running in-process with the
+API. Two levels of concurrency compose: `EXEC_CONCURRENCY` (default 10) is
+how many *runs* the worker processes at once; `EXEC_MAX_PARALLEL` is how
+many *nodes* of one run execute concurrently. better-sqlite3's single
+synchronous connection serializes writes, so concurrent runs interleave
+safely at `await` points.
+
+Replays re-run the workflow's **current** definition against the original
+run's persisted trigger payload (`trigger_data`) — matching how a redeploy
+affects future runs — and a replayed dry-run stays a dry-run, so re-running
+a test can never fire real side effects.
+
+---
+
+## Static analysis (the linter)
+
+`services/workflowLinter.js` inspects a graph without running it. Severity
+is a contract: **error** means the run will (almost certainly) fail or
+misfire — cycles, dangling edges, missing required config, references that
+can never resolve, unknown secret names, undeployed sub-workflow targets;
+**warning** means legal but probably unintended — unreachable branches,
+half-wired conditions, references to nodes that aren't ancestors (which
+resolve to empty at runtime).
+
+The ancestor check mirrors the engine exactly: ancestor sets are built with
+a topological pass, so the linter's idea of "upstream" and the engine's idea
+of "resolvable" cannot drift apart. The lint route accepts the canvas's
+live, unsaved graph and enriches it with real workspace context (secret
+names, sub-workflow target status).
+
+---
+
+## Security architecture
+
+[SECURITY.md](../SECURITY.md) is the authoritative threat model. The load-
+bearing decisions:
+
+- **No code evaluation path** for user input, anywhere.
+- **Auth:** bcrypt + JWT with optional TOTP two-factor (backup codes
+  bcrypt-hashed); session tokens and API tokens are deliberately
+  non-interchangeable surfaces.
+- **Personal access tokens** are stored hash-only (SHA-256), scoped,
+  expiring, and revocable — revocation keeps the row as an audit trail.
+- **Workspace secrets** are AES-256-GCM at rest and write-only through the
+  API; the engine redacts them from everything it persists or publishes.
+- **SSRF guard:** user-supplied URLs (HTTP/Slack nodes) resolve through a
+  scheme + private/reserved-IP egress check, re-applied per redirect hop.
+- **Webhook HMAC signing:** opt-in per webhook; deliveries carry a
+  timestamped HMAC-SHA256 over the raw request bytes, verified in constant
+  time with a replay-tolerance window. The raw bytes come from the body
+  parser's `verify` hook — re-serializing parsed JSON would not round-trip
+  key order or whitespace.
+
+---
+
+## Observability
+
+`services/metrics.js` is a deliberately hand-rolled Prometheus registry
+(~150 lines): the app needs a dozen series, not a client library, and the
+text exposition format is three line shapes. Design constraints:
+
+- **Bounded cardinality.** HTTP metrics label the *matched route pattern*
+  (`/api/workflows/:id`), never raw URLs — resource ids can't explode the
+  series space or leak into the metrics endpoint.
+- **Scrape-time collectors** for values cheaper to read on demand (queue
+  depth from Bull, process stats), each fault-isolated so a broken source
+  skips its gauges instead of failing the scrape.
+- **Engine outcomes** (`flowforge_executions_total`,
+  `..._duration_seconds`) are recorded at the same terminal points that
+  publish execution events, with a `nested` label separating sub-workflow
+  child runs.
+
+Health is two endpoints with different jobs: `/api/health` answers "is the
+process up" for liveness; `/api/health/ready` actually exercises SQLite and
+Redis (the ping raced against a timeout, because ioredis queues commands
+indefinitely while disconnected) and 503s with per-check detail so an
+orchestrator holds traffic until the process can genuinely serve.
+
+---
+
+## Persistence
+
+SQLite (better-sqlite3) is a deliberate fit for the deployment shape: a
+single server instance with a mounted volume, synchronous statements that
+compose with the in-process worker, and zero operational surface. Schema
+changes are **additive migrations** — `schema.sql` uses
+`CREATE TABLE IF NOT EXISTS` and `config/database.js` applies
+column-if-missing `ALTER`s at boot, so existing databases pick up new
+fields without a wipe or a migration framework.
+
+Two denormalizations are intentional: `execution_steps.node_type` is
+captured at run time so per-type analytics survive later graph edits, and
+`activity_events.entity_name` keeps feed rows readable after their entity
+is deleted.
+
+---
+
+## Testing strategy
+
+Every feature lands with tests; the suites run in CI on every push
+(`.github/workflows/ci.yml`):
+
+- **Server (Jest + supertest):** routes are tested through the real Express
+  app against an in-memory SQLite database; Redis and the Bull queue are
+  mocked at the module boundary (`jest.mock('../config/queue')`), so tests
+  exercise real SQL and real HTTP handling without infrastructure. Engine
+  tests drive `runExecution` directly — including timing-based assertions
+  that parallel branches actually overlap and a local HTTP server that
+  measures the concurrency cap.
+- **Client (Vitest + Testing Library):** components are tested through
+  their rendered behavior with `apiFetch` mocked; pure logic (graph diff,
+  auto-layout, fuzzy matching, undo history) is extracted into utilities
+  with focused unit tests.
+- **Contract pinning:** the OpenAPI document has a test asserting its path
+  list matches the mounted routes, so the spec cannot silently drift from
+  the API.
