@@ -5,6 +5,7 @@ const auth = require('../middleware/auth')
 const { validate } = require('../middleware/validate')
 const scheduler = require('../services/scheduler')
 const activityService = require('../services/activityService')
+const { lintGraph } = require('../services/workflowLinter')
 
 const router = express.Router()
 
@@ -259,6 +260,53 @@ router.post('/workflows/:id/archive', auth, (req, res) => {
 
     const updated = db.prepare('SELECT * FROM workflows WHERE id = ?').get(req.params.id)
     res.json({ workflow: updated })
+  } catch (err) {
+    console.error(err)
+    res.status(500).json({ error: 'Internal server error' })
+  }
+})
+
+// POST /api/workflows/:id/lint — static analysis of a workflow graph. Lints
+// the posted { nodes, edges } when the body carries them (the canvas's live,
+// possibly not-yet-saved state), else the stored graph. Workspace context —
+// secret names and sub-workflow targets — comes from the workflow's workspace,
+// so {{secrets.*}} references and call targets are checked for real.
+router.post('/workflows/:id/lint', auth, (req, res) => {
+  try {
+    const workflow = db.prepare('SELECT * FROM workflows WHERE id = ?').get(req.params.id)
+    if (!workflow || !isMember(workflow.workspace_id, req.user.id)) {
+      return res.status(404).json({ error: 'Workflow not found' })
+    }
+
+    let graph
+    if (req.body && Array.isArray(req.body.nodes) && Array.isArray(req.body.edges)) {
+      if (req.body.nodes.length > 2000 || req.body.edges.length > 5000) {
+        return res.status(400).json({ error: 'Graph too large to lint' })
+      }
+      graph = { nodes: req.body.nodes, edges: req.body.edges }
+    } else {
+      graph = parseGraphData(workflow.graph_json)
+    }
+
+    const secretNames = new Set(
+      db.prepare('SELECT name FROM workspace_secrets WHERE workspace_id = ?')
+        .all(workflow.workspace_id)
+        .map((r) => r.name)
+    )
+    const workflowTargets = new Map(
+      db.prepare('SELECT id, name, status FROM workflows WHERE workspace_id = ?')
+        .all(workflow.workspace_id)
+        .map((r) => [r.id, { name: r.name, status: r.status }])
+    )
+
+    const issues = lintGraph(graph, { secretNames, workflowTargets })
+    res.json({
+      issues,
+      summary: {
+        errors: issues.filter((i) => i.severity === 'error').length,
+        warnings: issues.filter((i) => i.severity === 'warning').length,
+      },
+    })
   } catch (err) {
     console.error(err)
     res.status(500).json({ error: 'Internal server error' })

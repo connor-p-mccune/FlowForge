@@ -1,0 +1,338 @@
+// Static analysis for workflow graphs. lintGraph inspects a { nodes, edges }
+// canvas without running anything and returns the problems it finds, so the
+// editor can surface them before a run fails at 3am.
+//
+// Severities:
+//   error   — the run will (or almost certainly will) fail or misfire at
+//             runtime: cycles, dangling edges, missing required config,
+//             references that can never resolve.
+//   warning — legal but probably not what the author meant: unreachable
+//             branches, references that resolve to empty, half-wired
+//             conditions.
+//
+// Each issue: { severity, code, message, nodeId } (nodeId null for
+// graph-level problems). Sorted errors-first so callers can slice cheaply.
+
+const cron = require('node-cron')
+const { buildAdjacency, topoSort } = require('./dagParser')
+
+const PLACEHOLDER = /\{\{\s*([\w-]+(?:\.[\w-]+)*)\s*\}\}/g
+
+function issue(severity, code, message, nodeId = null) {
+  return { severity, code, message, nodeId }
+}
+
+function label(node) {
+  return node.data?.label || node.id
+}
+
+function isBlank(value) {
+  return value == null || (typeof value === 'string' && value.trim() === '')
+}
+
+// Every {{path}} reference inside a node's config, as [firstSegment, rest].
+function collectRefs(config) {
+  const refs = []
+  const walk = (value) => {
+    if (typeof value === 'string') {
+      for (const match of value.matchAll(PLACEHOLDER)) {
+        const [head, ...rest] = match[1].split('.')
+        refs.push({ head, rest })
+      }
+    } else if (Array.isArray(value)) {
+      value.forEach(walk)
+    } else if (value && typeof value === 'object') {
+      Object.values(value).forEach(walk)
+    }
+  }
+  walk(config || {})
+  return refs
+}
+
+// Per-type required-config checks. Only fields the runner will definitely
+// choke on are errors; softer omissions are warnings.
+function lintNodeConfig(node, { workflowTargets }) {
+  const issues = []
+  const config = node.data?.config || {}
+  const name = label(node)
+
+  const requireField = (field, what) => {
+    if (isBlank(config[field])) {
+      issues.push(
+        issue('error', 'missing-config', `${name}: ${what} is required`, node.id)
+      )
+    }
+  }
+
+  switch (node.type) {
+    case 'trigger-schedule':
+      if (isBlank(config.cron) || !cron.validate(String(config.cron))) {
+        issues.push(
+          issue(
+            'error',
+            'invalid-cron',
+            `${name}: "${config.cron ?? ''}" is not a valid cron expression`,
+            node.id
+          )
+        )
+      }
+      break
+    case 'action-http':
+      requireField('url', 'a URL')
+      break
+    case 'action-email':
+      requireField('to', 'a recipient')
+      if (isBlank(config.subject)) {
+        issues.push(
+          issue('warning', 'missing-config', `${name}: the email has no subject`, node.id)
+        )
+      }
+      break
+    case 'action-slack':
+      requireField('webhookUrl', 'a Slack webhook URL')
+      break
+    case 'ai-prompt':
+      requireField('prompt', 'a prompt')
+      break
+    case 'ai-classify':
+      requireField('text', 'input text')
+      requireField('labels', 'labels')
+      break
+    case 'ai-extract':
+      requireField('text', 'input text')
+      requireField('fields', 'fields to extract')
+      break
+    case 'condition':
+      if (isBlank(config.left)) {
+        issues.push(
+          issue(
+            'warning',
+            'missing-config',
+            `${name}: the left value is empty — the comparison always sees ""`,
+            node.id
+          )
+        )
+      }
+      break
+    case 'transform':
+      if (isBlank(config.template)) {
+        issues.push(
+          issue('warning', 'missing-config', `${name}: the output template is empty`, node.id)
+        )
+      }
+      break
+    case 'sub-workflow':
+    case 'for-each': {
+      if (node.type === 'for-each') requireField('items', 'an items list')
+      if (isBlank(config.workflowId)) {
+        issues.push(
+          issue('error', 'missing-config', `${name}: no target workflow selected`, node.id)
+        )
+      } else if (workflowTargets) {
+        // The runner requires the target to exist in this workspace and be
+        // deployed — anything else throws at run time.
+        const target = workflowTargets.get(config.workflowId)
+        if (!target) {
+          issues.push(
+            issue(
+              'error',
+              'missing-target',
+              `${name}: the target workflow no longer exists in this workspace`,
+              node.id
+            )
+          )
+        } else if (target.status !== 'deployed') {
+          issues.push(
+            issue(
+              'error',
+              'undeployed-target',
+              `${name}: target workflow "${target.name}" is not deployed`,
+              node.id
+            )
+          )
+        }
+      }
+      break
+    }
+    default:
+      break
+  }
+  return issues
+}
+
+// Ancestor sets via a topological pass: ancestors(n) = union over incoming
+// edges of source + ancestors(source). Used to tell a legal upstream reference
+// from one that will always resolve empty.
+function buildAncestors(order, incomingByNode) {
+  const ancestors = {}
+  for (const nodeId of order) {
+    const set = new Set()
+    for (const e of incomingByNode[nodeId] || []) {
+      set.add(e.source)
+      for (const a of ancestors[e.source] || []) set.add(a)
+    }
+    ancestors[nodeId] = set
+  }
+  return ancestors
+}
+
+// Lint a graph. Options (all optional — omitted context skips those rules):
+//   secretNames     — Set of the workspace's secret names, for {{secrets.*}}
+//   workflowTargets — Map(workflowId -> { name, status }) for sub-workflow /
+//                     for-each target validation
+function lintGraph({ nodes = [], edges = [] } = {}, { secretNames, workflowTargets } = {}) {
+  const issues = []
+
+  if (nodes.length === 0) {
+    issues.push(issue('warning', 'empty-graph', 'The workflow has no nodes yet'))
+    return issues
+  }
+
+  const nodeIds = new Set(nodes.map((n) => n.id))
+
+  // Structural problems first — an edge into nowhere breaks the run before any
+  // node executes, and a cycle can't be ordered at all.
+  const validEdges = []
+  for (const e of edges) {
+    if (!nodeIds.has(e.source) || !nodeIds.has(e.target)) {
+      issues.push(
+        issue(
+          'error',
+          'dangling-edge',
+          `A connection references a node that no longer exists (${e.source} → ${e.target})`
+        )
+      )
+    } else {
+      validEdges.push(e)
+    }
+  }
+
+  let order = null
+  try {
+    const { adj, inDegree } = buildAdjacency(nodes, validEdges)
+    order = topoSort(nodes, adj, inDegree)
+  } catch {
+    issues.push(
+      issue('error', 'cycle', 'The workflow contains a cycle and can never finish')
+    )
+  }
+
+  const triggers = nodes.filter((n) => n.type.startsWith('trigger-'))
+  if (triggers.length === 0) {
+    issues.push(
+      issue(
+        'warning',
+        'no-trigger',
+        'The workflow has no trigger node — webhooks and schedules can never start it'
+      )
+    )
+  }
+
+  // Nodes a trigger can never reach still execute (the engine runs the whole
+  // graph), which is rarely what the author expects.
+  if (triggers.length > 0 && order) {
+    const reachable = new Set(triggers.map((t) => t.id))
+    const outgoing = {}
+    for (const e of validEdges) (outgoing[e.source] ||= []).push(e.target)
+    const queue = [...reachable]
+    while (queue.length) {
+      for (const next of outgoing[queue.shift()] || []) {
+        if (!reachable.has(next)) {
+          reachable.add(next)
+          queue.push(next)
+        }
+      }
+    }
+    for (const node of nodes) {
+      if (!reachable.has(node.id)) {
+        issues.push(
+          issue(
+            'warning',
+            'unreachable-node',
+            `${label(node)} is not connected to any trigger`,
+            node.id
+          )
+        )
+      }
+    }
+  }
+
+  // Condition nodes route on their true/false handles; a missing side means
+  // one outcome silently ends the flow.
+  for (const node of nodes) {
+    if (node.type !== 'condition') continue
+    const handles = new Set(
+      validEdges.filter((e) => e.source === node.id).map((e) => e.sourceHandle)
+    )
+    const missing = ['true', 'false'].filter((h) => !handles.has(h))
+    if (missing.length === 1) {
+      issues.push(
+        issue(
+          'warning',
+          'unwired-branch',
+          `${label(node)}: the ${missing[0]} branch is not connected`,
+          node.id
+        )
+      )
+    } else if (missing.length === 2) {
+      issues.push(
+        issue(
+          'warning',
+          'unwired-branch',
+          `${label(node)}: neither branch is connected — the result is never used`,
+          node.id
+        )
+      )
+    }
+  }
+
+  // Per-node config + template references.
+  const incomingByNode = {}
+  for (const e of validEdges) (incomingByNode[e.target] ||= []).push(e)
+  const ancestors = order ? buildAncestors(order, incomingByNode) : null
+
+  for (const node of nodes) {
+    issues.push(...lintNodeConfig(node, { workflowTargets }))
+
+    for (const ref of collectRefs(node.data?.config)) {
+      if (ref.head === 'secrets') {
+        const secretName = ref.rest[0]
+        if (secretNames && secretName && !secretNames.has(secretName)) {
+          issues.push(
+            issue(
+              'error',
+              'unknown-secret',
+              `${label(node)}: secret "${secretName}" does not exist in this workspace`,
+              node.id
+            )
+          )
+        }
+        continue
+      }
+      if (!nodeIds.has(ref.head)) {
+        issues.push(
+          issue(
+            'error',
+            'unknown-node-ref',
+            `${label(node)}: {{${ref.head}…}} references a node that doesn't exist`,
+            node.id
+          )
+        )
+      } else if (ancestors && !ancestors[node.id]?.has(ref.head)) {
+        issues.push(
+          issue(
+            'warning',
+            'non-upstream-ref',
+            `${label(node)}: {{${ref.head}…}} isn't upstream of this node, so it resolves to empty`,
+            node.id
+          )
+        )
+      }
+    }
+  }
+
+  const rank = { error: 0, warning: 1 }
+  return issues.sort((a, b) => rank[a.severity] - rank[b.severity])
+}
+
+module.exports = { lintGraph }
