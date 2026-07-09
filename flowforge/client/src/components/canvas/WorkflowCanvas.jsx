@@ -934,6 +934,8 @@ function CanvasInner({ workflowId }) {
         onDelete={handleDeleteNode}
         workspaceId={workflow?.workspace_id}
         currentWorkflowId={workflowId}
+        nodes={nodes}
+        edges={edges}
       />
       {suggestions !== null && (
         <SuggestionsPanel

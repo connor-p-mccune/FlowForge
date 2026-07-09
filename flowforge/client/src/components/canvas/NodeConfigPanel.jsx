@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import cronstrue from 'cronstrue'
 import { apiFetch } from '../../services/api'
+import VariableExplorer from './VariableExplorer'
 
 const OPERATORS = [
   { value: 'equals', label: 'equals' },
@@ -151,6 +152,8 @@ export default function NodeConfigPanel({
   onDelete,
   workspaceId,
   currentWorkflowId,
+  nodes,
+  edges,
 }) {
   if (!node) return null
 
@@ -526,6 +529,7 @@ export default function NodeConfigPanel({
           />
         </label>
         {renderFields()}
+        <VariableExplorer node={node} nodes={nodes} edges={edges} />
         <div className="config-panel__node-id">
           Node ID: <code>{node.id}</code>
         </div>
