@@ -11,6 +11,7 @@ import ReactFlow, {
 } from 'reactflow'
 import 'reactflow/dist/style.css'
 import { useWorkflow } from '../../hooks/useWorkflow'
+import { useUndoRedo } from '../../hooks/useUndoRedo'
 import { useSocket } from '../../hooks/useSocket'
 import { useAuth } from '../../hooks/useAuth'
 import { useToast } from '../../hooks/useToast'
@@ -300,6 +301,41 @@ function CanvasInner({ workflowId }) {
     },
     [socket, workflowId]
   )
+
+  // Undo/redo over debounced graph snapshots. Applying a step broadcasts the
+  // node/edge differences through the same channel as live edits, so
+  // collaborators converge on the undone state.
+  const { undo, redo, canUndo, canRedo } = useUndoRedo({
+    ready: !loading && Boolean(workflow),
+    nodes,
+    edges,
+    setNodes,
+    setEdges,
+    emitNodeChange,
+    emitEdgeChange,
+  })
+
+  // Ctrl/⌘-Z undoes, Ctrl/⌘-Shift-Z (or Ctrl-Y) redoes — except while typing
+  // in a field, where the browser's own text undo must keep working.
+  useEffect(() => {
+    const onKeyDown = (event) => {
+      if (!(event.ctrlKey || event.metaKey)) return
+      const tag = event.target?.tagName
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || event.target?.isContentEditable) {
+        return
+      }
+      const key = event.key.toLowerCase()
+      if (key === 'z' && !event.shiftKey) {
+        event.preventDefault()
+        undo()
+      } else if ((key === 'z' && event.shiftKey) || key === 'y') {
+        event.preventDefault()
+        redo()
+      }
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [undo, redo])
 
   // Drop cursors that stopped updating (closed tab, network drop)
   useEffect(() => {
@@ -824,6 +860,10 @@ function CanvasInner({ workflowId }) {
         onToggleCommentMode={toggleCommentMode}
         commentMode={commentMode}
         onAutoLayout={handleAutoLayout}
+        onUndo={undo}
+        onRedo={redo}
+        canUndo={canUndo}
+        canRedo={canRedo}
         onToggleIssues={handleToggleIssues}
         issuesOpen={issuesOpen}
         onDeploy={handleDeploy}

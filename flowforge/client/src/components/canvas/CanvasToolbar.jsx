@@ -11,6 +11,10 @@ export default function CanvasToolbar({
   onToggleCommentMode,
   commentMode,
   onAutoLayout,
+  onUndo,
+  onRedo,
+  canUndo,
+  canRedo,
   onToggleIssues,
   issuesOpen,
   onDeploy,
@@ -78,6 +82,24 @@ export default function CanvasToolbar({
         onClick={onAutoLayout}
       >
         ▦ Tidy
+      </button>
+      <button
+        className="toolbar-btn toolbar-btn--undo"
+        title="Undo (Ctrl/⌘-Z)"
+        onClick={onUndo}
+        disabled={!canUndo}
+        aria-label="Undo"
+      >
+        ↶
+      </button>
+      <button
+        className="toolbar-btn toolbar-btn--redo"
+        title="Redo (Ctrl/⌘-Shift-Z)"
+        onClick={onRedo}
+        disabled={!canRedo}
+        aria-label="Redo"
+      >
+        ↷
       </button>
       <button
         className={`toolbar-btn toolbar-btn--issues${issuesOpen ? ' toolbar-btn--active' : ''}`}

@@ -23,7 +23,9 @@ order while streaming live progress back to every collaborator on the canvas.
 ## Features
 
 - **Drag-and-drop canvas** — build workflows visually with React Flow, with
-  one-click **auto-layout** ("Tidy") that arranges the graph into clean layers.
+  one-click **auto-layout** ("Tidy") that arranges the graph into clean layers
+  and **undo/redo** (`Ctrl/⌘-Z`) that broadcasts each step to collaborators so
+  everyone converges on the same state.
 - **Rich node library** — manual, webhook & schedule triggers; HTTP request,
   delay, email, Slack, and transform actions; branching conditions; AI prompt /
   classify / extract nodes; log outputs; **sub-workflows** (call a workflow as a
