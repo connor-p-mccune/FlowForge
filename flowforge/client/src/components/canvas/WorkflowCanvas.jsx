@@ -7,6 +7,7 @@ import ReactFlow, {
   addEdge,
   Background,
   Controls,
+  MiniMap,
   useReactFlow,
 } from 'reactflow'
 import 'reactflow/dist/style.css'
@@ -31,6 +32,7 @@ import PresenceBar from '../collaboration/PresenceBar'
 import { NODE_DEFS } from './nodeDefs'
 import { nodeTypes } from './nodeTypes'
 import { layoutGraph } from '../../utils/autoLayout'
+import { makeDuplicate } from '../../utils/nodeOps'
 
 // Shown for any generation failure — the model may have returned something
 // unusable, the prompt may be too vague, or the AI service may be unreachable.
@@ -315,8 +317,23 @@ function CanvasInner({ workflowId }) {
     emitEdgeChange,
   })
 
-  // Ctrl/⌘-Z undoes, Ctrl/⌘-Shift-Z (or Ctrl-Y) redoes — except while typing
-  // in a field, where the browser's own text undo must keep working.
+  // Ctrl/⌘-D duplicates the selected node: fresh id, deep-copied config,
+  // offset position, selection moved to the copy, broadcast to peers.
+  const handleDuplicate = useCallback(() => {
+    const source = nodes.find((n) => n.selected)
+    if (!source) return
+    const copy = makeDuplicate(source)
+    setNodes((nds) =>
+      nds
+        .map((n) => (n.selected ? { ...n, selected: false } : n))
+        .concat({ ...copy, selected: true })
+    )
+    emitNodeChange('add', copy)
+  }, [nodes, setNodes, emitNodeChange])
+
+  // Ctrl/⌘-Z undoes, Ctrl/⌘-Shift-Z (or Ctrl-Y) redoes, Ctrl/⌘-D duplicates —
+  // except while typing in a field, where the browser's own behavior must
+  // keep working.
   useEffect(() => {
     const onKeyDown = (event) => {
       if (!(event.ctrlKey || event.metaKey)) return
@@ -331,11 +348,14 @@ function CanvasInner({ workflowId }) {
       } else if ((key === 'z' && event.shiftKey) || key === 'y') {
         event.preventDefault()
         redo()
+      } else if (key === 'd') {
+        event.preventDefault()
+        handleDuplicate()
       }
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [undo, redo])
+  }, [undo, redo, handleDuplicate])
 
   // Drop cursors that stopped updating (closed tab, network drop)
   useEffect(() => {
@@ -894,6 +914,7 @@ function CanvasInner({ workflowId }) {
       >
         <Background />
         <Controls />
+        <MiniMap className="canvas-minimap" pannable zoomable />
       </ReactFlow>
       {loading && (
         <div className="canvas-loading">

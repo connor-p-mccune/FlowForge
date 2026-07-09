@@ -1096,6 +1096,13 @@ html, body, #root {
 }
 
 /* Webhook management panel */
+/* Canvas minimap */
+.canvas-minimap {
+  border: 1px solid #e5e5e5;
+  border-radius: 8px;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+}
+
 /* Variable explorer (config panel) */
 .var-explorer {
   margin-top: 14px;
