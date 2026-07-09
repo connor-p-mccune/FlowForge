@@ -2,9 +2,69 @@ import { useCallback, useEffect, useState } from 'react'
 import ReactFlow, { Background, ReactFlowProvider } from 'reactflow'
 import { apiFetch } from '../../services/api'
 import { nodeTypes } from './nodeTypes'
+import { diffGraphs, describeEdge, nodeLabel } from '../../utils/graphDiff'
 
 function formatWhen(iso) {
   return iso ? new Date(iso).toLocaleString() : ''
+}
+
+// What changed on the live canvas since `base` (a stored version's graph).
+// Read top-down: added = on the canvas but not in the version, removed = in
+// the version but gone from the canvas.
+function VersionDiff({ base, current }) {
+  const diff = diffGraphs(base, current)
+  if (diff.identical) {
+    return (
+      <p className="history-panel__hint">The current canvas matches this version exactly.</p>
+    )
+  }
+
+  const chips = [
+    diff.addedNodes.length && `+${diff.addedNodes.length} node${diff.addedNodes.length > 1 ? 's' : ''}`,
+    diff.removedNodes.length && `−${diff.removedNodes.length} node${diff.removedNodes.length > 1 ? 's' : ''}`,
+    diff.changedNodes.length && `~${diff.changedNodes.length} changed`,
+    diff.addedEdges.length && `+${diff.addedEdges.length} connection${diff.addedEdges.length > 1 ? 's' : ''}`,
+    diff.removedEdges.length && `−${diff.removedEdges.length} connection${diff.removedEdges.length > 1 ? 's' : ''}`,
+  ].filter(Boolean)
+
+  return (
+    <div className="version-diff">
+      <p className="version-diff__caption">Changes on the canvas since this version:</p>
+      <div className="version-diff__chips">
+        {chips.map((chip) => (
+          <span className="version-diff__chip" key={chip}>{chip}</span>
+        ))}
+      </div>
+      <ul className="version-diff__list">
+        {diff.addedNodes.map((n) => (
+          <li className="version-diff__item version-diff__item--added" key={`an-${n.id}`}>
+            + {nodeLabel(n)}
+          </li>
+        ))}
+        {diff.removedNodes.map((n) => (
+          <li className="version-diff__item version-diff__item--removed" key={`rn-${n.id}`}>
+            − {nodeLabel(n)}
+          </li>
+        ))}
+        {diff.changedNodes.map(({ node, changes }) => (
+          <li className="version-diff__item version-diff__item--changed" key={`cn-${node.id}`}>
+            ~ {nodeLabel(node)}
+            <span className="version-diff__fields"> ({changes.join(', ')})</span>
+          </li>
+        ))}
+        {diff.addedEdges.map((e) => (
+          <li className="version-diff__item version-diff__item--added" key={`ae-${e.source}-${e.target}-${e.sourceHandle}`}>
+            + {describeEdge(e, base, current)}
+          </li>
+        ))}
+        {diff.removedEdges.map((e) => (
+          <li className="version-diff__item version-diff__item--removed" key={`re-${e.source}-${e.target}-${e.sourceHandle}`}>
+            − {describeEdge(e, base, current)}
+          </li>
+        ))}
+      </ul>
+    </div>
+  )
 }
 
 // Read-only mini canvas for a past version's graph. Wrapped in its own
@@ -38,15 +98,24 @@ function GraphPreview({ nodes, edges }) {
 }
 
 // Slide-out drawer listing every deployed version of a workflow. Each entry can
-// expand to a read-only preview of that version's graph and offers a Restore
-// action (guarded by a confirmation dialog). On a successful restore the parent
-// reloads the canvas via onRestored.
-export default function HistoryPanel({ workflowId, open, reloadSignal, onClose, onRestored }) {
+// expand to a read-only preview of that version's graph or a diff against the
+// live canvas, and offers a Restore action (guarded by a confirmation dialog).
+// On a successful restore the parent reloads the canvas via onRestored.
+export default function HistoryPanel({
+  workflowId,
+  open,
+  reloadSignal,
+  onClose,
+  onRestored,
+  currentNodes,
+  currentEdges,
+}) {
   const [versions, setVersions] = useState([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState(null)
 
-  const [expandedId, setExpandedId] = useState(null) // version currently previewed
+  const [expandedId, setExpandedId] = useState(null) // version currently expanded
+  const [expandedMode, setExpandedMode] = useState('preview') // 'preview' | 'diff'
   const [preview, setPreview] = useState(null) // { nodes, edges } for expandedId
   const [previewLoading, setPreviewLoading] = useState(false)
 
@@ -70,6 +139,7 @@ export default function HistoryPanel({ workflowId, open, reloadSignal, onClose, 
     if (!open) {
       // Reset transient UI so the drawer reopens clean.
       setExpandedId(null)
+      setExpandedMode('preview')
       setPreview(null)
       setConfirmId(null)
       return
@@ -77,14 +147,21 @@ export default function HistoryPanel({ workflowId, open, reloadSignal, onClose, 
     load()
   }, [open, load, reloadSignal])
 
-  const handleTogglePreview = useCallback(
-    async (version) => {
+  // Expand a version as a graph preview or as a diff against the live canvas.
+  // Switching modes on an already-expanded version reuses the fetched graph.
+  const handleToggleExpand = useCallback(
+    async (version, mode) => {
       if (expandedId === version.id) {
-        setExpandedId(null)
-        setPreview(null)
+        if (expandedMode === mode) {
+          setExpandedId(null)
+          setPreview(null)
+          return
+        }
+        setExpandedMode(mode)
         return
       }
       setExpandedId(version.id)
+      setExpandedMode(mode)
       setPreview(null)
       setPreviewLoading(true)
       try {
@@ -99,7 +176,7 @@ export default function HistoryPanel({ workflowId, open, reloadSignal, onClose, 
         setPreviewLoading(false)
       }
     },
-    [expandedId, workflowId]
+    [expandedId, expandedMode, workflowId]
   )
 
   const confirmVersion = versions.find((v) => v.id === confirmId) || null
@@ -156,9 +233,16 @@ export default function HistoryPanel({ workflowId, open, reloadSignal, onClose, 
                     <div className="version-item__actions">
                       <button
                         className="version-item__preview-btn"
-                        onClick={() => handleTogglePreview(v)}
+                        onClick={() => handleToggleExpand(v, 'preview')}
                       >
-                        {expandedId === v.id ? 'Hide' : 'Preview'}
+                        {expandedId === v.id && expandedMode === 'preview' ? 'Hide' : 'Preview'}
+                      </button>
+                      <button
+                        className="version-item__preview-btn"
+                        title="Compare this version with the current canvas"
+                        onClick={() => handleToggleExpand(v, 'diff')}
+                      >
+                        {expandedId === v.id && expandedMode === 'diff' ? 'Hide' : 'Diff'}
                       </button>
                       <button
                         className="version-item__restore"
@@ -171,7 +255,12 @@ export default function HistoryPanel({ workflowId, open, reloadSignal, onClose, 
                   {expandedId === v.id && (
                     <div className="version-preview">
                       {previewLoading || !preview ? (
-                        <p className="history-panel__hint">Loading preview…</p>
+                        <p className="history-panel__hint">Loading…</p>
+                      ) : expandedMode === 'diff' ? (
+                        <VersionDiff
+                          base={preview}
+                          current={{ nodes: currentNodes || [], edges: currentEdges || [] }}
+                        />
                       ) : preview.nodes.length === 0 ? (
                         <p className="history-panel__hint">This version has no nodes.</p>
                       ) : (

@@ -1096,6 +1096,56 @@ html, body, #root {
 }
 
 /* Webhook management panel */
+/* Version diff (history drawer) */
+.version-diff {
+  padding: 8px 2px 2px;
+}
+
+.version-diff__caption {
+  font-size: 12px;
+  color: #666;
+  margin-bottom: 6px;
+}
+
+.version-diff__chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.version-diff__chip {
+  font-size: 11px;
+  font-weight: 600;
+  background: #eef2ff;
+  color: #4338ca;
+  border-radius: 999px;
+  padding: 2px 8px;
+}
+
+.version-diff__list {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.version-diff__item {
+  font-size: 12.5px;
+  line-height: 1.4;
+  border-radius: 6px;
+  padding: 4px 8px;
+}
+
+.version-diff__item--added { background: #f0fdf4; color: #15803d; }
+.version-diff__item--removed { background: #fef2f2; color: #b91c1c; }
+.version-diff__item--changed { background: #fffbeb; color: #b45309; }
+
+.version-diff__fields {
+  color: #92700c;
+  font-size: 11.5px;
+}
+
 /* Issues (lint) panel — left-anchored so it can stay open while clicking an
    issue opens the node's config panel on the right. */
 .issues-panel {

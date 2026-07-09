@@ -939,6 +939,8 @@ function CanvasInner({ workflowId }) {
         reloadSignal={historyReload}
         onClose={() => setHistoryOpen(false)}
         onRestored={handleRestored}
+        currentNodes={nodes}
+        currentEdges={edges}
       />
       <ExecutionPanel
         open={execPanelOpen}

@@ -43,6 +43,10 @@ order while streaming live progress back to every collaborator on the canvas.
   dead branches, missing config, references to nodes that aren't upstream,
   unknown `{{secrets.*}}` names, undeployed sub-workflow targets. Click an
   issue to jump to the offending node.
+- **Version diffs** — every deploy snapshots the graph; the history drawer can
+  preview any version, restore it (reversibly), or **diff it against the live
+  canvas** — nodes added/removed, changed config fields, and rewired
+  connections.
 - **Command palette** — `Ctrl/⌘-K` fuzzy-jumps to any workflow, page, or action
   across every workspace.
 - **Live execution streaming** — step-by-step status updates pushed to the UI
