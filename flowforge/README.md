@@ -50,7 +50,11 @@ order while streaming live progress back to every collaborator on the canvas.
 - **Command palette** — `Ctrl/⌘-K` fuzzy-jumps to any workflow, page, or action
   across every workspace.
 - **Live execution streaming** — step-by-step status updates pushed to the UI
-  over WebSockets as a run progresses.
+  over WebSockets as a run progresses, with a **Stop** button for cooperative
+  cancellation.
+- **Run timeline** — any finished run renders as a Gantt chart: per-step bars
+  inside the run's wall-time window make parallel branches and slow steps
+  obvious at a glance.
 - **Real-time collaboration** — multiple people edit the same workflow at once
   with shared cursors, presence, and last-write-wins sync.
 - **Webhook triggers** — generate a public URL that fires a workflow on POST;

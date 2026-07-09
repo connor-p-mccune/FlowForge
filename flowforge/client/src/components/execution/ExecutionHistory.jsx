@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { apiFetch } from '../../services/api'
 import { useToast } from '../../hooks/useToast'
 import { StepList } from './ExecutionPanel'
+import ExecutionTimeline from './ExecutionTimeline'
 import { SkeletonRows } from '../Skeleton'
 
 function parseSteps(rows) {
@@ -11,6 +12,8 @@ function parseSteps(rows) {
     status: r.status,
     output: r.output_json ? JSON.parse(r.output_json) : null,
     error: r.error,
+    startedAt: r.started_at,
+    finishedAt: r.finished_at,
   }))
 }
 
@@ -87,6 +90,7 @@ export default function ExecutionHistory({ workflowId, nodes, autoOpenId }) {
   const [executions, setExecutions] = useState([])
   const [workflowUpdatedAt, setWorkflowUpdatedAt] = useState(null)
   const [selected, setSelected] = useState(null) // { execution, steps }
+  const [detailView, setDetailView] = useState('steps') // 'steps' | 'timeline'
   const [pendingReplay, setPendingReplay] = useState(null) // execution awaiting confirm
   const [replaying, setReplaying] = useState(false)
   const [error, setError] = useState(null)
@@ -126,6 +130,7 @@ export default function ExecutionHistory({ workflowId, nodes, autoOpenId }) {
   const openRun = useCallback(async (executionId) => {
     setError(null)
     setPendingReplay(null)
+    setDetailView('steps')
     try {
       const { execution, steps, childExecutions } = await apiFetch(`/api/executions/${executionId}`)
       setSelected({
@@ -193,11 +198,33 @@ export default function ExecutionHistory({ workflowId, nodes, autoOpenId }) {
             onConfirm={handleReplay}
           />
         )}
-        <StepList
-          steps={selected.steps}
-          nodes={nodes}
-          childExecutionsByNode={selected.childExecutionsByNode}
-        />
+        <div className="exec-history__viewtoggle" role="tablist" aria-label="Run detail view">
+          <button
+            role="tab"
+            aria-selected={detailView === 'steps'}
+            className={`exec-history__viewtab${detailView === 'steps' ? ' exec-history__viewtab--active' : ''}`}
+            onClick={() => setDetailView('steps')}
+          >
+            Steps
+          </button>
+          <button
+            role="tab"
+            aria-selected={detailView === 'timeline'}
+            className={`exec-history__viewtab${detailView === 'timeline' ? ' exec-history__viewtab--active' : ''}`}
+            onClick={() => setDetailView('timeline')}
+          >
+            Timeline
+          </button>
+        </div>
+        {detailView === 'timeline' ? (
+          <ExecutionTimeline steps={selected.steps} nodes={nodes} />
+        ) : (
+          <StepList
+            steps={selected.steps}
+            nodes={nodes}
+            childExecutionsByNode={selected.childExecutionsByNode}
+          />
+        )}
       </div>
     )
   }
