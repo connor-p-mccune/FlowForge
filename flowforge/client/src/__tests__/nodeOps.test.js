@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { makeDuplicate } from '../utils/nodeOps'
+import { makeDuplicate, decorateConditionEdges } from '../utils/nodeOps'
 
 const source = {
   id: 'orig',
@@ -27,5 +27,31 @@ describe('makeDuplicate', () => {
   it('does not carry volatile props like selection', () => {
     const copy = makeDuplicate(source)
     expect(copy).not.toHaveProperty('selected')
+  })
+})
+
+describe('decorateConditionEdges', () => {
+  const plain = { id: 'e1', source: 'a', target: 'b', sourceHandle: null }
+  const yes = { id: 'e2', source: 'c', target: 'x', sourceHandle: 'true' }
+  const no = { id: 'e3', source: 'c', target: 'y', sourceHandle: 'false' }
+
+  it('labels and colors true/false branch edges', () => {
+    const [, decoratedYes, decoratedNo] = decorateConditionEdges([plain, yes, no])
+    expect(decoratedYes.label).toBe('true')
+    expect(decoratedYes.style.stroke).toBe('#16a34a')
+    expect(decoratedNo.label).toBe('false')
+    expect(decoratedNo.style.stroke).toBe('#dc2626')
+  })
+
+  it('leaves ordinary edges untouched and never mutates the input', () => {
+    const input = [plain, yes]
+    const result = decorateConditionEdges(input)
+    expect(result[0]).toBe(plain) // same object — no decoration needed
+    expect(yes).not.toHaveProperty('label') // original untouched
+  })
+
+  it('returns the same array reference when no edge needs decorating', () => {
+    const input = [plain]
+    expect(decorateConditionEdges(input)).toBe(input)
   })
 })

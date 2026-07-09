@@ -32,7 +32,7 @@ import PresenceBar from '../collaboration/PresenceBar'
 import { NODE_DEFS } from './nodeDefs'
 import { nodeTypes } from './nodeTypes'
 import { layoutGraph } from '../../utils/autoLayout'
-import { makeDuplicate } from '../../utils/nodeOps'
+import { makeDuplicate, decorateConditionEdges } from '../../utils/nodeOps'
 
 // Shown for any generation failure — the model may have returned something
 // unusable, the prompt may be too vague, or the AI service may be unreachable.
@@ -521,6 +521,11 @@ function CanvasInner({ workflowId }) {
     )
   }, [nodes, dryRunByNode])
 
+  // Condition-branch edges get a true/false label for rendering only — the
+  // `edges` state (what auto-save persists and collaboration broadcasts)
+  // stays undecorated.
+  const displayEdges = useMemo(() => decorateConditionEdges(edges), [edges])
+
   // The test-mode banner shows only while a dry run is actively executing.
   const testBannerVisible =
     isTestRun && (execution?.status === 'pending' || execution?.status === 'running')
@@ -903,7 +908,7 @@ function CanvasInner({ workflowId }) {
       )}
       <ReactFlow
         nodes={displayNodes}
-        edges={edges}
+        edges={displayEdges}
         onNodesChange={handleNodesChange}
         onEdgesChange={handleEdgesChange}
         onConnect={onConnect}
