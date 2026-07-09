@@ -230,3 +230,34 @@ CREATE TABLE IF NOT EXISTS activity_events (
 -- The feed pages newest-first within a workspace (and filters by event_type prefix).
 CREATE INDEX IF NOT EXISTS idx_activity_workspace_created
   ON activity_events (workspace_id, created_at DESC, id DESC);
+
+-- Human-in-the-loop approvals: an approval node pauses its run until a
+-- workspace member responds or the wait times out. The node runner
+-- (services/nodeRunners/approval.js) inserts the row as 'pending' and polls it;
+-- POST /api/approvals/:id/respond flips it to 'approved'/'rejected' with the
+-- pending-only guard in the UPDATE so concurrent responders can't both win. The
+-- runner itself settles 'timed-out' (past expires_at) and 'cancelled' (run was
+-- cancelled mid-wait). workflow_id/workspace_id are denormalised so the inbox
+-- query (GET /api/approvals) doesn't join through executions; responded_by is
+-- kept for the audit trail (LEFT JOINed for display).
+CREATE TABLE IF NOT EXISTS execution_approvals (
+  id           TEXT PRIMARY KEY,
+  execution_id TEXT NOT NULL REFERENCES executions(id) ON DELETE CASCADE,
+  node_id      TEXT NOT NULL,
+  workflow_id  TEXT NOT NULL,
+  workspace_id TEXT NOT NULL,
+  status       TEXT NOT NULL DEFAULT 'pending',
+  message      TEXT,
+  requested_at TEXT NOT NULL,
+  expires_at   TEXT,
+  responded_at TEXT,
+  responded_by TEXT REFERENCES users(id),
+  note         TEXT
+);
+
+-- The inbox lists a workspace's approvals by status; the run detail view loads
+-- them per execution.
+CREATE INDEX IF NOT EXISTS idx_execution_approvals_workspace
+  ON execution_approvals (workspace_id, status, requested_at DESC);
+CREATE INDEX IF NOT EXISTS idx_execution_approvals_execution
+  ON execution_approvals (execution_id);

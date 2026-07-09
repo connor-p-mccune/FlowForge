@@ -25,7 +25,14 @@ const runners = {
   'output-return': require('./nodeRunners/outputReturn'),
   'sub-workflow': require('./nodeRunners/subWorkflow'),
   'for-each': require('./nodeRunners/forEach'),
+  'approval': require('./nodeRunners/approval'),
 }
+
+// Node types that get exactly one attempt. Sub-workflow and for-each run whole
+// nested executions that already retry their own nodes — retrying the wrapper
+// would duplicate side effects and child execution rows. Approval waits on a
+// human decision — a retry would file a duplicate approval request.
+const SINGLE_ATTEMPT_TYPES = new Set(['sub-workflow', 'for-each', 'approval'])
 
 const MAX_ATTEMPTS = parseInt(process.env.EXEC_MAX_ATTEMPTS || '3')
 const BASE_BACKOFF_MS = parseInt(process.env.EXEC_RETRY_BASE_MS || '500')
@@ -171,13 +178,7 @@ function defaultPublish(payload) {
 
 async function runWithRetries(node, config, input, isDryRun, ctx) {
   const runner = getRunner(node.type)
-  // Sub-workflow and for-each nodes run entire nested executions that already
-  // retry their own nodes. Retrying them here would re-run whole sub-workflows
-  // on any inner failure — duplicate side effects and duplicate child execution
-  // rows — so they get a single attempt; everything else keeps the standard
-  // retry-with-backoff.
-  const nested = node.type === 'sub-workflow' || node.type === 'for-each'
-  const maxAttempts = nested ? 1 : MAX_ATTEMPTS
+  const maxAttempts = SINGLE_ATTEMPT_TYPES.has(node.type) ? 1 : MAX_ATTEMPTS
   for (let attempt = 1; ; attempt++) {
     try {
       return await runner(config, input, isDryRun, ctx)
@@ -329,8 +330,10 @@ async function runExecution(
     return incomingByNode[nodeId].filter((e) => {
       if (nodeStatus[e.source] !== 'success') return false
       const sourceNode = nodeById[e.source]
-      // Condition nodes only activate the matching true/false branch
-      if (sourceNode?.type === 'condition' && e.sourceHandle != null) {
+      // Branching nodes only activate the matching handle: condition routes on
+      // its true/false result, approval on approved (result true) vs rejected.
+      const branching = sourceNode?.type === 'condition' || sourceNode?.type === 'approval'
+      if (branching && e.sourceHandle != null) {
         return String(context[e.source]?.result) === e.sourceHandle
       }
       return true
