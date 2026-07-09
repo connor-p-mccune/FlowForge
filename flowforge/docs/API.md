@@ -99,6 +99,34 @@ Requires the `trigger` scope. Returns `400` if the workflow has no nodes,
 `404` if it doesn't exist or the token's owner isn't a member of its
 workspace.
 
+### List a workflow's runs
+
+```bash
+curl -s "https://your-flowforge-host/api/v1/workflows/6f0c…/executions?limit=5" \
+  -H "Authorization: Bearer $FLOWFORGE_TOKEN"
+```
+
+Response `200` — run summaries, newest first (no step payloads; poll a single
+execution for those). `limit` is 1–100, default 20:
+
+```json
+{
+  "executions": [
+    {
+      "id": "e57a…",
+      "workflowId": "6f0c…",
+      "status": "completed",
+      "triggerType": "api",
+      "startedAt": "2026-07-09T09:00:01.000Z",
+      "finishedAt": "2026-07-09T09:00:03.412Z",
+      "createdAt": "2026-07-09T09:00:00.000Z"
+    }
+  ]
+}
+```
+
+Requires the `read` scope.
+
 ### Poll an execution
 
 ```bash

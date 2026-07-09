@@ -91,6 +91,42 @@ router.post('/workflows/:id/trigger', tokenAuth('trigger'), async (req, res) => 
   }
 })
 
+// GET /api/v1/workflows/:id/executions — a workflow's recent runs, newest
+// first, as summaries (no step payloads — poll GET /executions/:id for those).
+// ?limit caps the page (default 20, max 100).
+router.get('/workflows/:id/executions', tokenAuth('read'), (req, res) => {
+  try {
+    const workflow = getWorkflowForMember(req.params.id, req.user.id)
+    if (!workflow) return res.status(404).json({ error: 'Workflow not found' })
+
+    const requested = parseInt(req.query.limit, 10)
+    const limit = Number.isFinite(requested) ? Math.min(Math.max(requested, 1), 100) : 20
+
+    const rows = db.prepare(
+      `SELECT id, status, trigger_type, started_at, finished_at, created_at
+         FROM executions
+        WHERE workflow_id = ?
+        ORDER BY created_at DESC, rowid DESC
+        LIMIT ?`
+    ).all(workflow.id, limit)
+
+    res.json({
+      executions: rows.map((r) => ({
+        id: r.id,
+        workflowId: workflow.id,
+        status: r.status,
+        triggerType: r.trigger_type,
+        startedAt: r.started_at,
+        finishedAt: r.finished_at,
+        createdAt: r.created_at,
+      })),
+    })
+  } catch (err) {
+    console.error(err)
+    res.status(500).json({ error: 'Internal server error' })
+  }
+})
+
 // GET /api/v1/executions/:id — a run's status and its steps (inputs/outputs
 // already secret-redacted by the engine before they were persisted).
 router.get('/executions/:id', tokenAuth('read'), (req, res) => {

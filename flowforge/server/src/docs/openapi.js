@@ -101,6 +101,49 @@ const spec = {
         },
       },
     },
+    '/workflows/{workflowId}/executions': {
+      get: {
+        tags: ['executions'],
+        summary: 'List a workflow’s recent runs',
+        description:
+          'Run summaries (no step payloads), newest first. Poll ' +
+          'GET /executions/{executionId} for step-level detail. Requires the ' +
+          '`read` scope.',
+        operationId: 'listExecutions',
+        parameters: [
+          { $ref: '#/components/parameters/WorkflowId' },
+          {
+            name: 'limit',
+            in: 'query',
+            required: false,
+            schema: { type: 'integer', minimum: 1, maximum: 100, default: 20 },
+            description: 'Page size (1–100).',
+          },
+        ],
+        responses: {
+          200: {
+            description: 'The workflow’s recent runs.',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    executions: {
+                      type: 'array',
+                      items: { $ref: '#/components/schemas/ExecutionSummary' },
+                    },
+                  },
+                },
+              },
+            },
+          },
+          401: { $ref: '#/components/responses/Unauthorized' },
+          403: { $ref: '#/components/responses/Forbidden' },
+          404: { $ref: '#/components/responses/NotFound' },
+          429: { $ref: '#/components/responses/RateLimited' },
+        },
+      },
+    },
     '/executions/{executionId}': {
       get: {
         tags: ['executions'],
@@ -232,6 +275,18 @@ const spec = {
           triggerType: { type: 'string', nullable: true, example: 'api' },
           startedAt: { type: 'string', format: 'date-time', nullable: true },
           finishedAt: { type: 'string', format: 'date-time', nullable: true },
+        },
+      },
+      ExecutionSummary: {
+        type: 'object',
+        properties: {
+          id: { type: 'string' },
+          workflowId: { type: 'string' },
+          status: { $ref: '#/components/schemas/ExecutionStatus' },
+          triggerType: { type: 'string', nullable: true, example: 'webhook' },
+          startedAt: { type: 'string', format: 'date-time', nullable: true },
+          finishedAt: { type: 'string', format: 'date-time', nullable: true },
+          createdAt: { type: 'string', format: 'date-time' },
         },
       },
       ExecutionStatus: {
