@@ -6,6 +6,7 @@ const auth = require('../middleware/auth')
 const { validate } = require('../middleware/validate')
 const { webhookLimiter } = require('../middleware/rateLimit')
 const { getExecutionQueue } = require('../config/queue')
+const { generateSigningSecret, verifyWebhookSignature } = require('../services/webhookSignature')
 
 const router = express.Router()
 
@@ -18,6 +19,13 @@ function getWorkflowForMember(workflowId, userId) {
   return member ? workflow : null
 }
 
+// Shape a row for API responses: the signing secret itself never leaves the
+// server after creation — callers only learn *whether* a webhook is signed.
+function presentWebhook(row) {
+  const { signing_secret: signingSecret, ...rest } = row
+  return { ...rest, signed: Boolean(signingSecret) }
+}
+
 // --- Webhook management (authenticated) ---
 
 // GET /api/workflows/:id/webhooks — list a workflow's webhooks
@@ -28,14 +36,17 @@ router.get('/workflows/:id/webhooks', auth, (req, res) => {
     const webhooks = db.prepare(
       'SELECT * FROM webhooks WHERE workflow_id = ? ORDER BY created_at DESC'
     ).all(workflow.id)
-    res.json({ webhooks })
+    res.json({ webhooks: webhooks.map(presentWebhook) })
   } catch (err) {
     console.error(err)
     res.status(500).json({ error: 'Internal server error' })
   }
 })
 
-// POST /api/workflows/:id/webhooks — create a webhook trigger
+// POST /api/workflows/:id/webhooks — create a webhook trigger. Pass
+// { signed: true } to also mint a per-webhook HMAC signing secret; the secret
+// appears exactly once, in this response — deliveries must then be signed
+// (see the public trigger below).
 router.post('/workflows/:id/webhooks', auth, validate({ name: { type: 'string', maxLength: 200 } }), (req, res) => {
   try {
     const workflow = getWorkflowForMember(req.params.id, req.user.id)
@@ -43,13 +54,18 @@ router.post('/workflows/:id/webhooks', auth, validate({ name: { type: 'string', 
 
     const id = uuidv4()
     const key = crypto.randomBytes(24).toString('base64url')
+    const signingSecret = req.body?.signed === true ? generateSigningSecret() : null
     const now = new Date().toISOString()
     db.prepare(
-      'INSERT INTO webhooks (id, workflow_id, webhook_key, name, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?)'
-    ).run(id, workflow.id, key, req.body?.name || null, req.user.id, now)
+      'INSERT INTO webhooks (id, workflow_id, webhook_key, name, signing_secret, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)'
+    ).run(id, workflow.id, key, req.body?.name || null, signingSecret, req.user.id, now)
 
     const webhook = db.prepare('SELECT * FROM webhooks WHERE id = ?').get(id)
-    res.status(201).json({ webhook })
+    res.status(201).json({
+      webhook: presentWebhook(webhook),
+      // The only time the secret is ever returned.
+      ...(signingSecret ? { signingSecret } : {}),
+    })
   } catch (err) {
     console.error(err)
     res.status(500).json({ error: 'Internal server error' })
@@ -76,10 +92,22 @@ router.delete('/webhooks/:webhookId', auth, (req, res) => {
 
 // POST /api/webhooks/:key — anyone with the key can fire the workflow.
 // The request body becomes the trigger node's output for this run.
+// Signed webhooks additionally require a timestamped HMAC over the raw body
+// (X-FlowForge-Timestamp + X-FlowForge-Signature) — see webhookSignature.js.
 router.post('/webhooks/:key', webhookLimiter, async (req, res) => {
   try {
     const webhook = db.prepare('SELECT * FROM webhooks WHERE webhook_key = ?').get(req.params.key)
     if (!webhook) return res.status(404).json({ error: 'Webhook not found' })
+
+    if (webhook.signing_secret) {
+      const result = verifyWebhookSignature({
+        secret: webhook.signing_secret,
+        timestampHeader: req.get('x-flowforge-timestamp'),
+        signatureHeader: req.get('x-flowforge-signature'),
+        rawBody: req.rawBody,
+      })
+      if (!result.ok) return res.status(401).json({ error: result.error })
+    }
 
     const workflow = db.prepare('SELECT * FROM workflows WHERE id = ?').get(webhook.workflow_id)
     if (!workflow) return res.status(404).json({ error: 'Workflow not found' })

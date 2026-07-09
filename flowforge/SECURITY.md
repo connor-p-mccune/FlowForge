@@ -19,7 +19,7 @@ Bull worker. The notable trust boundaries and the threats against them:
 |---|--------|--------|-------------|
 | T1 | **Code injection via workflow nodes** | A user crafts a `transform` template, `condition` operand, or `{{...}}` placeholder hoping it is `eval`'d server-side (e.g. `require('fs')`, `process.exit()`). | **Mitigated** — there is no code-evaluation path (see below). |
 | T2 | **Credential brute-force / stuffing** | Automated guessing against `POST /api/auth/login`, or mass account creation against `/api/auth/register`. | **Mitigated** — bcrypt + strict rate limiting. |
-| T3 | **Webhook abuse** | The public `POST /api/webhooks/:key` trigger is flooded, or fired by someone who obtained the key. | **Partially mitigated** — unguessable key + rate limiting. Signature verification deferred (see T3 in *Deferred*). |
+| T3 | **Webhook abuse** | The public `POST /api/webhooks/:key` trigger is flooded, or fired by someone who obtained the key. | **Mitigated** — unguessable key + rate limiting + optional per-webhook HMAC signatures with timestamp-bound replay protection (see below). |
 | T4 | **Cross-origin / browser attacks** | A malicious site calls the API with a victim's session, or injects content. | **Mitigated** — CORS allow-list, security headers, tokens in `Authorization` (not cookies). |
 | T5 | **SQL injection** | User input reaches a SQL query. | **Mitigated** — all queries use `better-sqlite3` prepared statements. |
 | T6 | **Resource exhaustion / DoS** | Oversized request bodies or enormous graphs. | **Mitigated** — body cap + per-field/array size limits. |
@@ -223,19 +223,25 @@ for the MVP.
 - **When to revisit:** before handling sensitive data or supporting forced
   logout / session revocation. At that point also add a token version / denylist.
 
-### T3 — Webhook signature verification *(deferred — decision recorded)*
+### T3 — Webhook signature verification *(implemented — was deferred)*
 
-The public webhook trigger is authenticated by an **unguessable 192-bit random
-key** (`crypto.randomBytes(24).toString('base64url')`) and rate-limited at
-60/min. HMAC signature verification (per-webhook shared secret + an
-`X-Signature` header verified on each call) was considered and **deferred**.
+Previously deferred; now implemented as designed (`services/webhookSignature.js`):
 
-- **Risk accepted:** anyone who obtains the key (e.g. via logs or a leaked
-  config) can trigger the workflow; there is no replay protection.
-- **When to revisit:** when integrating providers that sign payloads, or when
-  webhook URLs may be exposed. Implementation note: add a `secret` column to the
-  `webhooks` table, verify `HMAC-SHA256(body, secret)` in constant time, and keep
-  the current key check as a first factor.
+- A webhook can be created with `{ signed: true }`, which mints a per-webhook
+  secret (`whsec_<48 hex>`). The secret is returned **once** at creation and
+  never again — list responses expose only a `signed` flag.
+- Every delivery to a signed webhook must carry
+  `X-FlowForge-Timestamp` (unix seconds) and
+  `X-FlowForge-Signature: v1=<hex>`, where the signature is
+  `HMAC-SHA256(secret, "<timestamp>.<raw body bytes>")`. The raw bytes are
+  captured by the body parser (`verify` hook) so verification never depends on
+  re-serialization round-tripping key order or whitespace.
+- The timestamp is inside the signed payload and checked against a ±5-minute
+  tolerance — a captured request cannot be replayed later.
+- Comparison uses `crypto.timingSafeEqual`; failures return `401` without ever
+  echoing the expected signature.
+- The unguessable 192-bit webhook key remains the first factor; unsigned
+  webhooks behave exactly as before.
 
 ### T7 — SSRF: DNS-rebinding residual + egress allowlist *(partial — decision recorded)*
 

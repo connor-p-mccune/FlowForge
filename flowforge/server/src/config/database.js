@@ -60,6 +60,11 @@ ensureColumn('executions', 'parent_node_id', 'TEXT')
 ensureColumn('executions', 'trigger_data', 'TEXT')
 ensureColumn('executions', 'trigger_type', 'TEXT')
 
+// Webhook HMAC signing (SECURITY.md T3): optional per-webhook shared secret.
+// NULL = unsigned webhook (key-only auth, unchanged behavior); set = every
+// delivery must carry a valid timestamped HMAC (services/webhookSignature.js).
+ensureColumn('webhooks', 'signing_secret', 'TEXT')
+
 // Run cancellation: cancel_requested is the cooperative stop flag. The cancel
 // routes set it; the engine polls it between node settlements and winds the run
 // down ('cancelled' status) at the next scheduling round. A run cancelled while

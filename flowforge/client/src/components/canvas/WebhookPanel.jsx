@@ -13,6 +13,11 @@ export default function WebhookPanel({ workflowId, open, onClose }) {
   const [error, setError] = useState(null)
   const [creating, setCreating] = useState(false)
   const [copiedId, setCopiedId] = useState(null)
+  // HMAC signing: whether the next webhook is created signed, and the one-time
+  // secret display ({ webhookId, secret }) — the server never returns it again.
+  const [signNew, setSignNew] = useState(false)
+  const [newSecret, setNewSecret] = useState(null)
+  const [secretCopied, setSecretCopied] = useState(false)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -34,16 +39,29 @@ export default function WebhookPanel({ workflowId, open, onClose }) {
   async function handleCreate() {
     setCreating(true)
     setError(null)
+    setNewSecret(null)
+    setSecretCopied(false)
     try {
-      const { webhook } = await apiFetch(`/api/workflows/${workflowId}/webhooks`, {
+      const { webhook, signingSecret } = await apiFetch(`/api/workflows/${workflowId}/webhooks`, {
         method: 'POST',
-        body: { name: `Webhook ${webhooks.length + 1}` },
+        body: { name: `Webhook ${webhooks.length + 1}`, signed: signNew },
       })
       setWebhooks((prev) => [webhook, ...prev])
+      if (signingSecret) setNewSecret({ webhookId: webhook.id, secret: signingSecret })
     } catch (err) {
       setError(err.message)
     } finally {
       setCreating(false)
+    }
+  }
+
+  async function handleCopySecret() {
+    if (!newSecret) return
+    try {
+      await navigator.clipboard.writeText(newSecret.secret)
+      setSecretCopied(true)
+    } catch {
+      setError('Could not copy to clipboard')
     }
   }
 
@@ -80,10 +98,37 @@ export default function WebhookPanel({ workflowId, open, onClose }) {
           Anyone with a URL below can POST JSON to start this workflow. The request
           body flows into your webhook trigger node.
         </p>
+        <label className="webhook-panel__sign-toggle">
+          <input
+            type="checkbox"
+            checked={signNew}
+            onChange={(e) => setSignNew(e.target.checked)}
+          />
+          <span>
+            Require signed deliveries — callers must send a timestamped
+            HMAC-SHA256 signature
+          </span>
+        </label>
         <button className="webhook-panel__create" onClick={handleCreate} disabled={creating}>
           {creating ? 'Creating…' : '+ New webhook URL'}
         </button>
         {error && <p className="webhook-panel__error">{error}</p>}
+        {newSecret && (
+          <div className="webhook-secret" role="status">
+            <p className="webhook-secret__title">
+              Signing secret — copy it now, it won&rsquo;t be shown again:
+            </p>
+            <code className="webhook-secret__value">{newSecret.secret}</code>
+            <button className="webhook-item__copy" onClick={handleCopySecret}>
+              {secretCopied ? 'Copied!' : 'Copy secret'}
+            </button>
+            <p className="webhook-secret__hint">
+              Sign each POST with{' '}
+              <code>X-FlowForge-Signature: v1=HMAC_SHA256(secret, timestamp + &quot;.&quot; + body)</code>{' '}
+              and <code>X-FlowForge-Timestamp</code> (unix seconds).
+            </p>
+          </div>
+        )}
         {loading ? (
           <p className="webhook-panel__hint">Loading…</p>
         ) : webhooks.length === 0 ? (
@@ -94,6 +139,14 @@ export default function WebhookPanel({ workflowId, open, onClose }) {
               <li className="webhook-item" key={w.id}>
                 <div className="webhook-item__row">
                   <span className="webhook-item__name">{w.name || 'Webhook'}</span>
+                  {w.signed && (
+                    <span
+                      className="webhook-item__signed"
+                      title="Deliveries must carry a valid HMAC signature"
+                    >
+                      🔏 Signed
+                    </span>
+                  )}
                   <button
                     className="webhook-item__delete"
                     title="Delete"

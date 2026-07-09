@@ -34,7 +34,17 @@ if (process.env.NODE_ENV === 'production' && corsOrigins === '*') {
 app.use(cors({ origin: corsOrigins, credentials: corsOrigins !== '*' }))
 // Cap request bodies so a huge payload can't exhaust memory. Workflow graphs
 // are the largest legitimate body, and 2mb covers very large graphs.
-app.use(express.json({ limit: '2mb' }))
+// `verify` keeps a reference to the exact raw bytes: webhook HMAC signatures
+// are computed over the wire payload, and re-serializing the parsed body
+// would not round-trip key order or whitespace.
+app.use(
+  express.json({
+    limit: '2mb',
+    verify: (req, _res, buf) => {
+      req.rawBody = buf
+    },
+  })
+)
 
 // Prometheus instrumentation: every response is counted and timed against its
 // matched route pattern (bounded label cardinality). Scraped at GET /metrics.

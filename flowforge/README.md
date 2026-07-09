@@ -60,7 +60,9 @@ order while streaming live progress back to every collaborator on the canvas.
 - **Real-time collaboration** — multiple people edit the same workflow at once
   with shared cursors, presence, and last-write-wins sync.
 - **Webhook triggers** — generate a public URL that fires a workflow on POST;
-  the request body flows into the graph as the trigger's output.
+  the request body flows into the graph as the trigger's output. Optionally
+  **HMAC-signed**: deliveries must carry a timestamped SHA-256 signature over
+  the raw body (constant-time verified, replay-window bounded).
 - **AI suggestions** — ask the assistant for sensible next nodes based on the
   current graph.
 - **Workspaces & auth** — JWT auth, per-user workspaces, and workflow CRUD.
