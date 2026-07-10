@@ -155,6 +155,17 @@ Enforced in dev/prod; skipped under `NODE_ENV=test` unless `ENABLE_SSRF_GUARD=tr
 (the runner suites hit `127.0.0.1` servers). Tested in `__tests__/ssrfGuard.test.js`.
 A residual DNS-rebinding window remains — see *Deferred*.
 
+**Outbound webhooks** (`services/eventDispatcher.js`) are the third
+user-supplied-URL surface: a workspace owner points a subscription at an
+external endpoint and the server POSTs events to it. Deliveries go through the
+same `safeFetch` guard, and the subscription routes additionally reject
+blocked URLs at creation time (`routes/subscriptions.js`). Every delivery is
+HMAC-signed with a per-subscription secret (same timestamped scheme as T3's
+inbound signatures, shown once at creation, never returned by the API), so
+receivers can authenticate FlowForge and reject replays. Creating, editing,
+redelivering, and test-pinging subscriptions is workspace-owner-only. Tested
+in `__tests__/eventDispatcher.test.js` and `__tests__/eventSubscriptions.test.js`.
+
 ### Encrypted workspace secrets (T9)
 
 Workspace secrets (`routes/secrets.js` + `services/secretVault.js`) give node

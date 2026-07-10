@@ -186,6 +186,70 @@ execution to observe the terminal status).
 
 Requires the `trigger` scope. Returns `409` if the run has already finished.
 
+## Receiving events (outbound webhooks)
+
+Instead of polling, a workspace can push its events to you: add a
+subscription on the workspace's **Webhooks** page (endpoint URL + event
+patterns like `execution.failed`, `workflow.*`, or `*`). FlowForge then POSTs
+each matching event to your endpoint:
+
+```json
+{
+  "id": "d3b0c44a-…",
+  "type": "execution.failed",
+  "createdAt": "2026-07-09T12:00:00.000Z",
+  "data": {
+    "event_type": "execution.failed",
+    "entity_type": "execution",
+    "entity_id": "…",
+    "entity_name": "Nightly sync",
+    "actor_display_name": null,
+    "metadata": { "workflowId": "…", "error": "…" },
+    "created_at": "2026-07-09T12:00:00.000Z"
+  }
+}
+```
+
+Delivery semantics:
+
+- **At-least-once, in order of due time.** Failed deliveries retry with
+  exponential backoff (30s, 2m, 8m, 32m) up to 5 attempts. The `id` is stable
+  across retries and manual redeliveries — deduplicate on it.
+- **Answer fast with a 2xx.** Anything else (including a timeout after 10s)
+  counts as a failure and schedules a retry.
+- **Every delivery is signed** with the subscription's `whsec_…` secret
+  (shown once at creation), using the same scheme as inbound webhook
+  triggers:
+
+  ```
+  X-FlowForge-Timestamp: <unix seconds>
+  X-FlowForge-Signature: v1=<hex>
+  X-FlowForge-Event:     <event type>
+  X-FlowForge-Delivery:  <delivery id>
+  ```
+
+  where the signature is `HMAC-SHA256(secret, "<timestamp>.<raw body>")` over
+  the exact raw request bytes. Verify with a constant-time comparison and
+  reject timestamps outside your tolerance window (FlowForge uses 5 minutes)
+  to block replays:
+
+  ```js
+  const crypto = require('crypto')
+
+  function verify(req, rawBody, secret) {
+    const ts = req.headers['x-flowforge-timestamp']
+    const sig = req.headers['x-flowforge-signature']
+    if (!ts || !sig || Math.abs(Date.now() / 1000 - Number(ts)) > 300) return false
+    const expected = 'v1=' + crypto.createHmac('sha256', secret)
+      .update(`${ts}.`).update(rawBody).digest('hex')
+    return sig.length === expected.length &&
+      crypto.timingSafeEqual(Buffer.from(sig), Buffer.from(expected))
+  }
+  ```
+
+Use the **Send test** button (or the delivery log's **Redeliver**) on the
+Webhooks page to exercise your endpoint end to end.
+
 ## Errors
 
 All errors use the same shape as the rest of the API:

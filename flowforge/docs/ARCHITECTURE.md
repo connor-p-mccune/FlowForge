@@ -8,6 +8,7 @@ relative to `flowforge/`.
 - [The execution engine](#the-execution-engine)
 - [Real-time collaboration](#real-time-collaboration)
 - [Jobs and reliability](#jobs-and-reliability)
+- [Outbound webhooks](#outbound-webhooks)
 - [Static analysis (the linter)](#static-analysis-the-linter)
 - [Security architecture](#security-architecture)
 - [Observability](#observability)
@@ -168,6 +169,35 @@ Replays re-run the workflow's **current** definition against the original
 run's persisted trigger payload (`trigger_data`) — matching how a redeploy
 affects future runs — and a replayed dry-run stays a dry-run, so re-running
 a test can never fire real side effects.
+
+---
+
+## Outbound webhooks
+
+Event subscriptions (`services/eventDispatcher.js`) push workspace activity
+events to external URLs. The design piggybacks on two systems that already
+existed rather than inventing new ones:
+
+- **The event stream is the activity feed.** `activityService.logEvent` is
+  already the single funnel every significant action flows through, so the
+  dispatcher hooks there — one line — and subscriptions automatically cover
+  every current and future event type, with patterns (`execution.failed`,
+  `workflow.*`, `*`) mirroring the feed's own families. Coalesced feed
+  bursts deliver once, because the coalesce path returns before the hook.
+- **The queue is a SQLite table, not memory.** Each matching event inserts
+  an `event_deliveries` row; a poller drains due rows and reschedules
+  failures with exponential backoff (5 attempts). A restart loses nothing —
+  pending deliveries and their retry schedule are just rows. Delivery is
+  therefore at-least-once, and the delivery id is deliberately stable
+  across retries and manual redeliveries so consumers can deduplicate.
+- **Signing reuses `webhookSignature.js`.** Outbound deliveries carry the
+  same timestamped HMAC scheme the inbound webhook trigger verifies, so one
+  documented verification snippet serves both directions.
+- **Subscription URLs are SSRF surface.** They are user-supplied addresses
+  the server will POST to from inside the network, so delivery goes through
+  the same `safeFetch` as HTTP nodes (scheme + private-range checks per
+  redirect hop), and the routes reject blocked URLs at creation time for a
+  friendlier failure than a delivery that can never succeed.
 
 ---
 
