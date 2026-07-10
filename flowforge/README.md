@@ -200,6 +200,8 @@ Copy `.env.example` to `.env` before running. **Never commit `.env`.**
 | `METRICS_TOKEN`   | no       | Bearer token guarding `GET /metrics` (unguarded when unset) |
 | `WEBHOOK_MAX_ATTEMPTS` | no  | Delivery attempts per outbound webhook event (default 5) |
 | `WEBHOOK_DISPATCH_INTERVAL_MS` | no | Outbound webhook delivery-queue poll interval (default 5000) |
+| `EXECUTION_RETENTION_DAYS` | no | Prune terminal runs older than this many days (default: keep forever) |
+| `WEBHOOK_DELIVERY_RETENTION_DAYS` | no | Prune settled delivery-log rows after this many days (default 30; 0 = keep) |
 
 \* The app runs without it, but any AI node or the Suggest button will error
 until a valid key is set.

@@ -287,6 +287,15 @@ captured at run time so per-type analytics survive later graph edits, and
 `activity_events.entity_name` keeps feed rows readable after their entity
 is deleted.
 
+Growth is bounded by a retention sweep (`services/retention.js`, startup +
+every 6h): settled webhook-delivery logs age out after 30 days by default,
+while execution history is kept forever unless `EXECUTION_RETENTION_DAYS`
+opts in — history is a feature, so pruning it is a deliberate choice. The
+sweep only ever deletes terminal rows (a years-old run still marked
+`running` is evidence of a bug, not garbage), and deletes are capped per
+pass so a first sweep over an old database can't stall the synchronous
+SQLite connection.
+
 ---
 
 ## Testing strategy

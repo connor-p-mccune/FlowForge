@@ -92,6 +92,9 @@ if (process.env.NODE_ENV !== 'test') {
   // Drain the outbound webhook delivery queue (event subscriptions). Durable in
   // SQLite, so deliveries queued before a restart pick back up here.
   require('./services/eventDispatcher').startDispatcher()
+  // Age-based cleanup: settled webhook deliveries (default 30d) and — only
+  // when EXECUTION_RETENTION_DAYS is set — old terminal runs.
+  require('./services/retention').startRetention()
 }
 
 app.get('/api/health', (req, res) => res.json({ status: 'ok' }))
