@@ -258,6 +258,11 @@ text exposition format is three line shapes. Design constraints:
   `..._duration_seconds`) are recorded at the same terminal points that
   publish execution events, with a `nested` label separating sub-workflow
   child runs.
+- **Outbound webhook health** is two series: an attempt counter by outcome
+  (`delivered` / `retried` / `failed`) at the dispatcher's settle points,
+  and a scrape-time backlog gauge — a growing
+  `flowforge_webhook_deliveries_pending` means an unreachable receiver (or
+  a dispatcher that isn't running).
 
 Health is two endpoints with different jobs: `/api/health` answers "is the
 process up" for liveness; `/api/health/ready` actually exercises SQLite and

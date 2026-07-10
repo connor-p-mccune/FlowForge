@@ -20,6 +20,7 @@ const { v4: uuidv4 } = require('uuid')
 const db = require('../config/database')
 const { computeSignature } = require('./webhookSignature')
 const { safeFetch } = require('./ssrfGuard')
+const { recordWebhookDelivery } = require('./metrics')
 
 // All read live so tests (and deployments) can tune without re-requiring.
 const maxAttempts = () => Math.max(1, parseInt(process.env.WEBHOOK_MAX_ATTEMPTS || '5', 10) || 5)
@@ -83,6 +84,7 @@ async function attemptDelivery(delivery) {
     db.prepare(
       "UPDATE event_deliveries SET status = 'failed', error = ? WHERE id = ?"
     ).run('Subscription removed or disabled', delivery.id)
+    recordWebhookDelivery('failed')
     return
   }
 
@@ -131,6 +133,7 @@ async function attemptDelivery(delivery) {
               error = NULL, delivered_at = ?, next_attempt_at = NULL
         WHERE id = ?`
     ).run(outcome.status, now, delivery.id)
+    recordWebhookDelivery('delivered')
     return
   }
 
@@ -141,6 +144,7 @@ async function attemptDelivery(delivery) {
           SET status = 'failed', attempts = ?, response_status = ?, error = ?, next_attempt_at = NULL
         WHERE id = ?`
     ).run(attempts, outcome.status, outcome.error, delivery.id)
+    recordWebhookDelivery('failed')
     return
   }
   // 30s, 2m, 8m, 32m… — generous enough to ride out a receiver deploy without
@@ -151,6 +155,7 @@ async function attemptDelivery(delivery) {
         SET attempts = ?, response_status = ?, error = ?, next_attempt_at = ?
       WHERE id = ?`
   ).run(attempts, outcome.status, outcome.error, new Date(Date.now() + backoff).toISOString(), delivery.id)
+  recordWebhookDelivery('retried')
 }
 
 // Drain due deliveries (oldest first). Returns how many were attempted so the

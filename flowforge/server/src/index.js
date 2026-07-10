@@ -143,6 +143,15 @@ metrics.registerCollector(async () => {
   }
 })
 
+// Outbound webhook backlog — a growing number means an unreachable receiver
+// (or the dispatcher isn't running).
+metrics.registerCollector(() => {
+  const { n } = require('./config/database')
+    .prepare("SELECT COUNT(*) AS n FROM event_deliveries WHERE status = 'pending'")
+    .get()
+  metrics.webhookPending.set({}, n)
+})
+
 app.get('/metrics', async (req, res) => {
   const token = process.env.METRICS_TOKEN
   if (token && req.headers.authorization !== `Bearer ${token}`) {

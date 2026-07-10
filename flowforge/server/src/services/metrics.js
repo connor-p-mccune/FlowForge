@@ -162,6 +162,19 @@ const queueJobs = gauge(
   ['state']
 )
 
+// Outbound webhooks (eventDispatcher.js). outcome: 'delivered' | 'retried'
+// (failed attempt, retry scheduled) | 'failed' (attempt budget exhausted).
+const webhookDeliveries = counter(
+  'flowforge_webhook_deliveries_total',
+  'Outbound webhook delivery attempts, by outcome.',
+  ['outcome']
+)
+
+const webhookPending = gauge(
+  'flowforge_webhook_deliveries_pending',
+  'Outbound webhook deliveries waiting in the queue, sampled at scrape time.'
+)
+
 const processUptime = gauge('process_uptime_seconds', 'Process uptime in seconds.')
 const processMemory = gauge(
   'process_resident_memory_bytes',
@@ -194,6 +207,11 @@ function recordExecution(status, seconds, { nested = false } = {}) {
   if (Number.isFinite(seconds)) executionDuration.observe({ status }, seconds)
 }
 
+// Called by the event dispatcher after every delivery attempt settles.
+function recordWebhookDelivery(outcome) {
+  webhookDeliveries.inc({ outcome })
+}
+
 module.exports = {
   counter,
   gauge,
@@ -202,5 +220,7 @@ module.exports = {
   renderPrometheus,
   httpMetricsMiddleware,
   recordExecution,
+  recordWebhookDelivery,
   queueJobs,
+  webhookPending,
 }

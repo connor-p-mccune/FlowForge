@@ -90,6 +90,8 @@ describe('GET /metrics', () => {
     // Queue depth sampled from the (mocked) Bull queue at scrape time.
     expect(res.text).toContain('flowforge_queue_jobs{state="waiting"} 3')
     expect(res.text).toContain('flowforge_queue_jobs{state="active"} 1')
+    // Outbound webhook backlog sampled from SQLite at scrape time.
+    expect(res.text).toContain('flowforge_webhook_deliveries_pending 0')
   })
 
   it('labels requests with the matched route pattern, not the raw URL', async () => {

@@ -186,6 +186,29 @@ describe('attemptDelivery', () => {
   })
 })
 
+describe('delivery metrics', () => {
+  it('counts delivered, retried, and terminally failed attempts by outcome', async () => {
+    const { renderPrometheus } = require('../services/metrics')
+    const receiver = await listen(200)
+    const good = createSubscription({ url: receiver.url })
+    dispatcher.enqueueEvent(workspaceId, 'execution.completed', {})
+    await dispatcher.attemptDelivery(deliveriesFor(good)[0])
+    await receiver.close()
+
+    const dead = await listen(500)
+    const failing = createSubscription({ url: dead.url })
+    dispatcher.enqueueEvent(workspaceId, 'execution.failed', {})
+    await dispatcher.attemptDelivery(deliveriesFor(failing)[0]) // retry scheduled
+    await dispatcher.attemptDelivery(deliveriesFor(failing)[0]) // attempt cap (2) → failed
+    await dead.close()
+
+    const text = await renderPrometheus()
+    expect(text).toMatch(/flowforge_webhook_deliveries_total\{outcome="delivered"\} \d+/)
+    expect(text).toMatch(/flowforge_webhook_deliveries_total\{outcome="retried"\} \d+/)
+    expect(text).toMatch(/flowforge_webhook_deliveries_total\{outcome="failed"\} \d+/)
+  })
+})
+
 describe('processDueDeliveries', () => {
   it('attempts only rows whose next_attempt_at has arrived', async () => {
     const receiver = await listen(200)
