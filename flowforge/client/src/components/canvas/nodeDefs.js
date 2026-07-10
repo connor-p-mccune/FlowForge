@@ -46,6 +46,15 @@ export const NODE_DEFS = {
     subtype: 'condition',
     config: { left: '', operator: 'equals', right: '' },
   },
+  // Approval: pauses the run until a workspace member approves or rejects,
+  // then routes down the matching branch. timeoutMinutes bounds the wait;
+  // onTimeout picks what an expired wait does ('reject' the branch, or 'fail'
+  // the run).
+  'approval': {
+    label: 'Approval',
+    subtype: 'approval',
+    config: { message: '', timeoutMinutes: 60, onTimeout: 'reject' },
+  },
   'ai-prompt': {
     label: 'AI Prompt',
     subtype: 'prompt',
@@ -99,6 +108,7 @@ export const TOOLBAR_BUTTONS = [
   { type: 'action-slack', label: 'Slack', className: 'toolbar-btn--action' },
   { type: 'transform', label: 'Transform', className: 'toolbar-btn--action' },
   { type: 'condition', label: 'Condition', className: 'toolbar-btn--condition' },
+  { type: 'approval', label: 'Approval', className: 'toolbar-btn--approval' },
   { type: 'ai-prompt', label: 'AI', className: 'toolbar-btn--ai' },
   { type: 'ai-classify', label: 'Classify', className: 'toolbar-btn--ai' },
   { type: 'ai-extract', label: 'Extract', className: 'toolbar-btn--ai' },

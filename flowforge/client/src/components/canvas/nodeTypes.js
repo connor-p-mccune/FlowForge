@@ -8,6 +8,7 @@ import AINode from './nodes/AINode'
 import OutputNode from './nodes/OutputNode'
 import SubWorkflowNode from './nodes/SubWorkflowNode'
 import ForEachNode from './nodes/ForEachNode'
+import ApprovalNode from './nodes/ApprovalNode'
 
 export const nodeTypes = {
   'trigger-manual': TriggerNode,
@@ -19,6 +20,7 @@ export const nodeTypes = {
   'action-slack': ActionNode,
   'transform': ActionNode,
   'condition': ConditionNode,
+  'approval': ApprovalNode,
   'ai-prompt': AINode,
   'ai-classify': AINode,
   'ai-extract': AINode,

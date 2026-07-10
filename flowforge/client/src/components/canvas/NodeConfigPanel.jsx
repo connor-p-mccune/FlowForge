@@ -367,6 +367,44 @@ export default function NodeConfigPanel({
             </label>
           </>
         )
+      case 'approval':
+        return (
+          <>
+            <label className="config-panel__field">
+              <span>Message for approvers (supports {'{{node-id.field}}'})</span>
+              <textarea
+                rows={3}
+                value={config.message || ''}
+                placeholder="Deploy {{node-id.version}} to production?"
+                onChange={(e) => setConfig('message', e.target.value)}
+              />
+            </label>
+            <label className="config-panel__field">
+              <span>Timeout (minutes)</span>
+              <input
+                type="number"
+                min={1}
+                value={config.timeoutMinutes ?? 60}
+                onChange={(e) => setConfig('timeoutMinutes', Number(e.target.value))}
+              />
+            </label>
+            <label className="config-panel__field">
+              <span>When the timeout expires</span>
+              <select
+                value={config.onTimeout || 'reject'}
+                onChange={(e) => setConfig('onTimeout', e.target.value)}
+              >
+                <option value="reject">Take the rejected branch</option>
+                <option value="fail">Fail the run</option>
+              </select>
+            </label>
+            <p className="config-panel__hint">
+              The run pauses here until a workspace member approves or rejects —
+              everyone is notified, and the decision can be made from the run
+              panel or a notification link. Test runs auto-approve.
+            </p>
+          </>
+        )
       case 'ai-prompt':
         return (
           <>

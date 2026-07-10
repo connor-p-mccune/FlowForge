@@ -5,6 +5,7 @@ import { ReactFlowProvider } from 'reactflow'
 import TriggerNode from '../components/canvas/nodes/TriggerNode'
 import ActionNode from '../components/canvas/nodes/ActionNode'
 import ConditionNode from '../components/canvas/nodes/ConditionNode'
+import ApprovalNode from '../components/canvas/nodes/ApprovalNode'
 import AINode from '../components/canvas/nodes/AINode'
 import OutputNode from '../components/canvas/nodes/OutputNode'
 
@@ -127,6 +128,35 @@ describe('ConditionNode', () => {
     expect(sources(container)).toHaveLength(2)
     expect(container.querySelector('[data-handleid="true"]')).toBeInTheDocument()
     expect(container.querySelector('[data-handleid="false"]')).toBeInTheDocument()
+  })
+})
+
+describe('ApprovalNode', () => {
+  it('renders approved/rejected branch labels and the message', () => {
+    renderNode(
+      <ApprovalNode
+        data={{ label: 'Release gate', config: { message: 'Ship v2 to prod?' } }}
+        selected={false}
+      />
+    )
+    expect(screen.getByText('Release gate')).toBeInTheDocument()
+    expect(screen.getByText('Ship v2 to prod?')).toBeInTheDocument()
+    expect(screen.getByText('approved')).toBeInTheDocument()
+    expect(screen.getByText('rejected')).toBeInTheDocument()
+  })
+
+  it('keeps the condition-style true/false handle ids for engine routing', () => {
+    const { container } = renderNode(<ApprovalNode data={{}} selected={false} />)
+    expect(handles(container)).toHaveLength(3)
+    expect(targets(container)).toHaveLength(1)
+    expect(sources(container)).toHaveLength(2)
+    expect(container.querySelector('[data-handleid="true"]')).toBeInTheDocument()
+    expect(container.querySelector('[data-handleid="false"]')).toBeInTheDocument()
+  })
+
+  it('omits the message line when none is configured', () => {
+    const { container } = renderNode(<ApprovalNode data={{ label: 'Gate' }} selected={false} />)
+    expect(container.querySelector('.node__approval-message')).toBeNull()
   })
 })
 

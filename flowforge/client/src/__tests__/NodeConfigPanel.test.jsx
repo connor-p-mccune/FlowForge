@@ -52,6 +52,16 @@ describe('NodeConfigPanel rendering', () => {
     expect(screen.getByText('Right value')).toBeInTheDocument()
   })
 
+  it('renders approval fields with the timeout policy for approval', () => {
+    setup(mk('approval', { config: { message: 'Ship it?', timeoutMinutes: 30, onTimeout: 'fail' } }))
+    expect(screen.getByText(/Message for approvers/)).toBeInTheDocument()
+    expect(screen.getByDisplayValue('Ship it?')).toBeInTheDocument()
+    expect(screen.getByText('Timeout (minutes)')).toBeInTheDocument()
+    expect(screen.getByDisplayValue('30')).toBeInTheDocument()
+    expect(screen.getByText('When the timeout expires')).toBeInTheDocument()
+    expect(screen.getByRole('option', { name: 'Fail the run' }).selected).toBe(true)
+  })
+
   it('renders prompt fields for ai-prompt', () => {
     setup(mk('ai-prompt'))
     expect(screen.getByText(/^Prompt/)).toBeInTheDocument()
