@@ -1681,6 +1681,58 @@ html, body, #root {
   background: #fee2e2;
 }
 
+/* Inline approve/reject controls on a step waiting at an approval gate */
+.approval-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 6px 0 4px 24px;
+  padding: 8px 10px;
+  background: #fdf2f8;
+  border: 1px solid #fbcfe8;
+  border-radius: 6px;
+}
+
+.approval-actions__message {
+  font-size: 12px;
+  color: #9d174d;
+}
+
+.approval-actions__buttons {
+  display: flex;
+  gap: 6px;
+  flex: none;
+}
+
+.approval-actions__btn {
+  border-radius: 4px;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 3px 10px;
+  cursor: pointer;
+}
+
+.approval-actions__btn--approve {
+  background: #f0fdf4;
+  border: 1px solid #86efac;
+  color: #15803d;
+}
+
+.approval-actions__btn--approve:hover {
+  background: #dcfce7;
+}
+
+.approval-actions__btn--reject {
+  background: #fff;
+  border: 1px solid #fca5a5;
+  color: #b91c1c;
+}
+
+.approval-actions__btn--reject:hover {
+  background: #fee2e2;
+}
+
 .exec-panel__body {
   flex: 1;
   overflow-y: auto;

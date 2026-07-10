@@ -102,12 +102,19 @@ function CanvasInner({ workflowId }) {
   }, [workflow])
   const hasSchedule = useMemo(() => nodes.some((n) => n.type === 'trigger-schedule'), [nodes])
 
+  // Approval gates waiting on the current run: nodeId -> { id, message,
+  // expiresAt }. Set by 'approval' events off the exec-update channel; an
+  // entry clears when its step settles (the responder's decision arrives as
+  // an ordinary step event) or when a new run starts.
+  const [pendingApprovals, setPendingApprovals] = useState({})
+
   const handleExecUpdate = useCallback((payload) => {
     if (payload.kind === 'execution') {
       // Adopt runs we didn't start (e.g. triggered by a collaborator)
       if (payload.status === 'running' && payload.executionId !== executionIdRef.current) {
         executionIdRef.current = payload.executionId
         setExecSteps([])
+        setPendingApprovals({})
         setIsTestRun(Boolean(payload.dryRun))
         setExecution({ id: payload.executionId, status: 'running', error: null })
         setExecPanelOpen(true)
@@ -149,6 +156,28 @@ function CanvasInner({ workflowId }) {
         next[idx] = step
         return next
       })
+      // The gate settled (someone responded, timeout, cancel) — drop its controls.
+      if (payload.status !== 'running') {
+        setPendingApprovals((prev) => {
+          if (!prev[payload.nodeId]) return prev
+          const rest = { ...prev }
+          delete rest[payload.nodeId]
+          return rest
+        })
+      }
+    } else if (
+      payload.kind === 'approval' &&
+      payload.executionId === executionIdRef.current &&
+      payload.status === 'pending'
+    ) {
+      setPendingApprovals((prev) => ({
+        ...prev,
+        [payload.nodeId]: {
+          id: payload.approvalId,
+          message: payload.message,
+          expiresAt: payload.expiresAt,
+        },
+      }))
     }
   }, [])
 
@@ -388,6 +417,7 @@ function CanvasInner({ workflowId }) {
       })
       executionIdRef.current = ex.id
       setExecSteps([])
+      setPendingApprovals({})
       setExecution({ id: ex.id, status: ex.status, error: null })
     } catch (err) {
       executionIdRef.current = null
@@ -408,6 +438,7 @@ function CanvasInner({ workflowId }) {
       })
       executionIdRef.current = ex.id
       setExecSteps([])
+      setPendingApprovals({})
       setExecution({ id: ex.id, status: ex.status, error: null })
     } catch (err) {
       executionIdRef.current = null
@@ -416,6 +447,21 @@ function CanvasInner({ workflowId }) {
     }
     setExecPanelOpen(true)
   }, [workflowId])
+
+  // Settle a waiting approval gate. The run continues on its own — the
+  // engine's poll sees the verdict and the step settling clears the controls
+  // for everyone watching. A 409 just means someone else decided first.
+  const handleRespondApproval = useCallback(async (approvalId, decision) => {
+    try {
+      await apiFetch(`/api/approvals/${approvalId}/respond`, {
+        method: 'POST',
+        body: { decision },
+      })
+      toastRef.current.success(decision === 'approve' ? 'Approved — run continuing.' : 'Rejected.')
+    } catch (err) {
+      toastRef.current.error(`Couldn’t record the decision: ${err.message}`)
+    }
+  }, [])
 
   // Stop the current run. Cooperative: the engine finishes the node in flight,
   // then skips the rest — the 'cancelled' status arrives over the socket like
@@ -1013,6 +1059,8 @@ function CanvasInner({ workflowId }) {
       <ExecutionPanel
         open={execPanelOpen}
         onClose={() => setExecPanelOpen(false)}
+        pendingApprovals={pendingApprovals}
+        onRespondApproval={handleRespondApproval}
         execution={execution}
         steps={execSteps}
         nodes={nodes}

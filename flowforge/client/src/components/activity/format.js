@@ -74,6 +74,8 @@ export function formatEvent(event) {
     case 'member.removed': return `removed ${name} from the workspace`
     case 'comment.added': return `commented on ${name}`
     case 'comment.resolved': return `resolved a comment on ${name}`
+    case 'approval.approved': return `approved a run of ${name}`
+    case 'approval.rejected': return `rejected a run of ${name}`
     case 'secret.created': return `added secret ${name}`
     case 'secret.updated': return `rotated secret ${name}`
     case 'secret.deleted': return `deleted secret ${name}`
