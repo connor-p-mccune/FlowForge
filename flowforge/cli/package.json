@@ -1,0 +1,15 @@
+{
+  "name": "flowforge-cli",
+  "version": "1.0.0",
+  "description": "Trigger and watch FlowForge workflow runs from the terminal",
+  "bin": {
+    "flowforge": "./bin/flowforge.js"
+  },
+  "scripts": {
+    "test": "node --test"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "license": "MIT"
+}

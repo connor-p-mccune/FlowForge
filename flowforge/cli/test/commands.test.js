@@ -1,0 +1,247 @@
+const test = require('node:test')
+const assert = require('node:assert/strict')
+const fs = require('node:fs')
+const os = require('node:os')
+const path = require('node:path')
+
+const { startStub, makeCtx } = require('./helpers')
+const workflows = require('../src/commands/workflows')
+const trigger = require('../src/commands/trigger')
+const runs = require('../src/commands/runs')
+const runCmd = require('../src/commands/run')
+const cancel = require('../src/commands/cancel')
+const login = require('../src/commands/login')
+const { ApiError } = require('../src/api')
+
+test('workflows lists id, name, and status', async () => {
+  const stub = await startStub((method, url) => {
+    assert.equal(method, 'GET')
+    assert.equal(url, '/api/v1/workflows')
+    return {
+      json: {
+        workflows: [
+          { id: 'wf-1', name: 'Nightly sync', status: 'deployed', updated_at: '2026-07-01' },
+          { id: 'wf-2', name: 'Ad-hoc report', status: 'draft', updated_at: '2026-07-02' },
+        ],
+      },
+    }
+  })
+  const ctx = makeCtx(stub.api)
+  const code = await workflows({ positionals: [], flags: {} }, ctx)
+  await stub.close()
+
+  assert.equal(code, 0)
+  assert.match(ctx.output(), /Nightly sync/)
+  assert.match(ctx.output(), /wf-2/)
+  // The token rode along as a bearer header.
+  assert.equal(stub.requests[0].headers.authorization, 'Bearer ffp_testtoken')
+})
+
+test('trigger POSTs the payload and idempotency key', async () => {
+  const stub = await startStub(() => ({
+    status: 202,
+    json: {
+      execution: { id: 'exec-9', workflowId: 'wf-1', status: 'pending' },
+      statusUrl: '/api/v1/executions/exec-9',
+    },
+  }))
+  const ctx = makeCtx(stub.api)
+  const code = await trigger(
+    { positionals: ['wf-1'], flags: { data: '{"orderId":42}', key: 'deploy-7' } },
+    ctx
+  )
+  await stub.close()
+
+  assert.equal(code, 0)
+  const req = stub.requests[0]
+  assert.equal(req.method, 'POST')
+  assert.equal(req.path, '/api/v1/workflows/wf-1/trigger')
+  assert.deepEqual(req.body, { orderId: 42 })
+  assert.equal(req.headers['idempotency-key'], 'deploy-7')
+  assert.match(ctx.output(), /exec-9/)
+})
+
+test('trigger rejects malformed --data without calling the API', async () => {
+  const stub = await startStub(() => ({ json: {} }))
+  const ctx = makeCtx(stub.api)
+  const code = await trigger({ positionals: ['wf-1'], flags: { data: 'not json' } }, ctx)
+  await stub.close()
+
+  assert.equal(code, 1)
+  assert.equal(stub.requests.length, 0)
+})
+
+test('trigger --watch follows the run and exits 0 on completion', async () => {
+  let polls = 0
+  const stub = await startStub((method, url) => {
+    if (url.endsWith('/trigger')) {
+      return {
+        status: 202,
+        json: {
+          execution: { id: 'exec-w', workflowId: 'wf-1', status: 'pending' },
+          statusUrl: '/api/v1/executions/exec-w',
+        },
+      }
+    }
+    polls++
+    if (polls === 1) {
+      return {
+        json: {
+          execution: { id: 'exec-w', status: 'running', startedAt: '2026-07-09T10:00:00Z' },
+          steps: [
+            { id: 's1', node_id: 't1', node_type: 'trigger-manual', status: 'succeeded' },
+            { id: 's2', node_id: 'h1', node_type: 'action-http', status: 'running' },
+          ],
+        },
+      }
+    }
+    return {
+      json: {
+        execution: {
+          id: 'exec-w', status: 'completed',
+          startedAt: '2026-07-09T10:00:00Z', finishedAt: '2026-07-09T10:00:04Z',
+        },
+        steps: [
+          { id: 's1', node_id: 't1', node_type: 'trigger-manual', status: 'succeeded' },
+          { id: 's2', node_id: 'h1', node_type: 'action-http', status: 'succeeded' },
+        ],
+      },
+    }
+  })
+  const ctx = makeCtx(stub.api)
+  const code = await trigger(
+    { positionals: ['wf-1'], flags: { watch: true, interval: '0.01' } },
+    ctx
+  )
+  await stub.close()
+
+  assert.equal(code, 0)
+  assert.match(ctx.output(), /h1/)
+  assert.match(ctx.output(), /Run completed/)
+  // The step's transition printed once per status, not once per poll.
+  assert.equal(ctx.lines.filter((l) => l.includes('t1')).length, 1)
+})
+
+test('a watched run that fails exits 1', async () => {
+  const stub = await startStub((method, url) => {
+    if (url.endsWith('/trigger')) {
+      return {
+        status: 202,
+        json: {
+          execution: { id: 'exec-f', workflowId: 'wf-1', status: 'pending' },
+          statusUrl: '/api/v1/executions/exec-f',
+        },
+      }
+    }
+    return {
+      json: {
+        execution: { id: 'exec-f', status: 'failed' },
+        steps: [{ id: 's1', node_id: 'h1', node_type: 'action-http', status: 'failed' }],
+      },
+    }
+  })
+  const ctx = makeCtx(stub.api)
+  const code = await trigger(
+    { positionals: ['wf-1'], flags: { watch: true, interval: '0.01' } },
+    ctx
+  )
+  await stub.close()
+
+  assert.equal(code, 1)
+  assert.match(ctx.output(), /Run failed/)
+})
+
+test('runs renders the summary table with a limit', async () => {
+  const stub = await startStub((method, url) => {
+    assert.equal(url, '/api/v1/workflows/wf-1/executions?limit=2')
+    return {
+      json: {
+        executions: [
+          {
+            id: 'e1', status: 'completed', triggerType: 'api',
+            startedAt: '2026-07-09T10:00:00Z', finishedAt: '2026-07-09T10:00:02Z',
+          },
+          { id: 'e2', status: 'failed', triggerType: 'webhook', startedAt: null, finishedAt: null },
+        ],
+      },
+    }
+  })
+  const ctx = makeCtx(stub.api)
+  const code = await runs({ positionals: ['wf-1'], flags: { limit: '2' } }, ctx)
+  await stub.close()
+
+  assert.equal(code, 0)
+  assert.match(ctx.output(), /e1/)
+  assert.match(ctx.output(), /webhook/)
+})
+
+test('run shows steps and exits 1 for a failed run', async () => {
+  const stub = await startStub(() => ({
+    json: {
+      execution: { id: 'e9', status: 'failed', startedAt: '2026-07-09T10:00:00Z', finishedAt: '2026-07-09T10:00:01Z' },
+      steps: [
+        { id: 's1', node_id: 't1', node_type: 'trigger-manual', status: 'succeeded', started_at: null, finished_at: null, error: null },
+        { id: 's2', node_id: 'h1', node_type: 'action-http', status: 'failed', started_at: null, finished_at: null, error: 'HTTP 500' },
+      ],
+    },
+  }))
+  const ctx = makeCtx(stub.api)
+  const code = await runCmd({ positionals: ['e9'], flags: {} }, ctx)
+  await stub.close()
+
+  assert.equal(code, 1)
+  assert.match(ctx.output(), /HTTP 500/)
+})
+
+test('cancel POSTs and reports the wind-down', async () => {
+  const stub = await startStub(() => ({
+    status: 202,
+    json: { execution: { id: 'e1', status: 'running' }, cancelling: true },
+  }))
+  const ctx = makeCtx(stub.api)
+  const code = await cancel({ positionals: ['e1'], flags: {} }, ctx)
+  await stub.close()
+
+  assert.equal(code, 0)
+  assert.equal(stub.requests[0].path, '/api/v1/executions/e1/cancel')
+  assert.match(ctx.output(), /winding down/)
+})
+
+test('API errors surface the server message', async () => {
+  const stub = await startStub(() => ({ status: 404, json: { error: 'Workflow not found' } }))
+  const ctx = makeCtx(stub.api)
+  await assert.rejects(
+    () => trigger({ positionals: ['nope'], flags: {} }, ctx),
+    (err) => err instanceof ApiError && err.message === 'Workflow not found' && err.status === 404
+  )
+  await stub.close()
+})
+
+test('login verifies the token, writes the config file, and resolveConfig reads it back', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'flowforge-cli-'))
+  const configFile = path.join(dir, 'config.json')
+  process.env.FLOWFORGE_CONFIG = configFile
+  delete process.env.FLOWFORGE_URL
+  delete process.env.FLOWFORGE_TOKEN
+  try {
+    const stub = await startStub(() => ({ json: { workflows: [{ id: 'wf-1' }] } }))
+    const ctx = makeCtx(null)
+    const code = await login(
+      { positionals: [], flags: { url: `${stub.baseUrl}/`, token: 'ffp_fromlogin' } },
+      ctx
+    )
+    await stub.close()
+
+    assert.equal(code, 0)
+    assert.match(ctx.output(), /1 workflow\(s\) visible/)
+    const saved = JSON.parse(fs.readFileSync(configFile, 'utf8'))
+    assert.equal(saved.url, stub.baseUrl) // trailing slash stripped
+    assert.equal(saved.token, 'ffp_fromlogin')
+
+    const { resolveConfig } = require('../src/config')
+    assert.deepEqual(resolveConfig(), { baseUrl: stub.baseUrl, token: 'ffp_fromlogin' })
+  } finally {
+    delete process.env.FLOWFORGE_CONFIG
+    fs.rmSync(dir, { recursive: true, force: true })
+  }
+})
