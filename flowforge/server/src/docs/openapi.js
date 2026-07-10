@@ -60,9 +60,23 @@ const spec = {
           'Enqueues a run. The JSON body (if any) becomes the trigger payload, ' +
           'flowing into the graph exactly like a webhook body — downstream ' +
           'nodes read it as `{{trigger-node-id.field}}`. Requires the ' +
-          '`trigger` scope.',
+          '`trigger` scope. Send an `Idempotency-Key` header to make retries ' +
+          'safe: the same key returns the original run (`replayed: true`, ' +
+          'plus an `Idempotent-Replay: true` header) for 24 hours, and ' +
+          'reusing a key with a different body is rejected with 409.',
         operationId: 'triggerWorkflow',
-        parameters: [{ $ref: '#/components/parameters/WorkflowId' }],
+        parameters: [
+          { $ref: '#/components/parameters/WorkflowId' },
+          {
+            name: 'Idempotency-Key',
+            in: 'header',
+            required: false,
+            description:
+              'Any unique string (≤ 255 chars), e.g. a UUID per logical ' +
+              'request. Scoped to the token owner and workflow.',
+            schema: { type: 'string', maxLength: 255 },
+          },
+        ],
         requestBody: {
           required: false,
           content: {
@@ -91,12 +105,16 @@ const spec = {
             },
           },
           400: {
-            description: 'The workflow has no nodes to execute.',
+            description: 'The workflow has no nodes to execute, or the Idempotency-Key is malformed.',
             content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } },
           },
           401: { $ref: '#/components/responses/Unauthorized' },
           403: { $ref: '#/components/responses/Forbidden' },
           404: { $ref: '#/components/responses/NotFound' },
+          409: {
+            description: 'The Idempotency-Key was already used with a different request body.',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } },
+          },
           429: { $ref: '#/components/responses/RateLimited' },
         },
       },

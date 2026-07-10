@@ -231,6 +231,26 @@ CREATE TABLE IF NOT EXISTS activity_events (
 CREATE INDEX IF NOT EXISTS idx_activity_workspace_created
   ON activity_events (workspace_id, created_at DESC, id DESC);
 
+-- Idempotency keys for the public trigger endpoint. A retried
+-- POST /api/v1/workflows/:id/trigger carrying the same Idempotency-Key returns
+-- the original run instead of starting a second one — scoped per token owner
+-- and workflow so one client's keys can't collide with another's.
+-- request_hash pins the key to its payload (same key + different body is a
+-- 409, never a silent replay); rows expire after 24h and are pruned lazily.
+CREATE TABLE IF NOT EXISTS idempotency_keys (
+  key          TEXT NOT NULL,
+  user_id      TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  workflow_id  TEXT NOT NULL,
+  request_hash TEXT NOT NULL,
+  execution_id TEXT NOT NULL,
+  created_at   TEXT NOT NULL,
+  PRIMARY KEY (user_id, workflow_id, key)
+);
+
+-- The lazy sweep deletes by age.
+CREATE INDEX IF NOT EXISTS idx_idempotency_keys_created
+  ON idempotency_keys (created_at);
+
 -- Outbound webhooks: a workspace can subscribe an external URL to its activity
 -- events (the same event_type families the feed uses — 'execution.failed',
 -- 'workflow.*', or '*'). events is a JSON array of those patterns; secret signs

@@ -99,6 +99,27 @@ Requires the `trigger` scope. Returns `400` if the workflow has no nodes,
 `404` if it doesn't exist or the token's owner isn't a member of its
 workspace.
 
+**Idempotent retries.** Network timeouts make "did my trigger land?" a real
+question for CI scripts. Send an `Idempotency-Key` header (any unique string
+up to 255 chars — a UUID per logical request works well) and retries become
+safe:
+
+```bash
+curl -s -X POST …/trigger \
+  -H "Authorization: Bearer $FLOWFORGE_TOKEN" \
+  -H "Idempotency-Key: deploy-2026-07-09-42" \
+  -d '{"orderId": 42}'
+```
+
+- A repeat of the same key + body within 24 hours returns the **original
+  run** — same execution id, `"replayed": true` in the body, and an
+  `Idempotent-Replay: true` header — without enqueuing anything.
+- The key is pinned to its request body: the same key with a **different
+  body** is rejected with `409`, never silently replayed against the wrong
+  input.
+- Keys are scoped to the token's owner and the workflow, so two clients (or
+  two workflows) can't collide.
+
 ### List a workflow's runs
 
 ```bash

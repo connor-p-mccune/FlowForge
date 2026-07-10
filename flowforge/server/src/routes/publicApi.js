@@ -9,6 +9,7 @@
 // never see more than its owner could. Missing and forbidden both read as 404
 // to avoid confirming foreign resource ids.
 
+const crypto = require('crypto')
 const express = require('express')
 const { v4: uuidv4 } = require('uuid')
 const db = require('../config/database')
@@ -18,6 +19,10 @@ const { getExecutionQueue } = require('../config/queue')
 const { requestCancel } = require('../services/executionControl')
 
 const router = express.Router()
+
+// How long an Idempotency-Key guards its run. Long enough to outlive any
+// sane retry policy; short enough that keys can be reused across days.
+const IDEMPOTENCY_TTL_MS = 24 * 60 * 60 * 1000
 
 router.use(publicApiLimiter)
 
@@ -57,6 +62,11 @@ router.get('/workflows', tokenAuth('read'), (req, res) => {
 // POST /api/v1/workflows/:id/trigger — start a run. The JSON body (if any)
 // becomes the trigger payload, flowing into the graph exactly like a webhook
 // body ({{trigger-node-id.field}}). Responds 202 with the execution id to poll.
+//
+// Send an Idempotency-Key header to make retries safe: the same key (per
+// token owner, per workflow) returns the original run instead of starting a
+// duplicate, for 24 hours. The key is pinned to its payload — reusing it with
+// a different body is a 409, never a silent replay of the wrong input.
 router.post('/workflows/:id/trigger', tokenAuth('trigger'), async (req, res) => {
   try {
     const workflow = getWorkflowForMember(req.params.id, req.user.id)
@@ -69,6 +79,42 @@ router.post('/workflows/:id/trigger', tokenAuth('trigger'), async (req, res) => 
 
     const payload = req.body && typeof req.body === 'object' && !Array.isArray(req.body) ? req.body : {}
 
+    const idempotencyKey = req.headers['idempotency-key']
+    let requestHash = null
+    if (idempotencyKey !== undefined) {
+      if (typeof idempotencyKey !== 'string' || !idempotencyKey.trim() || idempotencyKey.length > 255) {
+        return res.status(400).json({ error: 'Idempotency-Key must be a non-empty string of at most 255 characters' })
+      }
+      requestHash = crypto.createHash('sha256').update(JSON.stringify(payload)).digest('hex')
+
+      // Lazy sweep, then replay lookup. Everything from here to the INSERT is
+      // synchronous (better-sqlite3), so two concurrent requests can't
+      // interleave between the read and the write.
+      const cutoff = new Date(Date.now() - IDEMPOTENCY_TTL_MS).toISOString()
+      db.prepare('DELETE FROM idempotency_keys WHERE created_at < ?').run(cutoff)
+      const existing = db.prepare(
+        'SELECT * FROM idempotency_keys WHERE user_id = ? AND workflow_id = ? AND key = ?'
+      ).get(req.user.id, workflow.id, idempotencyKey)
+      if (existing) {
+        if (existing.request_hash !== requestHash) {
+          return res.status(409).json({
+            error: 'Idempotency-Key was already used with a different request body',
+          })
+        }
+        const original = db.prepare('SELECT status FROM executions WHERE id = ?').get(existing.execution_id)
+        res.set('Idempotent-Replay', 'true')
+        return res.status(202).json({
+          execution: {
+            id: existing.execution_id,
+            workflowId: workflow.id,
+            status: original?.status ?? 'pending',
+          },
+          statusUrl: `/api/v1/executions/${existing.execution_id}`,
+          replayed: true,
+        })
+      }
+    }
+
     const executionId = uuidv4()
     const now = new Date().toISOString()
     // trigger_type 'api' marks the source; trigger_data persists the payload so
@@ -77,6 +123,13 @@ router.post('/workflows/:id/trigger', tokenAuth('trigger'), async (req, res) => 
       `INSERT INTO executions (id, workflow_id, status, triggered_by, trigger_type, trigger_data, created_at)
        VALUES (?, ?, 'pending', ?, 'api', ?, ?)`
     ).run(executionId, workflow.id, req.user.id, Object.keys(payload).length ? JSON.stringify(payload) : null, now)
+
+    if (requestHash) {
+      db.prepare(
+        `INSERT INTO idempotency_keys (key, user_id, workflow_id, request_hash, execution_id, created_at)
+         VALUES (?, ?, ?, ?, ?, ?)`
+      ).run(idempotencyKey, req.user.id, workflow.id, requestHash, executionId, now)
+    }
 
     await getExecutionQueue().add({ executionId, workflowId: workflow.id, payload })
 
