@@ -12,8 +12,8 @@ const TOKEN_PREFIX = 'ffp_'
 const PREFIX_DISPLAY_CHARS = 8
 
 // The full scope set. `trigger` starts workflow runs; `read` reads workflows
-// and execution results.
-const SCOPES = ['trigger', 'read']
+// and execution results; `approve` settles pending approval gates.
+const SCOPES = ['trigger', 'read', 'approve']
 
 function generateToken() {
   const token = TOKEN_PREFIX + crypto.randomBytes(20).toString('hex')

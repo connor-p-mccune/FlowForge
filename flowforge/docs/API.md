@@ -22,6 +22,7 @@ Tokens carry **scopes** chosen at creation:
 |-----------|-------------------------------------------------|
 | `trigger` | Starting workflow runs                          |
 | `read`    | Listing workflows and reading execution results |
+| `approve` | Settling approval gates (approve/reject a paused run) |
 
 A token acts as its owning user: it can only see workflows in workspaces the
 owner belongs to. Tokens can be revoked at any time from Settings, and can be
@@ -206,6 +207,49 @@ then carries `"cancelling": true` while that happens — keep polling the
 execution to observe the terminal status).
 
 Requires the `trigger` scope. Returns `409` if the run has already finished.
+
+### List approval requests
+
+```bash
+curl -s "https://your-flowforge-host/api/v1/approvals?status=pending" \
+  -H "Authorization: Bearer $FLOWFORGE_TOKEN"
+```
+
+Approval-gate requests across every workspace the token owner belongs to,
+newest first. `status` filters by `pending` (default), `approved`,
+`rejected`, `timed-out`, or `cancelled`. Requires the `read` scope.
+
+```json
+{
+  "approvals": [
+    {
+      "id": "a1b2…",
+      "executionId": "e57a…",
+      "workflowId": "6f0c…",
+      "workflowName": "Production deploy",
+      "status": "pending",
+      "message": "Deploy v2.3.1 to production?",
+      "requestedAt": "2026-07-09T12:00:00.000Z",
+      "expiresAt": "2026-07-09T16:00:00.000Z"
+    }
+  ]
+}
+```
+
+### Approve or reject a waiting run
+
+```bash
+curl -s -X POST https://your-flowforge-host/api/v1/approvals/a1b2…/respond \
+  -H "Authorization: Bearer $FLOWFORGE_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"decision": "approve", "note": "LGTM"}'
+```
+
+Settles a pending gate; the paused run continues down the approved or
+rejected branch. Requires the dedicated **`approve` scope** — a token that
+can trigger runs cannot implicitly wave them through their own gates.
+Exactly one responder wins a race: the loser gets `409` with the verdict.
+`404` for unknown ids or non-members.
 
 ## Receiving events (outbound webhooks)
 

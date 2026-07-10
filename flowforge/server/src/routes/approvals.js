@@ -7,7 +7,7 @@
 const express = require('express')
 const db = require('../config/database')
 const auth = require('../middleware/auth')
-const { logEvent } = require('../services/activityService')
+const { respondToApproval } = require('../services/approvals')
 
 const router = express.Router()
 
@@ -40,9 +40,9 @@ router.get('/approvals', auth, (req, res) => {
 })
 
 // POST /api/approvals/:id/respond { decision: 'approve' | 'reject', note? } —
-// settle a pending approval. The pending-only guard lives in the UPDATE itself
-// so two concurrent responders (or a response racing the runner's timeout)
-// can't both win; the loser gets a 409 with the settled status.
+// settle a pending approval. Semantics live in services/approvals.js (shared
+// with the public API): the pending-only guard means two concurrent
+// responders can't both win, and the loser gets a 409 with the verdict.
 router.post('/approvals/:id/respond', auth, (req, res) => {
   try {
     const { decision, note } = req.body || {}
@@ -50,44 +50,14 @@ router.post('/approvals/:id/respond', auth, (req, res) => {
       return res.status(400).json({ error: 'decision must be "approve" or "reject"' })
     }
 
-    const approval = db.prepare('SELECT * FROM execution_approvals WHERE id = ?').get(req.params.id)
-    if (!approval) return res.status(404).json({ error: 'Approval not found' })
-    const member = db.prepare(
-      'SELECT 1 FROM workspace_members WHERE workspace_id = ? AND user_id = ?'
-    ).get(approval.workspace_id, req.user.id)
-    if (!member) return res.status(404).json({ error: 'Approval not found' })
-
-    const status = decision === 'approve' ? 'approved' : 'rejected'
-    const trimmedNote = typeof note === 'string' && note.trim() ? note.trim().slice(0, 500) : null
-    const result = db.prepare(
-      `UPDATE execution_approvals
-          SET status = ?, responded_at = ?, responded_by = ?, note = ?
-        WHERE id = ? AND status = 'pending'`
-    ).run(status, new Date().toISOString(), req.user.id, trimmedNote, approval.id)
-
-    if (result.changes === 0) {
-      const current = db.prepare('SELECT status FROM execution_approvals WHERE id = ?').get(approval.id)
-      return res.status(409).json({ error: `Approval already ${current.status}` })
+    const result = respondToApproval(req.params.id, req.user.id, { decision, note })
+    if (result.outcome === 'not-found') {
+      return res.status(404).json({ error: 'Approval not found' })
     }
-
-    const workflow = db.prepare('SELECT name FROM workflows WHERE id = ?').get(approval.workflow_id)
-    logEvent(approval.workspace_id, req.user.id, `approval.${status}`, {
-      type: 'execution',
-      id: approval.execution_id,
-      name: workflow?.name ?? null,
-      metadata: {
-        workflowId: approval.workflow_id,
-        ...(approval.message ? { message: approval.message } : {}),
-        ...(trimmedNote ? { note: trimmedNote } : {}),
-      },
-    })
-
-    const updated = db.prepare(
-      `SELECT a.*, u.display_name AS responded_by_name
-         FROM execution_approvals a LEFT JOIN users u ON u.id = a.responded_by
-        WHERE a.id = ?`
-    ).get(approval.id)
-    res.json({ approval: updated })
+    if (result.outcome === 'conflict') {
+      return res.status(409).json({ error: `Approval already ${result.status}` })
+    }
+    res.json({ approval: result.approval })
   } catch (err) {
     console.error(err)
     res.status(500).json({ error: 'Internal server error' })

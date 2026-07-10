@@ -11,14 +11,16 @@ const spec = {
     description:
       'Token-authenticated REST API for integrating FlowForge workflows into ' +
       'external systems: trigger a run from CI or another service, poll it to ' +
-      'completion, or cancel it. Tokens are created in the app under ' +
-      'Settings → API tokens and carry scopes (`trigger`, `read`).',
+      'completion, cancel it, or settle its approval gates. Tokens are created ' +
+      'in the app under Settings → API tokens and carry scopes (`trigger`, ' +
+      '`read`, `approve`).',
   },
   servers: [{ url: '/api/v1' }],
   security: [{ bearerAuth: [] }],
   tags: [
     { name: 'workflows', description: 'Discover and trigger workflows' },
     { name: 'executions', description: 'Inspect and control runs' },
+    { name: 'approvals', description: 'Human-in-the-loop approval gates' },
   ],
   paths: {
     '/workflows': {
@@ -197,6 +199,108 @@ const spec = {
         },
       },
     },
+    '/approvals': {
+      get: {
+        tags: ['approvals'],
+        summary: 'List approval requests',
+        description:
+          'Approval-gate requests across every workspace the token owner ' +
+          'belongs to, newest first (100 max). Defaults to the pending inbox — ' +
+          'what is waiting on a human right now. Requires the `read` scope.',
+        operationId: 'listApprovals',
+        parameters: [
+          {
+            name: 'status',
+            in: 'query',
+            required: false,
+            schema: {
+              type: 'string',
+              enum: ['pending', 'approved', 'rejected', 'timed-out', 'cancelled'],
+              default: 'pending',
+            },
+          },
+        ],
+        responses: {
+          200: {
+            description: 'Approval requests with the given status.',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    approvals: {
+                      type: 'array',
+                      items: { $ref: '#/components/schemas/Approval' },
+                    },
+                  },
+                },
+              },
+            },
+          },
+          400: {
+            description: 'Unknown status filter.',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } },
+          },
+          401: { $ref: '#/components/responses/Unauthorized' },
+          403: { $ref: '#/components/responses/Forbidden' },
+          429: { $ref: '#/components/responses/RateLimited' },
+        },
+      },
+    },
+    '/approvals/{approvalId}/respond': {
+      post: {
+        tags: ['approvals'],
+        summary: 'Approve or reject a waiting run',
+        description:
+          'Settles a pending approval gate; the paused run then continues down ' +
+          'the approved or rejected branch. Requires the dedicated `approve` ' +
+          'scope — a token that can trigger runs cannot implicitly wave them ' +
+          'through their own gates. Exactly one responder wins a race; the ' +
+          'loser receives 409 with the verdict.',
+        operationId: 'respondToApproval',
+        parameters: [{ $ref: '#/components/parameters/ApprovalId' }],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                required: ['decision'],
+                properties: {
+                  decision: { type: 'string', enum: ['approve', 'reject'] },
+                  note: { type: 'string', maxLength: 500 },
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          200: {
+            description: 'The settled approval.',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: { approval: { $ref: '#/components/schemas/Approval' } },
+                },
+              },
+            },
+          },
+          400: {
+            description: 'decision was not "approve" or "reject".',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } },
+          },
+          401: { $ref: '#/components/responses/Unauthorized' },
+          403: { $ref: '#/components/responses/Forbidden' },
+          404: { $ref: '#/components/responses/NotFound' },
+          409: {
+            description: 'The approval was already settled.',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } },
+          },
+          429: { $ref: '#/components/responses/RateLimited' },
+        },
+      },
+    },
     '/executions/{executionId}/cancel': {
       post: {
         tags: ['executions'],
@@ -263,6 +367,13 @@ const spec = {
         schema: { type: 'string' },
         description: 'An execution id from a trigger response.',
       },
+      ApprovalId: {
+        name: 'approvalId',
+        in: 'path',
+        required: true,
+        schema: { type: 'string' },
+        description: 'An approval id from GET /approvals.',
+      },
     },
     schemas: {
       Workflow: {
@@ -310,6 +421,26 @@ const spec = {
       ExecutionStatus: {
         type: 'string',
         enum: ['pending', 'running', 'completed', 'failed', 'cancelled'],
+      },
+      Approval: {
+        type: 'object',
+        properties: {
+          id: { type: 'string' },
+          executionId: { type: 'string' },
+          workflowId: { type: 'string' },
+          workflowName: { type: 'string', nullable: true },
+          nodeId: { type: 'string' },
+          status: {
+            type: 'string',
+            enum: ['pending', 'approved', 'rejected', 'timed-out', 'cancelled'],
+          },
+          message: { type: 'string', nullable: true },
+          requestedAt: { type: 'string', format: 'date-time' },
+          expiresAt: { type: 'string', format: 'date-time', nullable: true },
+          respondedAt: { type: 'string', format: 'date-time', nullable: true },
+          respondedBy: { type: 'string', nullable: true },
+          note: { type: 'string', nullable: true },
+        },
       },
       ExecutionStep: {
         type: 'object',

@@ -24,6 +24,8 @@ describe('GET /api/v1/openapi.json', () => {
   it('documents every public endpoint with its scope requirements', async () => {
     const { body: spec } = await request(app).get('/api/v1/openapi.json')
     expect(Object.keys(spec.paths).sort()).toEqual([
+      '/approvals',
+      '/approvals/{approvalId}/respond',
       '/executions/{executionId}',
       '/executions/{executionId}/cancel',
       '/workflows',

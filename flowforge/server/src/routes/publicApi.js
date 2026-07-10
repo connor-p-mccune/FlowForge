@@ -17,6 +17,7 @@ const tokenAuth = require('../middleware/tokenAuth')
 const { publicApiLimiter } = require('../middleware/rateLimit')
 const { getExecutionQueue } = require('../config/queue')
 const { requestCancel } = require('../services/executionControl')
+const { respondToApproval } = require('../services/approvals')
 
 const router = express.Router()
 
@@ -203,6 +204,82 @@ router.get('/executions/:id', tokenAuth('read'), (req, res) => {
       },
       steps,
     })
+  } catch (err) {
+    console.error(err)
+    res.status(500).json({ error: 'Internal server error' })
+  }
+})
+
+// Public shape for an approval row (camelCase like the rest of /api/v1).
+function presentApproval(row) {
+  return {
+    id: row.id,
+    executionId: row.execution_id,
+    workflowId: row.workflow_id,
+    workflowName: row.workflow_name ?? null,
+    nodeId: row.node_id,
+    status: row.status,
+    message: row.message,
+    requestedAt: row.requested_at,
+    expiresAt: row.expires_at,
+    respondedAt: row.responded_at,
+    respondedBy: row.responded_by_name ?? null,
+    note: row.note,
+  }
+}
+
+// GET /api/v1/approvals?status=pending — the token owner's approval inbox
+// across every workspace they belong to. This is what lets a chat-ops bot or
+// the CLI show "what's waiting on a human right now".
+router.get('/approvals', tokenAuth('read'), (req, res) => {
+  try {
+    const status = req.query.status || 'pending'
+    const valid = ['pending', 'approved', 'rejected', 'timed-out', 'cancelled']
+    if (!valid.includes(status)) {
+      return res.status(400).json({ error: `status must be one of: ${valid.join(', ')}` })
+    }
+    const rows = db.prepare(
+      `SELECT a.*, w.name AS workflow_name, u.display_name AS responded_by_name
+         FROM execution_approvals a
+         JOIN workspace_members wm ON wm.workspace_id = a.workspace_id AND wm.user_id = ?
+         LEFT JOIN workflows w ON w.id = a.workflow_id
+         LEFT JOIN users u ON u.id = a.responded_by
+        WHERE a.status = ?
+        ORDER BY a.requested_at DESC
+        LIMIT 100`
+    ).all(req.user.id, status)
+    res.json({ approvals: rows.map(presentApproval) })
+  } catch (err) {
+    console.error(err)
+    res.status(500).json({ error: 'Internal server error' })
+  }
+})
+
+// POST /api/v1/approvals/:id/respond { decision, note? } — settle a waiting
+// gate. Requires the dedicated `approve` scope: a token that can trigger runs
+// should not implicitly be able to wave them through their approval gates.
+// Semantics shared with the session route via services/approvals.js.
+router.post('/approvals/:id/respond', tokenAuth('approve'), (req, res) => {
+  try {
+    const { decision, note } = req.body || {}
+    if (decision !== 'approve' && decision !== 'reject') {
+      return res.status(400).json({ error: 'decision must be "approve" or "reject"' })
+    }
+    const result = respondToApproval(req.params.id, req.user.id, { decision, note })
+    if (result.outcome === 'not-found') {
+      return res.status(404).json({ error: 'Approval not found' })
+    }
+    if (result.outcome === 'conflict') {
+      return res.status(409).json({ error: `Approval already ${result.status}` })
+    }
+    const row = db.prepare(
+      `SELECT a.*, w.name AS workflow_name, u.display_name AS responded_by_name
+         FROM execution_approvals a
+         LEFT JOIN workflows w ON w.id = a.workflow_id
+         LEFT JOIN users u ON u.id = a.responded_by
+        WHERE a.id = ?`
+    ).get(req.params.id)
+    res.json({ approval: presentApproval(row) })
   } catch (err) {
     console.error(err)
     res.status(500).json({ error: 'Internal server error' })
