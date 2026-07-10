@@ -32,6 +32,11 @@ order while streaming live progress back to every collaborator on the canvas.
   delay, email, Slack, and transform actions; branching conditions; AI prompt /
   classify / extract nodes; log outputs; **sub-workflows** (call a workflow as a
   step) and **for-each** (fan a workflow out over a list).
+- **Human-in-the-loop approvals** — drop an **Approval** gate anywhere in a
+  workflow: the run pauses, every workspace member is notified, and whoever
+  decides first routes the run down the approved or rejected branch — from the
+  run panel, a notification link, or `GET /api/approvals`. Timeouts are
+  configurable (reject the branch or fail the run), and test runs auto-approve.
 - **Execution engine** — parses the graph into a DAG and schedules it with a
   ready-set scheduler: independent branches run **in parallel** (bounded by
   `EXEC_MAX_PARALLEL`), joins wait for every upstream branch, `{{node-id.field}}`
@@ -215,6 +220,8 @@ SMTP_USER=        SMTP_PASS=         EMAIL_FROM=flowforge@example.com
 6. **Run** with the ▶ button and watch steps stream into the execution panel;
    **Stop** cancels a run cooperatively. In run history, flip to the
    **Timeline** view to see a Gantt chart of where the time went.
+   If the run hits an **Approval** gate it pauses right there — approve or
+   reject inline from the panel (or from the notification every member gets).
 7. **Webhooks:** open the Webhooks panel to mint a public trigger URL.
 8. **Collaborate:** share the workflow URL — edits, cursors, and runs sync live,
    and `Ctrl/⌘-Z` undo/redo keeps everyone converged.

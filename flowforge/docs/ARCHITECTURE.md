@@ -83,6 +83,37 @@ secrets as `{{secrets.NAME}}`. Three properties matter:
    inputs/outputs, published events, and error messages — so a secret echoed
    back by a third-party API still never lands in the database or the UI.
 
+### Human-in-the-loop approvals
+
+An approval node pauses a run until a person decides, using the same
+cooperative pattern as cancellation: state lives in a database row, and the
+engine polls it. The runner inserts a pending `execution_approvals` row,
+notifies every workspace member, and re-reads the row until someone responds
+(`POST /api/approvals/:id/respond`), the run is cancelled, or the wait passes
+its deadline. The verdict then routes the graph through the **same
+sourceHandle mechanism condition nodes use** — approval outputs
+`result: true/false`, so the engine needed one generalized check, not a
+second branching system.
+
+Three details are load-bearing:
+
+- **The row is the only synchronization point.** Responder and runner never
+  share memory; the pending→settled transition is guarded inside the UPDATE
+  (`WHERE status = 'pending'`), so a response racing another responder — or
+  racing the runner's own timeout — resolves to exactly one winner, and the
+  loser is told what the verdict was.
+- **Approval nodes get a single attempt** (like sub-workflow and for-each):
+  a retry would file a duplicate approval request.
+- **A cancelled run settles its gate.** The runner polls `cancel_requested`
+  alongside the approval row and marks the request `cancelled`, so the inbox
+  never accumulates orphaned entries; the engine's own cancel check then
+  winds the run down before anything downstream launches.
+
+Timeouts default to taking the rejected branch — "nobody approved" is
+usually an answer, not an outage — with an opt-in `fail` mode for gates
+where silence must stop the world. Dry runs auto-approve so test mode never
+blocks on a human.
+
 ### Sub-workflows and for-each
 
 A sub-workflow node runs another workflow synchronously through the same
