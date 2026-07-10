@@ -4455,6 +4455,82 @@ html, body, #root {
   border-radius: 12px;
 }
 
+/* Outbound webhooks page (shares the secrets-page shell) */
+.webhook-secret-reveal {
+  margin-top: 12px;
+  padding: 14px 16px;
+  background: #f0fdf4;
+  border: 1px solid #bbf7d0;
+  border-radius: 10px;
+  font-size: 13px;
+}
+
+.webhook-secret-reveal__row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.webhook-secret-reveal__row code {
+  flex: 1;
+  padding: 6px 10px;
+  background: #fff;
+  border: 1px solid #d1fae5;
+  border-radius: 6px;
+  overflow-wrap: anywhere;
+}
+
+.webhook-status {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 1px 8px;
+  border-radius: 999px;
+}
+
+.webhook-status--active { background: #dcfce7; color: #15803d; }
+.webhook-status--paused { background: #f3f4f6; color: #6b7280; }
+
+.webhook-event-chip {
+  font-size: 11px;
+  font-family: ui-monospace, monospace;
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: #eff6ff;
+  color: #1d4ed8;
+  border: 1px solid #bfdbfe;
+}
+
+.webhook-failed-count { color: #b91c1c; font-weight: 600; }
+
+.webhook-deliveries {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid #eee;
+}
+
+.webhook-deliveries__table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.webhook-deliveries__table th {
+  text-align: left;
+  color: #888;
+  font-weight: 600;
+  padding: 4px 8px;
+  border-bottom: 1px solid #eee;
+}
+
+.webhook-deliveries__table td {
+  padding: 6px 8px;
+  border-bottom: 1px solid #f5f5f5;
+  vertical-align: middle;
+}
+
 /* API tokens (settings section) */
 .tokens__reveal {
   margin-top: 12px;

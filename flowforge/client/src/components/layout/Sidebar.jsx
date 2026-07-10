@@ -22,6 +22,7 @@ export default function Sidebar({ open = false, onNavigate }) {
   const onAnalytics = location.pathname.endsWith('/analytics')
   const onActivity = location.pathname.endsWith('/activity')
   const onSecrets = location.pathname.endsWith('/secrets')
+  const onWebhooks = location.pathname.endsWith('/webhooks')
 
   const [workspaces, setWorkspaces] = useState([])
   const [activeWorkspaceId, setActiveWorkspaceId] = useState(null)
@@ -103,6 +104,7 @@ export default function Sidebar({ open = false, onNavigate }) {
     if (onAnalytics) navigate(`/workspace/${id}/analytics`)
     else if (onActivity) navigate(`/workspace/${id}/activity`)
     else if (onSecrets) navigate(`/workspace/${id}/secrets`)
+    else if (onWebhooks) navigate(`/workspace/${id}/webhooks`)
   }
 
   async function handleCreateWorkspace(e) {
@@ -284,6 +286,14 @@ export default function Sidebar({ open = false, onNavigate }) {
             onClick={() => { navigate(`/workspace/${activeWorkspaceId}/secrets`); onNavigate?.() }}
           >
             <span aria-hidden="true">🔑</span> Secrets
+          </button>
+        )}
+        {activeWorkspaceId && (
+          <button
+            className={`sidebar__nav-link${onWebhooks ? ' sidebar__nav-link--active' : ''}`}
+            onClick={() => { navigate(`/workspace/${activeWorkspaceId}/webhooks`); onNavigate?.() }}
+          >
+            <span aria-hidden="true">📡</span> Webhooks
           </button>
         )}
       </div>
