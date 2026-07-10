@@ -98,6 +98,11 @@ function logEvent(workspaceId, actorId, eventType, entity = {}, options = {}) {
     // Best-effort live push; the feed also self-heals on the next fetch.
     if (io) io.to(`workspace:${workspaceId}`).emit('activity-event', { event })
 
+    // Fan the same event out to the workspace's outbound webhook subscriptions
+    // (durable queue — see eventDispatcher.js). Coalesced bumps return above
+    // before reaching here, so a burst delivers once, matching the feed.
+    require('./eventDispatcher').enqueueEvent(workspaceId, eventType, event)
+
     return event
   } catch (err) {
     console.error('activityService.logEvent failed:', err.message)

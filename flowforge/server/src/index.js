@@ -88,6 +88,9 @@ if (process.env.NODE_ENV !== 'test') {
   require('./workers/executionWorker').startWorker()
   // Re-register cron jobs for already-deployed scheduled workflows after a restart.
   require('./services/scheduler').restoreSchedules()
+  // Drain the outbound webhook delivery queue (event subscriptions). Durable in
+  // SQLite, so deliveries queued before a restart pick back up here.
+  require('./services/eventDispatcher').startDispatcher()
 }
 
 app.get('/api/health', (req, res) => res.json({ status: 'ok' }))

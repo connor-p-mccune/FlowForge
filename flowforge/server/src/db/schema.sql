@@ -231,6 +231,54 @@ CREATE TABLE IF NOT EXISTS activity_events (
 CREATE INDEX IF NOT EXISTS idx_activity_workspace_created
   ON activity_events (workspace_id, created_at DESC, id DESC);
 
+-- Outbound webhooks: a workspace can subscribe an external URL to its activity
+-- events (the same event_type families the feed uses — 'execution.failed',
+-- 'workflow.*', or '*'). events is a JSON array of those patterns; secret signs
+-- every delivery (same timestamped HMAC scheme as inbound webhook triggers) and
+-- is shown once at creation. Deliveries are queued durably in event_deliveries
+-- and dispatched by services/eventDispatcher.js.
+CREATE TABLE IF NOT EXISTS event_subscriptions (
+  id           TEXT PRIMARY KEY,
+  workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+  url          TEXT NOT NULL,
+  description  TEXT,
+  events       TEXT NOT NULL,
+  secret       TEXT NOT NULL,
+  is_active    INTEGER NOT NULL DEFAULT 1,
+  created_by   TEXT REFERENCES users(id),
+  created_at   TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_event_subscriptions_workspace
+  ON event_subscriptions (workspace_id, created_at DESC);
+
+-- The durable outbound delivery queue: one row per subscription per matching
+-- event, attempted at-least-once with exponential backoff until it lands
+-- (status 'delivered'), runs out of attempts ('failed'), or its subscription
+-- disappears. The row id doubles as the consumer-visible delivery id — a
+-- redelivery reuses it, so receivers can deduplicate. payload_json is the
+-- activity event; the envelope (id/type/createdAt/data) is built at send time.
+CREATE TABLE IF NOT EXISTS event_deliveries (
+  id              TEXT PRIMARY KEY,
+  subscription_id TEXT NOT NULL REFERENCES event_subscriptions(id) ON DELETE CASCADE,
+  event_type      TEXT NOT NULL,
+  payload_json    TEXT NOT NULL,
+  status          TEXT NOT NULL DEFAULT 'pending',
+  attempts        INTEGER NOT NULL DEFAULT 0,
+  next_attempt_at TEXT,
+  response_status INTEGER,
+  error           TEXT,
+  created_at      TEXT NOT NULL,
+  delivered_at    TEXT
+);
+
+-- The dispatcher scans for due work; the UI lists a subscription's deliveries
+-- newest-first.
+CREATE INDEX IF NOT EXISTS idx_event_deliveries_due
+  ON event_deliveries (status, next_attempt_at);
+CREATE INDEX IF NOT EXISTS idx_event_deliveries_subscription
+  ON event_deliveries (subscription_id, created_at DESC);
+
 -- Human-in-the-loop approvals: an approval node pauses its run until a
 -- workspace member responds or the wait times out. The node runner
 -- (services/nodeRunners/approval.js) inserts the row as 'pending' and polls it;
