@@ -46,8 +46,12 @@ order while streaming live progress back to every collaborator on the canvas.
   rest), reference them as `{{secrets.NAME}}`, and they're masked in run logs.
   Values are write-only: rotate or delete, never read back.
 - **Public REST API** — trigger workflows and poll runs from CI or scripts via
-  `/api/v1`, authenticated with scoped, expiring personal access tokens (hash-only
-  storage). See [docs/API.md](./docs/API.md).
+  `/api/v1`, authenticated with scoped, expiring personal access tokens
+  (hash-only storage), with **Idempotency-Key** support so retried triggers
+  never double-run. See [docs/API.md](./docs/API.md).
+- **CLI** — `flowforge trigger <id> --watch` runs a workflow and exits non-zero
+  unless it completed, turning any workflow into a one-line CI gate. Zero
+  dependencies; see [cli/README.md](./cli/README.md).
 - **Workflow linter** — one click checks the canvas before you run it: cycles,
   dead branches, missing config, references to nodes that aren't upstream,
   unknown `{{secrets.*}}` names, undeployed sub-workflow targets. Click an
@@ -280,9 +284,12 @@ cd client && npm run lint && npm test
 
 # AI service — Ruff + pytest
 cd ai-service && ruff check . && python -m pytest
+
+# CLI — node:test (zero dependencies, no install step)
+cd cli && npm test
 ```
 
-CI (`.github/workflows/ci.yml`) runs lint **and** tests for all three services
+CI (`.github/workflows/ci.yml`) runs lint **and** tests for all four packages
 on every push and pull request to `main`.
 
 ---
@@ -316,6 +323,7 @@ flowforge/
 ├── client/        React + Vite frontend (served by nginx in prod)
 ├── server/        Express API, Socket.io, Bull worker, SQLite
 ├── ai-service/    Flask microservice for LLM-backed features
+├── cli/           Zero-dependency terminal client for the public API
 ├── docs/          API reference + architecture deep dive
 ├── docker-compose.yml
 ├── .env.example

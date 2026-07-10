@@ -39,6 +39,19 @@ jobs:
       - run: npm run lint
       - run: npm run test:coverage
 
+  cli:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: flowforge/cli
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      # Zero runtime dependencies — no install step, just the node:test suite.
+      - run: npm test
+
   ai-service:
     runs-on: ubuntu-latest
     defaults:
