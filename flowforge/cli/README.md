@@ -46,6 +46,9 @@ export FLOWFORGE_TOKEN=ffp_…
 | `flowforge runs <id> [--limit N]` | A workflow's recent runs |
 | `flowforge run <exec-id> [--watch]` | One run with its steps |
 | `flowforge cancel <exec-id>` | Stop a queued or running run (cooperative) |
+| `flowforge approvals [--status pending]` | Runs waiting on a human, across your workspaces |
+| `flowforge approve <id> [--note "…"]` | Wave a paused run through its approval gate (needs the `approve` scope) |
+| `flowforge reject <id> [--note "…"]` | Send it down the rejected branch instead |
 
 `--watch` polls every 2 seconds (`--interval <seconds>` to change) and prints
 each step transition once. `NO_COLOR=1` (or piping stdout) disables colors.
