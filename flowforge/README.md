@@ -35,8 +35,10 @@ order while streaming live progress back to every collaborator on the canvas.
 - **Human-in-the-loop approvals** — drop an **Approval** gate anywhere in a
   workflow: the run pauses, every workspace member is notified, and whoever
   decides first routes the run down the approved or rejected branch — from the
-  run panel, a notification link, or `GET /api/approvals`. Timeouts are
-  configurable (reject the branch or fail the run), and test runs auto-approve.
+  dashboard's **Waiting on you** inbox, the run panel, a notification link,
+  the public API (dedicated `approve` token scope), or `flowforge approve` in
+  a terminal. Timeouts are configurable (reject the branch or fail the run),
+  and test runs auto-approve.
 - **Execution engine** — parses the graph into a DAG and schedules it with a
   ready-set scheduler: independent branches run **in parallel** (bounded by
   `EXEC_MAX_PARALLEL`), joins wait for every upstream branch, `{{node-id.field}}`

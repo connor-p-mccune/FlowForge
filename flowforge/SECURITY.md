@@ -192,8 +192,10 @@ personal access tokens (`services/apiTokens.js`, `middleware/tokenAuth.js`):
 
 - **Hash-only storage** — only the SHA-256 of the token is persisted; the full
   value appears once, at mint time. A display prefix identifies tokens in the UI.
-- **Scopes** (`trigger`, `read`), optional **expiry** (1–365 days), and
+- **Scopes** (`trigger`, `read`, `approve`), optional **expiry** (1–365 days), and
   **revocation** (row kept as an audit trail, `last_used_at` stamped per use).
+  `approve` is deliberately separate from `trigger`: a token that can start
+  runs cannot implicitly settle the approval gates meant to check them.
 - **Credential isolation** — session JWTs are rejected on `/api/v1` and API
   tokens on the session API, so an automation token can never reach account
   endpoints (password, 2FA), and vice versa.

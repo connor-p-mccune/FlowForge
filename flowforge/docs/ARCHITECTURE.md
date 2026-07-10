@@ -308,3 +308,7 @@ Every feature lands with tests; the suites run in CI on every push
 - **Contract pinning:** the OpenAPI document has a test asserting its path
   list matches the mounted routes, so the spec cannot silently drift from
   the API.
+- **CLI (node:test):** commands run against a stub HTTP server, so the
+  suite exercises the real wire format — auth headers, request bodies,
+  status handling — rather than mocks of the CLI's own client. Zero
+  dependencies means CI runs it with no install step.
