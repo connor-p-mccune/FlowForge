@@ -163,6 +163,41 @@ function buildTemplates() {
 
     // 6 ---------------------------------------------------------------------
     {
+      name: 'Webhook → Approval Gate → Deploy Call',
+      category: 'Human in the Loop',
+      description:
+        'Pause a deployment for sign-off: the run waits at an approval gate (every workspace member is notified), then calls the deploy API on approval or posts a rejection notice to Slack.',
+      graph: {
+        nodes: [
+          n('trigger', 'trigger-webhook', 'Release Ready', X(0), Y),
+          n('gate', 'approval', 'Deploy Approval', X(1), Y, {
+            message: 'Deploy {{trigger.version}} to production?',
+            timeoutMinutes: 240,
+            onTimeout: 'reject',
+          }),
+          // Approved: fire the deployment.
+          n('deploy', 'action-http', 'Trigger Deploy', X(2), Y - 80, {
+            method: 'POST',
+            url: 'https://api.example.com/deploy',
+            headers: '{"Content-Type":"application/json"}',
+            body: '{\n  "version": "{{trigger.version}}",\n  "approvedBy": "{{gate.respondedBy}}"\n}',
+          }),
+          // Rejected (or timed out): tell the channel why nothing shipped.
+          n('slack', 'action-slack', 'Announce Rejection', X(2), Y + 80, {
+            webhookUrl: 'https://hooks.slack.com/services/T000/B000/XXXXXXXX',
+            text: 'Deploy of {{trigger.version}} was not approved ({{gate.outcome}}).',
+          }),
+        ],
+        edges: [
+          e('trigger', 'gate'),
+          e('gate', 'deploy', 'true'),
+          e('gate', 'slack', 'false'),
+        ],
+      },
+    },
+
+    // 7 ---------------------------------------------------------------------
+    {
       name: 'Schedule → AI Prompt → Log Output',
       category: 'AI Automation',
       description:

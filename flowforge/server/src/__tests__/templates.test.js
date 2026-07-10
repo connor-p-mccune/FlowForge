@@ -13,6 +13,7 @@ const EXPECTED_CATEGORIES = [
   'Notifications',
   'Data Processing',
   'Resilience',
+  'Human in the Loop',
 ]
 
 describe('workflow templates', () => {
@@ -39,9 +40,9 @@ describe('workflow templates', () => {
       expect(res.status).toBe(200)
       expect(res.body.templates).toBeDefined()
 
-      // Auto-seeded on startup: the six built-in templates across five categories.
+      // Auto-seeded on startup: the seven built-in templates across six categories.
       const all = flatten(res.body.templates)
-      expect(all).toHaveLength(6)
+      expect(all).toHaveLength(7)
       for (const cat of EXPECTED_CATEGORIES) {
         expect(res.body.templates[cat]?.length).toBeGreaterThan(0)
       }
