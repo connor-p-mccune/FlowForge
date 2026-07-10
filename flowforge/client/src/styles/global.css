@@ -1733,6 +1733,91 @@ html, body, #root {
   background: #fee2e2;
 }
 
+/* Dashboard "Waiting on you" approvals inbox */
+.approvals-inbox {
+  margin: 32px auto 0;
+  max-width: 560px;
+  text-align: left;
+}
+
+.approvals-inbox__title {
+  font-size: 14px;
+  font-weight: 600;
+  color: #1a1a1a;
+  margin: 0 0 10px;
+}
+
+.approvals-inbox__count {
+  display: inline-block;
+  min-width: 20px;
+  text-align: center;
+  margin-left: 6px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: #fdf2f8;
+  color: #be185d;
+  border: 1px solid #fbcfe8;
+  font-size: 12px;
+}
+
+.approvals-inbox__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.approvals-inbox__item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 12px;
+  background: #fff;
+  border: 1px solid #eee;
+  border-radius: 10px;
+}
+
+.approvals-inbox__main {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
+  min-width: 0;
+  text-align: left;
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+}
+
+.approvals-inbox__workflow {
+  font-size: 13px;
+  font-weight: 600;
+  color: #1a1a1a;
+}
+
+.approvals-inbox__message {
+  font-size: 12px;
+  color: #9d174d;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.approvals-inbox__time {
+  font-size: 11px;
+  color: #999;
+}
+
+.approvals-inbox__actions {
+  display: flex;
+  gap: 6px;
+  flex: none;
+}
+
 .exec-panel__body {
   flex: 1;
   overflow-y: auto;

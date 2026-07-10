@@ -1,4 +1,5 @@
 import AppShell from '../layout/AppShell'
+import ApprovalsInbox from './ApprovalsInbox'
 
 export default function DashboardPage() {
   return (
@@ -8,6 +9,7 @@ export default function DashboardPage() {
         <p className="dashboard__empty-hint">
           Select a workflow from the sidebar, or create a new one with the + button.
         </p>
+        <ApprovalsInbox />
       </div>
     </AppShell>
   )
