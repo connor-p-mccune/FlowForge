@@ -8,6 +8,7 @@ export default function CanvasToolbar({
   onSuggest,
   onGenerate,
   onToggleWebhooks,
+  onToggleRunSettings,
   onToggleCommentMode,
   commentMode,
   onAutoLayout,
@@ -67,6 +68,13 @@ export default function CanvasToolbar({
         onClick={onToggleWebhooks}
       >
         Webhooks
+      </button>
+      <button
+        className="toolbar-btn toolbar-btn--limits"
+        title="Run limits — cap how many runs of this workflow execute at once"
+        onClick={onToggleRunSettings}
+      >
+        ⏱ Limits
       </button>
       <button
         className={`toolbar-btn toolbar-btn--comment${commentMode ? ' toolbar-btn--active' : ''}`}

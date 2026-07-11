@@ -1536,6 +1536,27 @@ html, body, #root {
 }
 
 .webhook-panel__title { font-weight: 700; color: #0369a1; }
+
+/* Run limits panel (RunSettingsPanel) — shares the webhook panel shell. */
+.run-settings__field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 10px 0;
+}
+.run-settings__label {
+  font-size: 12px;
+  font-weight: 600;
+  color: #374151;
+}
+.run-settings__field input,
+.run-settings__field select {
+  padding: 6px 8px;
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+  font-size: 13px;
+  background: #fff;
+}
 .webhook-panel__body { padding: 10px 14px 14px; }
 .webhook-panel__hint { color: #777; font-size: 12px; margin: 4px 0 10px; }
 .webhook-panel__error { color: #b91c1c; font-size: 13px; margin: 8px 0; }

@@ -23,6 +23,7 @@ import NodeConfigPanel from './NodeConfigPanel'
 import SuggestionsPanel from './SuggestionsPanel'
 import GenerateModal from './GenerateModal'
 import WebhookPanel from './WebhookPanel'
+import RunSettingsPanel from './RunSettingsPanel'
 import HistoryPanel from './HistoryPanel'
 import IssuesPanel from './IssuesPanel'
 import ExecutionPanel from '../execution/ExecutionPanel'
@@ -78,6 +79,9 @@ function CanvasInner({ workflowId }) {
   const [suggestError, setSuggestError] = useState(null)
   const suggestAnchorRef = useRef(null)
   const [webhookOpen, setWebhookOpen] = useState(false)
+
+  // Per-workflow run limits (concurrency cap + at-limit policy)
+  const [runSettingsOpen, setRunSettingsOpen] = useState(false)
 
   // AI workflow generation (natural-language description → full graph)
   const [generateOpen, setGenerateOpen] = useState(false)
@@ -928,6 +932,7 @@ function CanvasInner({ workflowId }) {
         onSuggest={handleSuggest}
         onGenerate={handleOpenGenerate}
         onToggleWebhooks={handleToggleWebhooks}
+        onToggleRunSettings={() => setRunSettingsOpen((v) => !v)}
         onToggleCommentMode={toggleCommentMode}
         commentMode={commentMode}
         onAutoLayout={handleAutoLayout}
@@ -1037,6 +1042,11 @@ function CanvasInner({ workflowId }) {
         workflowId={workflowId}
         open={webhookOpen}
         onClose={() => setWebhookOpen(false)}
+      />
+      <RunSettingsPanel
+        workflowId={workflowId}
+        open={runSettingsOpen}
+        onClose={() => setRunSettingsOpen(false)}
       />
       {issuesOpen && (
         <IssuesPanel
