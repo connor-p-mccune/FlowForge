@@ -228,4 +228,72 @@ router.post('/executions/:id/replay', auth, async (req, res) => {
   }
 })
 
+// POST /api/executions/:id/resume — continue a failed or cancelled run from
+// where it stopped. Starts a fresh execution that points back at the original
+// (resumed_from_execution_id); the engine adopts the original's succeeded step
+// outputs (step status 'reused') and re-executes only the remainder — an
+// approval gate that was already granted is not asked again. Like replay, the
+// workflow's *current* definition runs: an edited node, and transitively
+// everything downstream of any node that re-executes, runs fresh.
+router.post('/executions/:id/resume', auth, async (req, res) => {
+  try {
+    const original = db.prepare('SELECT * FROM executions WHERE id = ?').get(req.params.id)
+    if (!original) return res.status(404).json({ error: 'Execution not found' })
+
+    const workflow = getWorkflowForMember(original.workflow_id, req.user.id)
+    if (!workflow) return res.status(404).json({ error: 'Execution not found' })
+
+    if (original.status !== 'failed' && original.status !== 'cancelled') {
+      return res.status(409).json({
+        error: `Only a failed or cancelled run can be resumed (this one is ${original.status})`,
+      })
+    }
+
+    const { nodes } = JSON.parse(workflow.graph_json)
+    if (!nodes || nodes.length === 0) {
+      return res.status(400).json({ error: 'Workflow has no nodes to execute' })
+    }
+
+    // Same payload handling as replay: the original trigger input carries over,
+    // though reused trigger steps normally supersede it.
+    let payload = {}
+    if (original.trigger_data) {
+      try {
+        const parsed = JSON.parse(original.trigger_data)
+        if (parsed && typeof parsed === 'object') payload = parsed
+      } catch {
+        /* malformed trigger_data — resume with empty payload */
+      }
+    }
+
+    // Resuming a dry-run stays a dry-run, mirroring replay — continuing a test
+    // must never fire real actions.
+    const isDryRun = original.trigger_type === 'dry-run'
+
+    const executionId = uuidv4()
+    const now = new Date().toISOString()
+    db.prepare(
+      `INSERT INTO executions
+         (id, workflow_id, status, triggered_by, trigger_type, trigger_data, resumed_from_execution_id, created_at)
+       VALUES (?, ?, 'pending', ?, ?, ?, ?, ?)`
+    ).run(
+      executionId, workflow.id, req.user.id, isDryRun ? 'dry-run' : 'resume',
+      original.trigger_data ?? null, original.id, now
+    )
+
+    await getExecutionQueue().add({
+      executionId,
+      workflowId: workflow.id,
+      payload,
+      ...(isDryRun ? { dryRun: true } : {}),
+    })
+
+    const execution = db.prepare('SELECT * FROM executions WHERE id = ?').get(executionId)
+    res.status(202).json({ execution })
+  } catch (err) {
+    console.error(err)
+    res.status(500).json({ error: 'Internal server error' })
+  }
+})
+
 module.exports = router

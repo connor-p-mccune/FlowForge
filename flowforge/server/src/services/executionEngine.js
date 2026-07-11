@@ -232,6 +232,34 @@ async function runExecution(
   const { nodes = [], edges = [] } = JSON.parse(workflow.graph_json)
   const nodeById = Object.fromEntries(nodes.map((n) => [n.id, n]))
 
+  // Resume-from-failure: when this run continues an earlier failed/cancelled
+  // one, the source run's succeeded steps can stand in for re-executing their
+  // nodes — the recorded output is adopted and the step is marked 'reused'.
+  // Eligibility is checked twice. Here: the node must still exist in the
+  // current graph with the same type (an edited/replaced node re-executes),
+  // and its recorded output must parse. At schedule time (canReuse below): all
+  // of its upstream nodes must have settled exactly as they did in the source
+  // run, so a reused output can never sit downstream of a node that re-ran.
+  // 'reused' counts as succeeded so resuming a resumed run chains. Note the
+  // adopted output is the *persisted* value — already secret-redacted — so a
+  // secret echoed back by an API in the original run does not survive a
+  // resume; downstream nodes that need the raw value re-execute.
+  const priorOutputs = {}
+  if (execution.resumed_from_execution_id) {
+    const priorSteps = db.prepare(
+      "SELECT node_id, node_type, output_json FROM execution_steps WHERE execution_id = ? AND status IN ('succeeded', 'reused')"
+    ).all(execution.resumed_from_execution_id)
+    for (const step of priorSteps) {
+      const node = nodeById[step.node_id]
+      if (!node || node.type !== step.node_type) continue
+      try {
+        priorOutputs[step.node_id] = step.output_json ? JSON.parse(step.output_json) : {}
+      } catch {
+        /* unparseable prior output — the node re-executes */
+      }
+    }
+  }
+
   const updateExecution = db.prepare(
     'UPDATE executions SET status = ?, started_at = COALESCE(started_at, ?), finished_at = ? WHERE id = ?'
   )
@@ -346,6 +374,35 @@ async function runExecution(
     publishStep(nodeId, 'skipped')
   }
 
+  // Reuse (resume runs only): settle a node from its prior recorded output
+  // without invoking its runner. Safe only while the node's inputs cannot have
+  // changed: every upstream must have settled the same way it did in the
+  // source run — succeeded upstreams must themselves have been reused, and
+  // skipped upstreams re-skip identically because the condition/approval nodes
+  // that routed them are reused with their original result. The moment any
+  // upstream actually re-executed, its output may differ, so this node — and
+  // transitively everything downstream — re-executes too.
+  const reusedNodes = new Set()
+  function canReuse(nodeId) {
+    if (!(nodeId in priorOutputs)) return false
+    return incomingByNode[nodeId].every(
+      (e) =>
+        nodeStatus[e.source] === 'skipped' ||
+        (nodeStatus[e.source] === 'success' && reusedNodes.has(e.source))
+    )
+  }
+
+  function reuseNode(nodeId) {
+    const output = priorOutputs[nodeId]
+    reusedNodes.add(nodeId)
+    context[nodeId] = output
+    nodeStatus[nodeId] = 'success'
+    // Output was persisted redacted by the source run; storing it again is a
+    // no-op for redaction but keeps this step self-contained.
+    updateStep.run('reused', null, redact(JSON.stringify(output)), null, now(), now(), stepIdByNode[nodeId])
+    publishStep(nodeId, 'reused', { output })
+  }
+
   // Ready-set scheduler: a node is ready once all of its upstream nodes have
   // settled (succeeded / failed / skipped). Ready nodes with no active upstream
   // edge are skipped immediately (which can cascade); the rest launch
@@ -434,6 +491,13 @@ async function runExecution(
         if (incoming.length > 0 && activeIncomingFor(nodeId).length === 0) {
           unscheduled.splice(i, 1)
           skipNode(nodeId)
+          progressed = true
+        } else if (canReuse(nodeId)) {
+          // Reuse settles synchronously, like a skip — it never occupies an
+          // execution slot, so a resumed run's healthy prefix replays in one
+          // pass regardless of the parallelism cap.
+          unscheduled.splice(i, 1)
+          reuseNode(nodeId)
           progressed = true
         } else if (inFlight.size < cap) {
           unscheduled.splice(i, 1)

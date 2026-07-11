@@ -71,6 +71,13 @@ ensureColumn('webhooks', 'signing_secret', 'TEXT')
 // still queued is finalized directly by the route, and the worker skips it.
 ensureColumn('executions', 'cancel_requested', 'INTEGER NOT NULL DEFAULT 0')
 
+// Resume-from-failure: a resumed run points back at the failed/cancelled run it
+// continues. The engine reads the source run's succeeded steps and reuses their
+// recorded outputs (step status 'reused') instead of re-executing them, so only
+// the failed portion of the graph runs again. ON DELETE SET NULL — pruning the
+// source run detaches the resume rather than deleting it.
+ensureColumn('executions', 'resumed_from_execution_id', 'TEXT REFERENCES executions(id) ON DELETE SET NULL')
+
 // Two-factor authentication (TOTP). Optional, opt-in per user. totp_enabled stays
 // 0 until the user verifies a code from their authenticator, so a half-finished
 // setup never locks them out of login. totp_backup_codes is a JSON array of
