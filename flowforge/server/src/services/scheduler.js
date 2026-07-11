@@ -137,12 +137,19 @@ function restoreSchedules() {
   return count
 }
 
+// Stop every active cron job (graceful shutdown). Schedules are re-derived
+// from deployed workflows on the next boot via restoreSchedules.
+function stopAllSchedules() {
+  for (const workflowId of [...activeTasks.keys()]) unregisterSchedule(workflowId)
+}
+
 module.exports = {
   validateCron,
   registerSchedule,
   unregisterSchedule,
   restoreSchedules,
   runScheduledExecution,
+  stopAllSchedules,
   // exposed for tests
   _activeTasks: activeTasks,
 }

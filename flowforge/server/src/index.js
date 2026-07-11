@@ -92,7 +92,7 @@ require('./services/activityService').init(io)
 
 // Bull worker runs in-process alongside the API server
 if (process.env.NODE_ENV !== 'test') {
-  require('./workers/executionWorker').startWorker()
+  const queue = require('./workers/executionWorker').startWorker()
   // Re-register cron jobs for already-deployed scheduled workflows after a restart.
   require('./services/scheduler').restoreSchedules()
   // Drain the outbound webhook delivery queue (event subscriptions). Durable in
@@ -101,6 +101,32 @@ if (process.env.NODE_ENV !== 'test') {
   // Age-based cleanup: settled webhook deliveries (default 30d) and — only
   // when EXECUTION_RETENTION_DAYS is set — old terminal runs.
   require('./services/retention').startRetention()
+
+  // Graceful shutdown (services/shutdown.js): on SIGTERM/SIGINT, drain in
+  // dependency order instead of dying mid-run. Sources of new work stop first
+  // (HTTP intake, cron schedules), then the worker pause waits for in-flight
+  // runs to settle, then the background timers and connections close.
+  const { onShutdown, installSignalHandlers } = require('./services/shutdown')
+  onShutdown('http-intake', () => {
+    // Initiate close (stop accepting) and drop idle keep-alives, but don't
+    // wait for every connection — open WebSockets close with Socket.io below,
+    // and awaiting them here would deadlock the drain.
+    server.close()
+    server.closeIdleConnections?.()
+  })
+  onShutdown('schedules', () => require('./services/scheduler').stopAllSchedules())
+  onShutdown('execution-worker', async () => {
+    // Local pause resolves only once this worker's active jobs — in-flight
+    // runs — have settled. New/queued jobs stay in Redis for the next boot.
+    await queue.pause(true)
+    await queue.close()
+  })
+  onShutdown('event-dispatcher', () => require('./services/eventDispatcher').stopDispatcher())
+  onShutdown('retention', () => require('./services/retention').stopRetention())
+  onShutdown('socket-io', () => new Promise((resolve) => io.close(() => resolve())))
+  onShutdown('redis', () => require('./config/redis').quit().catch(() => {}))
+  onShutdown('database', () => require('./config/database').close())
+  installSignalHandlers()
 }
 
 app.get('/api/health', (req, res) => res.json({ status: 'ok' }))
@@ -126,6 +152,12 @@ const withTimeout = (promise, ms) =>
   })
 
 app.get('/api/health/ready', async (req, res) => {
+  // Draining: tell the orchestrator to route traffic elsewhere while in-flight
+  // runs settle. Liveness (/api/health) stays green so it doesn't kill the
+  // drain early.
+  if (require('./services/shutdown').isShuttingDown()) {
+    return res.status(503).json({ status: 'draining' })
+  }
   const checks = { database: 'ok', redis: 'ok' }
   try {
     require('./config/database').prepare('SELECT 1').get()

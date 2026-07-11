@@ -92,4 +92,12 @@ function startRetention() {
   return timer
 }
 
-module.exports = { sweepOnce, startRetention }
+// Stop sweeping (graceful shutdown). Age-based cleanup safely resumes on the
+// next boot.
+function stopRetention() {
+  if (!timer) return
+  clearInterval(timer)
+  timer = null
+}
+
+module.exports = { sweepOnce, startRetention, stopRetention }

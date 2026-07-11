@@ -197,10 +197,19 @@ function startDispatcher() {
   return timer
 }
 
+// Stop polling (graceful shutdown). Pending rows are durable — they resume on
+// the next startDispatcher, typically the next boot.
+function stopDispatcher() {
+  if (!timer) return
+  clearInterval(timer)
+  timer = null
+}
+
 module.exports = {
   enqueueEvent,
   attemptDelivery,
   processDueDeliveries,
   startDispatcher,
+  stopDispatcher,
   matchesPattern,
 }
