@@ -10,6 +10,7 @@ const trigger = require('../src/commands/trigger')
 const runs = require('../src/commands/runs')
 const runCmd = require('../src/commands/run')
 const cancel = require('../src/commands/cancel')
+const resume = require('../src/commands/resume')
 const login = require('../src/commands/login')
 const { ApiError } = require('../src/api')
 
@@ -205,6 +206,55 @@ test('cancel POSTs and reports the wind-down', async () => {
   assert.equal(code, 0)
   assert.equal(stub.requests[0].path, '/api/v1/executions/e1/cancel')
   assert.match(ctx.output(), /winding down/)
+})
+
+test('resume POSTs and reports the continued run', async () => {
+  const stub = await startStub(() => ({
+    status: 202,
+    json: {
+      execution: { id: 'e2', workflowId: 'wf-1', status: 'pending' },
+      statusUrl: '/api/v1/executions/e2',
+      resumedFrom: 'e1',
+    },
+  }))
+  const ctx = makeCtx(stub.api)
+  const code = await resume({ positionals: ['e1'], flags: {} }, ctx)
+  await stub.close()
+
+  assert.equal(code, 0)
+  assert.equal(stub.requests[0].path, '/api/v1/executions/e1/resume')
+  assert.match(ctx.output(), /Run e2 pending/)
+  assert.match(ctx.output(), /continues e1/)
+})
+
+test('resume --watch polls the new run and mirrors its outcome', async () => {
+  const stub = await startStub((method, url) => {
+    if (url.endsWith('/resume')) {
+      return {
+        status: 202,
+        json: {
+          execution: { id: 'e2', workflowId: 'wf-1', status: 'pending' },
+          statusUrl: '/api/v1/executions/e2',
+          resumedFrom: 'e1',
+        },
+      }
+    }
+    return {
+      json: {
+        execution: { id: 'e2', status: 'completed' },
+        steps: [
+          { id: 's1', node_id: 't1', node_type: 'trigger-manual', status: 'reused' },
+          { id: 's2', node_id: 'h1', node_type: 'action-http', status: 'succeeded' },
+        ],
+      },
+    }
+  })
+  const ctx = makeCtx(stub.api)
+  const code = await resume({ positionals: ['e1'], flags: { watch: true, interval: '0.01' } }, ctx)
+  await stub.close()
+
+  assert.equal(code, 0)
+  assert.match(ctx.output(), /Run completed/)
 })
 
 test('API errors surface the server message', async () => {

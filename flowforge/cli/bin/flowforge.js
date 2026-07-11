@@ -16,6 +16,7 @@ const COMMANDS = {
   runs: require('../src/commands/runs'),
   run: require('../src/commands/run'),
   cancel: require('../src/commands/cancel'),
+  resume: require('../src/commands/resume'),
   approvals: require('../src/commands/approvals'),
   approve: require('../src/commands/respond').approve,
   reject: require('../src/commands/respond').reject,
@@ -30,6 +31,7 @@ Usage:
   flowforge runs <workflow-id> [--limit N]         Recent runs for a workflow
   flowforge run <execution-id> [--watch]           One run with its steps
   flowforge cancel <execution-id>                  Stop a queued or running run
+  flowforge resume <execution-id> [--watch]        Re-run only the failed part of a run
   flowforge approvals [--status pending]           Runs waiting on a human
   flowforge approve <approval-id> [--note "…"]     Wave a paused run through
   flowforge reject <approval-id> [--note "…"]      Send it down the rejected branch
