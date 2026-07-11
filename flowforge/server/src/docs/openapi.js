@@ -114,7 +114,10 @@ const spec = {
           403: { $ref: '#/components/responses/Forbidden' },
           404: { $ref: '#/components/responses/NotFound' },
           409: {
-            description: 'The Idempotency-Key was already used with a different request body.',
+            description:
+              'The Idempotency-Key was already used with a different request ' +
+              'body — or the workflow caps concurrent runs with the reject ' +
+              'policy and is at its cap.',
             content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } },
           },
           429: { $ref: '#/components/responses/RateLimited' },

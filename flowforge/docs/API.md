@@ -98,7 +98,9 @@ Response `202`:
 
 Requires the `trigger` scope. Returns `400` if the workflow has no nodes,
 `404` if it doesn't exist or the token's owner isn't a member of its
-workspace.
+workspace, and `409` if the workflow caps concurrent runs with the
+**reject** policy and is at its cap (back off and retry — or switch the
+workflow to the **queue** policy to have runs wait instead).
 
 **Idempotent retries.** Network timeouts make "did my trigger land?" a real
 question for CI scripts. Send an `Idempotency-Key` header (any unique string

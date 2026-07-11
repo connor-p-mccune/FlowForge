@@ -44,6 +44,11 @@ order while streaming live progress back to every collaborator on the canvas.
   `EXEC_MAX_PARALLEL`), joins wait for every upstream branch, `{{node-id.field}}`
   templates resolve between steps, failures retry with backoff, and every step
   is recorded.
+- **Concurrency limits** — cap how many runs of a workflow execute at once
+  (singleton deploys, non-overlapping syncs) and choose the at-limit behavior:
+  **queue** parks the run until a slot frees, **reject** refuses it with a
+  `409` at every entry point — and skips schedule ticks, so a cron workflow
+  never overlaps itself.
 - **Resume from failure** — continue a failed (or cancelled) run from where it
   stopped: steps that already succeeded are **reused** rather than re-executed
   — an approval gate that was already granted is not asked twice — and only
@@ -202,6 +207,7 @@ Copy `.env.example` to `.env` before running. **Never commit `.env`.**
 | `AI_SERVICE_URL`  | no       | Server → AI service URL (defaults to the compose host) |
 | `SECRETS_ENCRYPTION_KEY` | no | Dedicated key material for workspace-secret encryption (falls back to `JWT_SECRET`) |
 | `EXEC_MAX_PARALLEL` | no     | Max concurrently-executing nodes per run (default 4; 1 = sequential) |
+| `CONCURRENCY_RETRY_MS` | no  | How long a run parked at its workflow's concurrency cap waits before re-checking (default 1000) |
 | `METRICS_TOKEN`   | no       | Bearer token guarding `GET /metrics` (unguarded when unset) |
 | `WEBHOOK_MAX_ATTEMPTS` | no  | Delivery attempts per outbound webhook event (default 5) |
 | `WEBHOOK_DISPATCH_INTERVAL_MS` | no | Outbound webhook delivery-queue poll interval (default 5000) |

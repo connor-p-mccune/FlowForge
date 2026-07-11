@@ -204,6 +204,37 @@ run's persisted trigger payload (`trigger_data`) — matching how a redeploy
 affects future runs — and a replayed dry-run stays a dry-run, so re-running
 a test can never fire real side effects.
 
+### Per-workflow concurrency limits
+
+A workflow can cap its active runs (`max_concurrent_runs`) and pick what
+happens at the cap (`concurrency_policy`: `queue` parks the run, `reject`
+refuses the submission with a 409). Enforcement is deliberately two-layered,
+each layer where its data is accurate:
+
+- **`reject` is checked at enqueue** (`services/concurrencyGate.js`), by
+  counting pending + running rows — synchronous in better-sqlite3, so two
+  submissions racing through one process can't both slip under the cap. The
+  caller finds out immediately: API and webhook submissions get a 409, and a
+  schedule tick at the cap is *skipped*, which for a cron workflow is exactly
+  the "don't overlap the previous run" behavior the limit asks for.
+- **The cap itself lives at worker pickup**, as an in-process counter. The
+  worker runs in-process with the API, so the counter is exact and race-free
+  — and unlike counting `running` rows, it can never be wedged by a stale
+  row left behind by a crash. A run at the cap is re-parked with a short
+  delay (`CONCURRENCY_RETRY_MS`) instead of holding a Bull slot hostage, and
+  `flowforge_runs_deferred_total` counts every re-park so saturation is
+  visible on the dashboard.
+
+Two invariants: an **accepted run is never dropped** (a `reject` workflow's
+run that slips past the enqueue check in a race simply waits like `queue`),
+and **idempotent trigger retries keep working at the cap** — the replay
+lookup runs before the admission check, so a retried request whose original
+landed still gets its original run back instead of a spurious 409. Dry runs
+are interactive and exempt throughout. Sub-workflow child runs execute
+inside their parent's engine loop, not through the queue, so limits apply to
+top-level runs — which also means a workflow calling itself through a gate
+can't deadlock.
+
 ---
 
 ## Outbound webhooks
