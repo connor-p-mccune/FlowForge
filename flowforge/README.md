@@ -97,7 +97,14 @@ order while streaming live progress back to every collaborator on the canvas.
 - **Observability** — a zero-dependency Prometheus exporter at `/metrics`
   (request rates/latency by route, run outcomes and durations, queue depth,
   process stats) plus a deep readiness probe at `/api/health/ready` that
-  verifies SQLite and Redis before reporting healthy.
+  verifies SQLite and Redis before reporting healthy. Every request carries a
+  **correlation id** (inbound `X-Request-Id` honored, echoed on the response,
+  included in 500 bodies) and logs one **structured JSON line** — a
+  user-reported failure maps to its log lines with one grep.
+- **Graceful shutdown** — on SIGTERM the process drains instead of dying
+  mid-run: new work stops, in-flight runs settle, the readiness probe flips
+  to `503 draining` so the orchestrator routes around it, and a hard deadline
+  backstops anything that hangs.
 - **Polish** — input validation, loading skeletons, empty states, toast
   notifications, an error boundary, and a responsive, collapsible sidebar.
 
@@ -209,6 +216,9 @@ Copy `.env.example` to `.env` before running. **Never commit `.env`.**
 | `EXEC_MAX_PARALLEL` | no     | Max concurrently-executing nodes per run (default 4; 1 = sequential) |
 | `CONCURRENCY_RETRY_MS` | no  | How long a run parked at its workflow's concurrency cap waits before re-checking (default 1000) |
 | `METRICS_TOKEN`   | no       | Bearer token guarding `GET /metrics` (unguarded when unset) |
+| `LOG_LEVEL`       | no       | `debug` \| `info` (default) \| `warn` \| `error` \| `silent` |
+| `LOG_FORMAT`      | no       | `pretty` for human-readable dev logs (default: one JSON line per event) |
+| `SHUTDOWN_TIMEOUT_MS` | no   | Hard deadline for the graceful-shutdown drain (default 30000) |
 | `WEBHOOK_MAX_ATTEMPTS` | no  | Delivery attempts per outbound webhook event (default 5) |
 | `WEBHOOK_DISPATCH_INTERVAL_MS` | no | Outbound webhook delivery-queue poll interval (default 5000) |
 | `EXECUTION_RETENTION_DAYS` | no | Prune terminal runs older than this many days (default: keep forever) |

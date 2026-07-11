@@ -335,6 +335,47 @@ Redis (the ping raced against a timeout, because ioredis queues commands
 indefinitely while disconnected) and 503s with per-check detail so an
 orchestrator holds traffic until the process can genuinely serve.
 
+### Correlation ids and structured logs
+
+Every request gets an id (`middleware/requestContext.js`): a valid inbound
+`X-Request-Id` is honored — a gateway's id follows the request through
+FlowForge's logs — anything else gets a fresh UUID. The id is echoed on the
+response, bound onto `req.log` as a child logger, and returned in 500
+bodies, so "what happened to request X?" is one grep. The middleware mounts
+*before* the body parser on purpose: even a request that fails to parse
+keeps its id through the error handler.
+
+The logger itself (`services/logger.js`) is hand-rolled in the same spirit
+as the metrics registry: the app needs leveled, field-structured JSON lines
+with child loggers, not a logging framework. One line per response with the
+*real* path — unlike metrics, logs are for debugging specific requests, so
+raw paths are the point rather than a cardinality hazard. Health and
+metrics probes log at debug so a 5-second scrape interval doesn't drown the
+interesting lines, and serialization never throws (Errors flatten to their
+message, circular references drop) because logging must never break the
+request it describes.
+
+### Graceful shutdown
+
+On SIGTERM/SIGINT, `services/shutdown.js` drains the process instead of
+letting it die mid-run. Closers registered by `index.js` run sequentially
+in dependency order: sources of new work stop first (HTTP intake, cron
+schedules), then the Bull worker's local pause waits for in-flight runs to
+settle, then the background pollers, Socket.io, Redis, and SQLite close.
+The readiness probe flips to `503 draining` the moment shutdown starts —
+the orchestrator routes traffic elsewhere — while liveness stays green so
+it doesn't kill the drain early.
+
+Two escape hatches bound the drain: a hard deadline (`SHUTDOWN_TIMEOUT_MS`,
+default 30s) force-exits if any closer hangs, and a second signal exits
+immediately so an operator's ^C^C still works. The HTTP closer deliberately
+initiates `server.close()` without awaiting every connection — open
+WebSockets belong to the Socket.io closer, and awaiting them first would
+deadlock the drain. Everything that stops is durable (delivery rows,
+deployed schedules, queued jobs stay in Redis), so the next boot resumes it
+— and a run that outlives the drain window is exactly what
+resume-from-failure exists for.
+
 ---
 
 ## Persistence
