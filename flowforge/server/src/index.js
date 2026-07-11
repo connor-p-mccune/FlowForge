@@ -32,6 +32,12 @@ if (process.env.NODE_ENV === 'production' && corsOrigins === '*') {
   console.warn('[security] CORS is open to "*" in production. Set FRONTEND_URL to restrict it.')
 }
 app.use(cors({ origin: corsOrigins, credentials: corsOrigins !== '*' }))
+
+// Request correlation + structured request logs: every request gets an id
+// (inbound X-Request-Id honored, echoed on the response, bound to req.log)
+// and one JSON log line per response. Mounted before the body parser so even
+// a request that fails to parse carries its id through the error handler.
+app.use(require('./middleware/requestContext'))
 // Cap request bodies so a huge payload can't exhaust memory. Workflow graphs
 // are the largest legitimate body, and 2mb covers very large graphs.
 // `verify` keeps a reference to the exact raw bytes: webhook HMAC signatures
@@ -167,19 +173,10 @@ app.get('/metrics', async (req, res) => {
 // Unknown API routes get a JSON 404 (not Express's default HTML page).
 app.use('/api', (req, res) => res.status(404).json({ error: 'Not found' }))
 
-// Final error handler — turns body-parser failures and any uncaught error
-// into the same { error } shape every route uses. (`next` is required for
-// Express to treat this as an error handler even though it's unused.)
-app.use((err, req, res, _next) => {
-  if (err.type === 'entity.too.large') {
-    return res.status(413).json({ error: 'Request body too large' })
-  }
-  if (err.type === 'entity.parse.failed' || err instanceof SyntaxError) {
-    return res.status(400).json({ error: 'Invalid JSON in request body' })
-  }
-  console.error(err)
-  res.status(500).json({ error: 'Internal server error' })
-})
+// Final error handler — body-parser failures and uncaught errors become the
+// same { error } shape every route uses, with the request's correlation id in
+// the 500 body and its log line. See middleware/errorHandler.js.
+app.use(require('./middleware/errorHandler'))
 
 if (process.env.NODE_ENV !== 'test') {
   const PORT = process.env.PORT || 3001
