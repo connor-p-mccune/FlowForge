@@ -336,6 +336,44 @@ describe('resume from failure', () => {
     expect(stillPending.status).toBe(409)
   })
 
+  it('resumes via the public API with a trigger-scoped token', async () => {
+    const minted = await request(app)
+      .post('/api/tokens')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ name: 'resume-test', scopes: ['trigger'] })
+    const pat = minted.body.token
+
+    const workflow = await createWorkflow({
+      nodes: [node('t1', 'trigger-manual'), httpNode('a', '/public-a')],
+      edges: [edge('t1', 'a')],
+    })
+    const original = await startRun(workflow.id)
+    failPaths.add('/public-a')
+    await runExecution(original.id, { publish: () => {} })
+    failPaths.delete('/public-a')
+
+    const res = await request(app)
+      .post(`/api/v1/executions/${original.id}/resume`)
+      .set('Authorization', `Bearer ${pat}`)
+    expect(res.status).toBe(202)
+    expect(res.body.resumedFrom).toBe(original.id)
+    expect(res.body.statusUrl).toBe(`/api/v1/executions/${res.body.execution.id}`)
+    expect(getExecution(res.body.execution.id).resumed_from_execution_id).toBe(original.id)
+  })
+
+  it('requires the trigger scope on the public surface', async () => {
+    const minted = await request(app)
+      .post('/api/tokens')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ name: 'resume-readonly', scopes: ['read'] })
+    const pat = minted.body.token
+
+    const res = await request(app)
+      .post(`/api/v1/executions/${uuidv4()}/resume`)
+      .set('Authorization', `Bearer ${pat}`)
+    expect(res.status).toBe(403)
+  })
+
   it('404s for non-members and unknown executions', async () => {
     const other = await request(app)
       .post('/api/auth/register')

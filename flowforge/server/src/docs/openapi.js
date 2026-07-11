@@ -301,6 +301,54 @@ const spec = {
         },
       },
     },
+    '/executions/{executionId}/resume': {
+      post: {
+        tags: ['executions'],
+        summary: 'Resume a failed or cancelled run',
+        description:
+          'Starts a fresh execution that continues the given run from where ' +
+          'it stopped: steps that already succeeded are not re-executed — ' +
+          'their recorded outputs are adopted (step status `reused`) — and ' +
+          'only the failed remainder runs again. An approval gate that was ' +
+          'already granted is not asked twice. Runs the workflow’s *current* ' +
+          'definition: an edited node, and everything downstream of any node ' +
+          'that re-executes, runs fresh. Requires the `trigger` scope.',
+        operationId: 'resumeExecution',
+        parameters: [{ $ref: '#/components/parameters/ExecutionId' }],
+        responses: {
+          202: {
+            description: 'The resumed run was enqueued; poll `statusUrl` for progress.',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    execution: { $ref: '#/components/schemas/ExecutionRef' },
+                    statusUrl: { type: 'string', example: '/api/v1/executions/f81c…' },
+                    resumedFrom: {
+                      type: 'string',
+                      description: 'The id of the failed/cancelled run this one continues.',
+                    },
+                  },
+                },
+              },
+            },
+          },
+          400: {
+            description: 'The workflow has no nodes to execute.',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } },
+          },
+          401: { $ref: '#/components/responses/Unauthorized' },
+          403: { $ref: '#/components/responses/Forbidden' },
+          404: { $ref: '#/components/responses/NotFound' },
+          409: {
+            description: 'The run is not failed or cancelled, so there is nothing to resume.',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } },
+          },
+          429: { $ref: '#/components/responses/RateLimited' },
+        },
+      },
+    },
     '/executions/{executionId}/cancel': {
       post: {
         tags: ['executions'],
@@ -450,7 +498,10 @@ const spec = {
           node_type: { type: 'string', nullable: true, example: 'action-http' },
           status: {
             type: 'string',
-            enum: ['pending', 'running', 'succeeded', 'failed', 'skipped'],
+            enum: ['pending', 'running', 'succeeded', 'failed', 'skipped', 'reused'],
+            description:
+              '`reused` appears in resumed runs: the step was not re-executed — ' +
+              'its output was adopted from the run being resumed.',
           },
           input_json: { type: 'string', nullable: true },
           output_json: { type: 'string', nullable: true },

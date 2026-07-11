@@ -312,4 +312,67 @@ router.post('/executions/:id/cancel', tokenAuth('trigger'), (req, res) => {
   }
 })
 
+// POST /api/v1/executions/:id/resume — continue a failed or cancelled run from
+// where it stopped. Requires the trigger scope (it starts a run, like trigger
+// does). The engine reuses the source run's succeeded step outputs and
+// re-executes only the remainder; poll statusUrl for the outcome. 409 unless
+// the source run is failed or cancelled.
+router.post('/executions/:id/resume', tokenAuth('trigger'), async (req, res) => {
+  try {
+    const original = db.prepare('SELECT * FROM executions WHERE id = ?').get(req.params.id)
+    if (!original) return res.status(404).json({ error: 'Execution not found' })
+    const workflow = getWorkflowForMember(original.workflow_id, req.user.id)
+    if (!workflow) return res.status(404).json({ error: 'Execution not found' })
+
+    if (original.status !== 'failed' && original.status !== 'cancelled') {
+      return res.status(409).json({
+        error: `Only a failed or cancelled run can be resumed (this one is ${original.status})`,
+      })
+    }
+
+    const { nodes } = JSON.parse(workflow.graph_json)
+    if (!nodes || nodes.length === 0) {
+      return res.status(400).json({ error: 'Workflow has no nodes to execute' })
+    }
+
+    let payload = {}
+    if (original.trigger_data) {
+      try {
+        const parsed = JSON.parse(original.trigger_data)
+        if (parsed && typeof parsed === 'object') payload = parsed
+      } catch {
+        /* malformed trigger_data — resume with empty payload */
+      }
+    }
+    const isDryRun = original.trigger_type === 'dry-run'
+
+    const executionId = uuidv4()
+    const now = new Date().toISOString()
+    db.prepare(
+      `INSERT INTO executions
+         (id, workflow_id, status, triggered_by, trigger_type, trigger_data, resumed_from_execution_id, created_at)
+       VALUES (?, ?, 'pending', ?, ?, ?, ?, ?)`
+    ).run(
+      executionId, workflow.id, req.user.id, isDryRun ? 'dry-run' : 'resume',
+      original.trigger_data ?? null, original.id, now
+    )
+
+    await getExecutionQueue().add({
+      executionId,
+      workflowId: workflow.id,
+      payload,
+      ...(isDryRun ? { dryRun: true } : {}),
+    })
+
+    res.status(202).json({
+      execution: { id: executionId, workflowId: workflow.id, status: 'pending' },
+      statusUrl: `/api/v1/executions/${executionId}`,
+      resumedFrom: original.id,
+    })
+  } catch (err) {
+    console.error(err)
+    res.status(500).json({ error: 'Internal server error' })
+  }
+})
+
 module.exports = router
