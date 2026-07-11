@@ -53,6 +53,8 @@ function triggerLabel(execution) {
       return 'schedule'
     case 'replay':
       return 'replay'
+    case 'resume':
+      return 'resume'
     case 'dry-run':
       return 'test'
     default:
@@ -86,13 +88,48 @@ function ReplayConfirm({ label, modified, busy, onCancel, onConfirm }) {
   )
 }
 
+// Confirmation card for resuming a failed/cancelled run. Distinct from replay:
+// a resume continues the same run — succeeded steps are reused, only the
+// failed remainder re-executes.
+function ResumeConfirm({ modified, busy, onCancel, onConfirm }) {
+  return (
+    <div className="replay-confirm" role="dialog" aria-label="Confirm resume">
+      <p className="replay-confirm__message">
+        Continue this run from where it stopped? Steps that already succeeded are
+        reused — only the failed part re-runs.
+      </p>
+      {modified && (
+        <p className="replay-confirm__warning">
+          Note: this workflow has been modified since this execution. Edited nodes
+          (and everything downstream of them) will re-run instead of being reused.
+        </p>
+      )}
+      <div className="confirm-dialog__actions">
+        <button className="confirm-dialog__cancel" onClick={onCancel} disabled={busy}>
+          Cancel
+        </button>
+        <button className="confirm-dialog__confirm" onClick={onConfirm} disabled={busy}>
+          {busy ? 'Starting…' : 'Resume'}
+        </button>
+      </div>
+    </div>
+  )
+}
+
+// Only a run that stopped short can be continued.
+function isResumable(execution) {
+  return execution.status === 'failed' || execution.status === 'cancelled'
+}
+
 export default function ExecutionHistory({ workflowId, nodes, autoOpenId }) {
   const [executions, setExecutions] = useState([])
   const [workflowUpdatedAt, setWorkflowUpdatedAt] = useState(null)
   const [selected, setSelected] = useState(null) // { execution, steps }
   const [detailView, setDetailView] = useState('steps') // 'steps' | 'timeline'
   const [pendingReplay, setPendingReplay] = useState(null) // execution awaiting confirm
+  const [pendingResume, setPendingResume] = useState(null) // execution awaiting confirm
   const [replaying, setReplaying] = useState(false)
+  const [resuming, setResuming] = useState(false)
   const [error, setError] = useState(null)
   const [loading, setLoading] = useState(true)
   const toast = useToast()
@@ -130,6 +167,7 @@ export default function ExecutionHistory({ workflowId, nodes, autoOpenId }) {
   const openRun = useCallback(async (executionId) => {
     setError(null)
     setPendingReplay(null)
+    setPendingResume(null)
     setDetailView('steps')
     try {
       const { execution, steps, childExecutions } = await apiFetch(`/api/executions/${executionId}`)
@@ -164,11 +202,28 @@ export default function ExecutionHistory({ workflowId, nodes, autoOpenId }) {
     }
   }
 
+  async function handleResume() {
+    if (!pendingResume) return
+    setResuming(true)
+    try {
+      await apiFetch(`/api/executions/${pendingResume.id}/resume`, { method: 'POST' })
+      toast.success('Run resumed')
+      setPendingResume(null)
+      setSelected(null) // back to the list so the resumed run shows at the top
+      await load()
+    } catch (err) {
+      toast.error(`Couldn’t resume: ${err.message}`)
+    } finally {
+      setResuming(false)
+    }
+  }
+
   if (error) return <p className="exec-panel__error">{error}</p>
   if (loading) return <SkeletonRows count={4} height={34} />
 
   if (selected) {
-    const showConfirm = pendingReplay?.id === selected.execution.id
+    const showReplayConfirm = pendingReplay?.id === selected.execution.id
+    const showResumeConfirm = pendingResume?.id === selected.execution.id
     return (
       <div>
         <div className="exec-history__detail-header">
@@ -177,25 +232,51 @@ export default function ExecutionHistory({ workflowId, nodes, autoOpenId }) {
             onClick={() => {
               setSelected(null)
               setPendingReplay(null)
+              setPendingResume(null)
             }}
           >
             ← All runs
           </button>
-          <button
-            className="exec-history__replay exec-history__replay--header"
-            aria-label="Replay this run"
-            onClick={() => setPendingReplay(selected.execution)}
-          >
-            ↻ Replay
-          </button>
+          <div className="exec-history__detail-actions">
+            {isResumable(selected.execution) && (
+              <button
+                className="exec-history__replay exec-history__replay--header"
+                aria-label="Resume this run"
+                onClick={() => {
+                  setPendingReplay(null)
+                  setPendingResume(selected.execution)
+                }}
+              >
+                ↪ Resume
+              </button>
+            )}
+            <button
+              className="exec-history__replay exec-history__replay--header"
+              aria-label="Replay this run"
+              onClick={() => {
+                setPendingResume(null)
+                setPendingReplay(selected.execution)
+              }}
+            >
+              ↻ Replay
+            </button>
+          </div>
         </div>
-        {showConfirm && (
+        {showReplayConfirm && (
           <ReplayConfirm
             label={triggerLabel(selected.execution)}
             modified={isModifiedSince(selected.execution)}
             busy={replaying}
             onCancel={() => setPendingReplay(null)}
             onConfirm={handleReplay}
+          />
+        )}
+        {showResumeConfirm && (
+          <ResumeConfirm
+            modified={isModifiedSince(selected.execution)}
+            busy={resuming}
+            onCancel={() => setPendingResume(null)}
+            onConfirm={handleResume}
           />
         )}
         <div className="exec-history__viewtoggle" role="tablist" aria-label="Run detail view">
@@ -253,16 +334,40 @@ export default function ExecutionHistory({ workflowId, nodes, autoOpenId }) {
                   Test
                 </span>
               )}
+              {ex.trigger_type === 'resume' && (
+                <span
+                  className="exec-history__resumed-badge"
+                  title="Continues an earlier run — its succeeded steps were reused"
+                >
+                  Resumed
+                </span>
+              )}
               <span className="exec-history__date">
                 {new Date(ex.created_at).toLocaleString()}
               </span>
               <span className="exec-history__duration">{formatDuration(ex)}</span>
             </button>
+            {isResumable(ex) && (
+              <button
+                className="exec-history__replay"
+                aria-label="Resume this run"
+                title="Resume this run — succeeded steps are reused, only the failed part re-runs"
+                onClick={() => {
+                  setPendingReplay(null)
+                  setPendingResume(ex)
+                }}
+              >
+                ↪
+              </button>
+            )}
             <button
               className="exec-history__replay"
               aria-label="Replay this run"
               title="Replay this run"
-              onClick={() => setPendingReplay(ex)}
+              onClick={() => {
+                setPendingResume(null)
+                setPendingReplay(ex)
+              }}
             >
               ↻
             </button>
@@ -274,6 +379,14 @@ export default function ExecutionHistory({ workflowId, nodes, autoOpenId }) {
               busy={replaying}
               onCancel={() => setPendingReplay(null)}
               onConfirm={handleReplay}
+            />
+          )}
+          {pendingResume?.id === ex.id && (
+            <ResumeConfirm
+              modified={isModifiedSince(ex)}
+              busy={resuming}
+              onCancel={() => setPendingResume(null)}
+              onConfirm={handleResume}
             />
           )}
         </li>

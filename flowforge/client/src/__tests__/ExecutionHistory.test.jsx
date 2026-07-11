@@ -34,14 +34,20 @@ const EXECS = [
 
 const REPLAY_EXEC = { id: 'exNew', status: 'pending', trigger_type: 'replay' }
 
+const RESUME_EXEC = { id: 'exResumed', status: 'pending', trigger_type: 'resume' }
+
 function mockApi() {
   apiFetch.mockImplementation((path) => {
     if (path.endsWith('/replay')) return Promise.resolve({ execution: REPLAY_EXEC })
+    if (path.endsWith('/resume')) return Promise.resolve({ execution: RESUME_EXEC })
     if (path === '/api/workflows/wf1/executions') {
       return Promise.resolve({ executions: EXECS, workflowUpdatedAt: WF_UPDATED })
     }
     if (path === '/api/executions/exA') {
       return Promise.resolve({ execution: EXECS[0], steps: [] })
+    }
+    if (path === '/api/executions/exB') {
+      return Promise.resolve({ execution: EXECS[1], steps: [] })
     }
     return Promise.reject(new Error(`unexpected request: ${path}`))
   })
@@ -122,6 +128,91 @@ describe('ExecutionHistory replay', () => {
     const replay = screen.getByRole('button', { name: 'Replay this run' })
     fireEvent.click(replay)
     expect(screen.getByRole('dialog')).toHaveTextContent(/original webhook trigger data/)
+  })
+})
+
+describe('ExecutionHistory resume', () => {
+  it('offers Resume only on failed/cancelled runs', async () => {
+    setup()
+    await screen.findByText('completed')
+    // exA completed (no resume), exB failed (resumable).
+    expect(screen.getAllByRole('button', { name: 'Resume this run' })).toHaveLength(1)
+  })
+
+  it('resumes on confirm: posts to the resume endpoint and refreshes the list', async () => {
+    setup()
+    await screen.findByText('failed')
+    fireEvent.click(screen.getByRole('button', { name: 'Resume this run' }))
+
+    const dialog = screen.getByRole('dialog', { name: 'Confirm resume' })
+    expect(dialog).toHaveTextContent(/Steps that already succeeded are reused/i)
+    fireEvent.click(screen.getByRole('button', { name: 'Resume' }))
+
+    await waitFor(() =>
+      expect(apiFetch).toHaveBeenCalledWith('/api/executions/exB/resume', { method: 'POST' })
+    )
+    const listCalls = apiFetch.mock.calls.filter(([p]) => p === '/api/workflows/wf1/executions')
+    expect(listCalls.length).toBeGreaterThanOrEqual(2)
+  })
+
+  it('warns about edited nodes when the workflow changed since the run', async () => {
+    // exB is from after the last edit — swap in a failed run from before it.
+    apiFetch.mockImplementation((path) => {
+      if (path === '/api/workflows/wf1/executions') {
+        return Promise.resolve({
+          executions: [{ ...EXECS[1], id: 'exOld', created_at: '2026-06-16T08:00:00.000Z' }],
+          workflowUpdatedAt: WF_UPDATED,
+        })
+      }
+      return Promise.reject(new Error(`unexpected request: ${path}`))
+    })
+    setup()
+    await screen.findByText('failed')
+    fireEvent.click(screen.getByRole('button', { name: 'Resume this run' }))
+    expect(screen.getByRole('dialog')).toHaveTextContent(/Edited nodes .* will re-run/i)
+  })
+
+  it('cancelling the confirmation resumes nothing', async () => {
+    setup()
+    await screen.findByText('failed')
+    fireEvent.click(screen.getByRole('button', { name: 'Resume this run' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
+
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    expect(apiFetch).not.toHaveBeenCalledWith('/api/executions/exB/resume', expect.anything())
+  })
+
+  it('offers Resume from a failed run detail view and badges resumed runs in the list', async () => {
+    apiFetch.mockImplementation((path) => {
+      if (path === '/api/workflows/wf1/executions') {
+        return Promise.resolve({
+          executions: [
+            EXECS[1],
+            {
+              id: 'exResumed',
+              status: 'completed',
+              trigger_type: 'resume',
+              triggered_by: 'u1',
+              created_at: '2026-06-17T12:00:00.000Z',
+              started_at: '2026-06-17T12:00:00.000Z',
+              finished_at: '2026-06-17T12:00:01.000Z',
+            },
+          ],
+          workflowUpdatedAt: WF_UPDATED,
+        })
+      }
+      if (path === '/api/executions/exB') {
+        return Promise.resolve({ execution: EXECS[1], steps: [] })
+      }
+      return Promise.reject(new Error(`unexpected request: ${path}`))
+    })
+    setup()
+    await screen.findByText('failed')
+    expect(screen.getByText('Resumed')).toBeInTheDocument()
+
+    fireEvent.click(screen.getByText('failed'))
+    await screen.findByText('← All runs')
+    expect(screen.getByRole('button', { name: 'Resume this run' })).toBeInTheDocument()
   })
 })
 

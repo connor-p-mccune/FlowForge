@@ -1857,6 +1857,9 @@ html, body, #root {
 .status-badge--failed { background: #fee2e2; color: #b91c1c; }
 .status-badge--skipped { background: #fef3c7; color: #b45309; }
 .status-badge--cancelled { background: #ede9fe; color: #6d28d9; }
+/* Resumed runs: the step was not re-executed — its output was adopted from
+   the run being resumed. */
+.status-badge--reused { background: #cffafe; color: #0e7490; }
 
 /* Step list */
 .step-list {
@@ -2073,6 +2076,20 @@ html, body, #root {
   letter-spacing: 0.04em;
 }
 
+/* Runs continuing an earlier failed/cancelled run (trigger_type 'resume'). */
+.exec-history__resumed-badge {
+  flex-shrink: 0;
+  padding: 1px 7px;
+  border-radius: 10px;
+  background: #cffafe;
+  border: 1px solid #06b6d4;
+  color: #0e7490;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
 .exec-history__date {
   flex: 1;
   color: #555;
@@ -2135,6 +2152,11 @@ html, body, #root {
   align-items: flex-start;
   justify-content: space-between;
   gap: 8px;
+}
+
+.exec-history__detail-actions {
+  display: flex;
+  gap: 6px;
 }
 
 .exec-history__replay--header {
