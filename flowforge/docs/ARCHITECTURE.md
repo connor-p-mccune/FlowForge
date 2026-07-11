@@ -115,6 +115,40 @@ usually an answer, not an outage — with an opt-in `fail` mode for gates
 where silence must stop the world. Dry runs auto-approve so test mode never
 blocks on a human.
 
+### Resume from failure
+
+A failed or cancelled run can be **resumed**: a fresh execution points back at
+the source run (`resumed_from_execution_id`), and the engine adopts the source
+run's succeeded step outputs — those steps are marked `reused` and their
+runners are never invoked — so only the failed remainder re-executes. An
+approval gate that was already granted is not asked twice.
+
+The interesting problem is deciding *when* a recorded output is still valid.
+The rule is a freshness invariant enforced at schedule time: a node's prior
+output is reused only while its inputs cannot have changed — every succeeded
+upstream must itself have been reused, and skipped upstreams re-skip
+identically because the condition/approval nodes that routed them are reused
+with their original `result`. The moment any node actually re-executes
+(including a node edited or replaced since the source run, which has no
+matching prior step), everything downstream of it re-executes too. Reuse
+therefore spreads exactly as far as the source run's healthy prefix and no
+further, with no special cases per node type.
+
+Two deliberate consequences:
+
+- **Reused nodes settle synchronously, like skips** — they never occupy an
+  execution slot, so the healthy prefix replays in one scheduling pass
+  regardless of the parallelism cap.
+- **The adopted output is the persisted (secret-redacted) value.** A secret
+  echoed back by a third-party API in the source run was scrubbed before it
+  ever reached the database, so it does not survive a resume — a downstream
+  node that needs the raw value re-executes. Persisting secrets to make
+  resumes byte-perfect would be the wrong trade.
+
+Node identity (id + type) is what matches steps across runs; config edits
+don't invalidate reuse on their own — like replay, a resume runs the current
+definition, and the UI warns when the workflow changed since the source run.
+
 ### Sub-workflows and for-each
 
 A sub-workflow node runs another workflow synchronously through the same

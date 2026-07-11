@@ -208,6 +208,36 @@ execution to observe the terminal status).
 
 Requires the `trigger` scope. Returns `409` if the run has already finished.
 
+### Resume an execution
+
+```bash
+curl -s -X POST https://your-flowforge-host/api/v1/executions/e57a…/resume \
+  -H "Authorization: Bearer $FLOWFORGE_TOKEN"
+```
+
+Continues a **failed or cancelled** run from where it stopped. A fresh
+execution is started; steps that already succeeded in the source run are
+**reused** (step status `reused`) rather than re-executed — an approval gate
+that was already granted is not asked twice — and only the failed remainder
+runs again.
+
+Response `202`:
+
+```json
+{
+  "execution": { "id": "f81c…", "workflowId": "6f0c…", "status": "pending" },
+  "statusUrl": "/api/v1/executions/f81c…",
+  "resumedFrom": "e57a…"
+}
+```
+
+Poll `statusUrl` exactly like a triggered run. Requires the `trigger` scope.
+Returns `409` if the source run is not failed or cancelled.
+
+Like replay, a resume runs the workflow's **current** definition: an edited or
+replaced node has no matching prior step, so it re-executes — and everything
+downstream of any node that re-executes runs fresh instead of being reused.
+
 ### List approval requests
 
 ```bash
