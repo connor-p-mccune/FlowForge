@@ -175,6 +175,13 @@ const webhookPending = gauge(
   'Outbound webhook deliveries waiting in the queue, sampled at scrape time.'
 )
 
+// Per-workflow concurrency limits (services/concurrencyGate.js). A steadily
+// growing counter means runs are routinely waiting on a saturated workflow.
+const runsDeferred = counter(
+  'flowforge_runs_deferred_total',
+  'Runs re-parked at worker pickup because their workflow was at its concurrency limit.'
+)
+
 const processUptime = gauge('process_uptime_seconds', 'Process uptime in seconds.')
 const processMemory = gauge(
   'process_resident_memory_bytes',
@@ -212,6 +219,11 @@ function recordWebhookDelivery(outcome) {
   webhookDeliveries.inc({ outcome })
 }
 
+// Called by the worker each time it defers a run at the concurrency cap.
+function recordRunDeferred() {
+  runsDeferred.inc({})
+}
+
 module.exports = {
   counter,
   gauge,
@@ -221,6 +233,7 @@ module.exports = {
   httpMetricsMiddleware,
   recordExecution,
   recordWebhookDelivery,
+  recordRunDeferred,
   queueJobs,
   webhookPending,
 }

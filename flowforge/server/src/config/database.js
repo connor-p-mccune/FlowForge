@@ -71,6 +71,14 @@ ensureColumn('webhooks', 'signing_secret', 'TEXT')
 // still queued is finalized directly by the route, and the worker skips it.
 ensureColumn('executions', 'cancel_requested', 'INTEGER NOT NULL DEFAULT 0')
 
+// Per-workflow run concurrency (services/concurrencyGate.js):
+// max_concurrent_runs caps how many of a workflow's runs may be active at once
+// (NULL/0 = unlimited); concurrency_policy decides what happens to a run
+// submitted at the cap — 'queue' (default) parks it until a slot frees,
+// 'reject' refuses the submission with a 409.
+ensureColumn('workflows', 'max_concurrent_runs', 'INTEGER')
+ensureColumn('workflows', 'concurrency_policy', "TEXT NOT NULL DEFAULT 'queue'")
+
 // Resume-from-failure: a resumed run points back at the failed/cancelled run it
 // continues. The engine reads the source run's succeeded steps and reuses their
 // recorded outputs (step status 'reused') instead of re-executing them, so only

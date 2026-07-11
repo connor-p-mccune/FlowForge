@@ -4,6 +4,7 @@ const db = require('../config/database')
 const auth = require('../middleware/auth')
 const { getExecutionQueue } = require('../config/queue')
 const { requestCancel } = require('../services/executionControl')
+const { admitRun } = require('../services/concurrencyGate')
 
 const router = express.Router()
 
@@ -48,6 +49,11 @@ router.post('/workflows/:id/execute', auth, async (req, res) => {
     if (!nodes || nodes.length === 0) {
       return res.status(400).json({ error: 'Workflow has no nodes to execute' })
     }
+
+    // 'reject' concurrency policy: refuse the submission at the cap so the
+    // caller finds out now rather than watching a run sit queued.
+    const admission = admitRun(workflow)
+    if (!admission.ok) return res.status(409).json({ error: admission.error })
 
     const executionId = uuidv4()
     const now = new Date().toISOString()
@@ -205,6 +211,12 @@ router.post('/executions/:id/replay', auth, async (req, res) => {
     // fires real actions; any other run replays for real as 'replay'.
     const isDryRun = original.trigger_type === 'dry-run'
 
+    // Real replays count toward the workflow's concurrency cap like any run.
+    if (!isDryRun) {
+      const admission = admitRun(workflow)
+      if (!admission.ok) return res.status(409).json({ error: admission.error })
+    }
+
     const executionId = uuidv4()
     const now = new Date().toISOString()
     // triggered_by is the user who clicked Replay; trigger_type marks it a replay
@@ -269,6 +281,12 @@ router.post('/executions/:id/resume', auth, async (req, res) => {
     // Resuming a dry-run stays a dry-run, mirroring replay — continuing a test
     // must never fire real actions.
     const isDryRun = original.trigger_type === 'dry-run'
+
+    // A resume starts a run; it counts toward the concurrency cap like any run.
+    if (!isDryRun) {
+      const admission = admitRun(workflow)
+      if (!admission.ok) return res.status(409).json({ error: admission.error })
+    }
 
     const executionId = uuidv4()
     const now = new Date().toISOString()

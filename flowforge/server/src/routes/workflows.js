@@ -178,6 +178,23 @@ router.get('/workflows/:id/export', auth, (req, res) => {
   }
 })
 
+// Optional per-workflow run-concurrency settings (services/concurrencyGate.js).
+// Validated here rather than in workflowRule: both are optional and
+// max_concurrent_runs is nullable (null clears the cap), which the shared
+// validate helper doesn't express. Returns an error string or null.
+function validateConcurrency(body) {
+  if ('max_concurrent_runs' in body && body.max_concurrent_runs !== null) {
+    const n = body.max_concurrent_runs
+    if (!Number.isInteger(n) || n < 1 || n > 100) {
+      return 'max_concurrent_runs must be an integer between 1 and 100, or null for unlimited'
+    }
+  }
+  if ('concurrency_policy' in body && !['queue', 'reject'].includes(body.concurrency_policy)) {
+    return 'concurrency_policy must be "queue" or "reject"'
+  }
+  return null
+}
+
 router.put('/workflows/:id', auth, validate(workflowRule), (req, res) => {
   try {
     const workflow = db.prepare('SELECT * FROM workflows WHERE id = ?').get(req.params.id)
@@ -186,10 +203,17 @@ router.put('/workflows/:id', auth, validate(workflowRule), (req, res) => {
     }
     const { name, description } = req.body
 
+    const concurrencyError = validateConcurrency(req.body)
+    if (concurrencyError) return res.status(400).json({ error: concurrencyError })
+    const maxConcurrent =
+      'max_concurrent_runs' in req.body ? req.body.max_concurrent_runs : workflow.max_concurrent_runs
+    const policy =
+      'concurrency_policy' in req.body ? req.body.concurrency_policy : workflow.concurrency_policy
+
     const now = new Date().toISOString()
     db.prepare(
-      'UPDATE workflows SET name = ?, description = ?, updated_at = ? WHERE id = ?'
-    ).run(name, description ?? workflow.description, now, req.params.id)
+      'UPDATE workflows SET name = ?, description = ?, max_concurrent_runs = ?, concurrency_policy = ?, updated_at = ? WHERE id = ?'
+    ).run(name, description ?? workflow.description, maxConcurrent, policy, now, req.params.id)
 
     const updated = db.prepare('SELECT * FROM workflows WHERE id = ?').get(req.params.id)
     activityService.logEvent(workflow.workspace_id, req.user.id, 'workflow.updated', {

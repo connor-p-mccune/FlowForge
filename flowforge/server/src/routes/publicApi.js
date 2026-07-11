@@ -18,6 +18,7 @@ const { publicApiLimiter } = require('../middleware/rateLimit')
 const { getExecutionQueue } = require('../config/queue')
 const { requestCancel } = require('../services/executionControl')
 const { respondToApproval } = require('../services/approvals')
+const { admitRun } = require('../services/concurrencyGate')
 
 const router = express.Router()
 
@@ -115,6 +116,12 @@ router.post('/workflows/:id/trigger', tokenAuth('trigger'), async (req, res) => 
         })
       }
     }
+
+    // 'reject' concurrency policy: refuse at the cap so the caller learns now.
+    // Checked after the idempotency replay above on purpose — a retried request
+    // whose original landed must still get its original run back.
+    const admission = admitRun(workflow)
+    if (!admission.ok) return res.status(409).json({ error: admission.error })
 
     const executionId = uuidv4()
     const now = new Date().toISOString()
@@ -345,6 +352,12 @@ router.post('/executions/:id/resume', tokenAuth('trigger'), async (req, res) => 
       }
     }
     const isDryRun = original.trigger_type === 'dry-run'
+
+    // A resume starts a run; it counts toward the concurrency cap like any run.
+    if (!isDryRun) {
+      const admission = admitRun(workflow)
+      if (!admission.ok) return res.status(409).json({ error: admission.error })
+    }
 
     const executionId = uuidv4()
     const now = new Date().toISOString()

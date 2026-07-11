@@ -7,6 +7,7 @@ const { validate } = require('../middleware/validate')
 const { webhookLimiter } = require('../middleware/rateLimit')
 const { getExecutionQueue } = require('../config/queue')
 const { generateSigningSecret, verifyWebhookSignature } = require('../services/webhookSignature')
+const { admitRun } = require('../services/concurrencyGate')
 
 const router = express.Router()
 
@@ -116,6 +117,11 @@ router.post('/webhooks/:key', webhookLimiter, async (req, res) => {
     if (!nodes || nodes.length === 0) {
       return res.status(400).json({ error: 'Workflow has no nodes to execute' })
     }
+
+    // 'reject' concurrency policy: a 409 tells the sender to back off and
+    // retry, rather than silently piling runs onto a saturated workflow.
+    const admission = admitRun(workflow)
+    if (!admission.ok) return res.status(409).json({ error: admission.error })
 
     // The request body is both the live run's trigger payload and the durable
     // record persisted on the execution row, so the run can later be replayed

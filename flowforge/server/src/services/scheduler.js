@@ -18,6 +18,7 @@ const { v4: uuidv4 } = require('uuid')
 const db = require('../config/database')
 const redis = require('../config/redis')
 const { getExecutionQueue } = require('../config/queue')
+const { admitRun } = require('../services/concurrencyGate')
 
 // workflowId -> { task, cron } for every currently-registered schedule.
 const activeTasks = new Map()
@@ -56,6 +57,15 @@ async function runScheduledExecution(workflowId) {
       nodes = []
     }
     if (nodes.length === 0) return
+
+    // 'reject' concurrency policy: skip this tick at the cap — for a cron
+    // workflow, dropping a tick against a still-busy previous run is exactly
+    // the "don't overlap" behavior the limit asks for. The next tick retries.
+    const admission = admitRun(workflow)
+    if (!admission.ok) {
+      console.log(`Schedule tick skipped for ${workflowId}: ${admission.error}`)
+      return
+    }
 
     const executionId = uuidv4()
     const now = new Date().toISOString()

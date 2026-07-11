@@ -2,6 +2,8 @@
 const { getExecutionQueue } = require('../config/queue')
 const { runExecution } = require('../services/executionEngine')
 const { createNotification } = require('../services/notificationService')
+const { acquireSlot, releaseSlot } = require('../services/concurrencyGate')
+const { recordRunDeferred } = require('../services/metrics')
 const db = require('../config/database')
 
 // If the run ended in failure, notify the workflow's owner. Reads the final
@@ -35,6 +37,9 @@ function notifyExecutionFailed(executionId) {
 // synchronous connection, so concurrent runs interleave safely at await points.
 const CONCURRENCY = Math.max(1, Number(process.env.EXEC_CONCURRENCY || '10'))
 
+// How long a run at its workflow's concurrency cap waits before re-checking.
+const DEFER_DELAY_MS = Math.max(100, Number(process.env.CONCURRENCY_RETRY_MS || '1000'))
+
 function startWorker() {
   // Connect the exec-update publisher up front — with lazyConnect, publishes
   // issued while the first connection is still opening can be flushed late
@@ -47,7 +52,19 @@ function startWorker() {
   const queue = getExecutionQueue()
 
   queue.process(CONCURRENCY, async (job) => {
-    const { executionId, payload, dryRun } = job.data
+    const { executionId, workflowId, payload, dryRun } = job.data
+
+    // Per-workflow concurrency cap. A run at the cap is re-parked with a short
+    // delay instead of held — this Bull slot frees for other workflows and the
+    // clone re-checks once DEFER_DELAY_MS passes. Dry runs are interactive and
+    // exempt: they neither consume slots nor wait on them.
+    const gated = !dryRun && Boolean(workflowId)
+    if (gated && !acquireSlot(workflowId)) {
+      recordRunDeferred()
+      await queue.add(job.data, { delay: DEFER_DELAY_MS })
+      return
+    }
+
     try {
       await runExecution(executionId, { payload, dryRun })
     } catch (err) {
@@ -59,6 +76,8 @@ function startWorker() {
       ).run(new Date().toISOString(), executionId)
       notifyExecutionFailed(executionId)
       throw err
+    } finally {
+      if (gated) releaseSlot(workflowId)
     }
     notifyExecutionFailed(executionId)
   })
