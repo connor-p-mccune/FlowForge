@@ -941,10 +941,27 @@ html, body, #root {
   border-color: #4f46e5;
 }
 
+/* FXL expression editors (condition expression, filter predicate): a subtle
+   tinted background sets the "this is code, evaluated live" fields apart from
+   the plain {{…}}-template text fields around them. */
+.config-panel__code {
+  background: #f8fafc;
+  border-color: #c7d2fe !important;
+  color: #1e293b;
+}
+
 .config-panel__hint {
   font-size: 12px;
   color: #888;
   line-height: 1.5;
+}
+
+.config-panel__hint code {
+  background: #f1f5f9;
+  border-radius: 3px;
+  padding: 0 3px;
+  font-size: 11px;
+  color: #4338ca;
 }
 
 /* Node test bench (NodeTester) — a "run this one node" section in the panel. */

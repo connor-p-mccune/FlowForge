@@ -52,6 +52,23 @@ describe('NodeConfigPanel rendering', () => {
     expect(screen.getByText('Right value')).toBeInTheDocument()
   })
 
+  it('swaps to an expression editor when the condition operator is expression', () => {
+    setup(mk('condition', { config: { operator: 'expression', expression: 'amount > 100' } }))
+    expect(screen.getByText(/Expression \(true \/ false\)/)).toBeInTheDocument()
+    expect(screen.getByDisplayValue('amount > 100')).toBeInTheDocument()
+    // The simple-comparison fields are hidden in expression mode.
+    expect(screen.queryByText(/Left value/)).not.toBeInTheDocument()
+    expect(screen.queryByText('Right value')).not.toBeInTheDocument()
+  })
+
+  it('renders source + predicate editors for the filter node', () => {
+    setup(mk('filter', { config: { source: '{{h1.body}}', predicate: 'price > 10' } }))
+    expect(screen.getByText(/Source list/)).toBeInTheDocument()
+    expect(screen.getByText(/Keep items where/)).toBeInTheDocument()
+    expect(screen.getByDisplayValue('{{h1.body}}')).toBeInTheDocument()
+    expect(screen.getByDisplayValue('price > 10')).toBeInTheDocument()
+  })
+
   it('renders approval fields with the timeout policy for approval', () => {
     setup(mk('approval', { config: { message: 'Ship it?', timeoutMinutes: 30, onTimeout: 'fail' } }))
     expect(screen.getByText(/Message for approvers/)).toBeInTheDocument()

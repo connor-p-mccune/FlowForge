@@ -46,6 +46,14 @@ export const NODE_DEFS = {
     subtype: 'condition',
     config: { left: '', operator: 'equals', right: '' },
   },
+  // Filter: keep the items of a list that satisfy an FXL predicate. source is a
+  // template resolving to an array; predicate is a boolean expression evaluated
+  // per item (item fields in scope directly, plus item / index / items).
+  'filter': {
+    label: 'Filter',
+    subtype: 'filter',
+    config: { source: '', predicate: '' },
+  },
   // Approval: pauses the run until a workspace member approves or rejects,
   // then routes down the matching branch. timeoutMinutes bounds the wait;
   // onTimeout picks what an expired wait does ('reject' the branch, or 'fail'
@@ -107,6 +115,7 @@ export const TOOLBAR_BUTTONS = [
   { type: 'action-email', label: 'Email', className: 'toolbar-btn--action' },
   { type: 'action-slack', label: 'Slack', className: 'toolbar-btn--action' },
   { type: 'transform', label: 'Transform', className: 'toolbar-btn--action' },
+  { type: 'filter', label: 'Filter', className: 'toolbar-btn--action' },
   { type: 'condition', label: 'Condition', className: 'toolbar-btn--condition' },
   { type: 'approval', label: 'Approval', className: 'toolbar-btn--approval' },
   { type: 'ai-prompt', label: 'AI', className: 'toolbar-btn--ai' },

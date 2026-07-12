@@ -19,6 +19,7 @@ export const nodeTypes = {
   'action-email': ActionNode,
   'action-slack': ActionNode,
   'transform': ActionNode,
+  'filter': ActionNode,
   'condition': ConditionNode,
   'approval': ApprovalNode,
   'ai-prompt': AINode,

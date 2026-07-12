@@ -10,6 +10,7 @@ const OPERATORS = [
   { value: 'contains', label: 'contains' },
   { value: 'greater_than', label: 'is greater than' },
   { value: 'less_than', label: 'is less than' },
+  { value: 'expression', label: 'matches expression…' },
 ]
 
 // One-click cron presets for the schedule trigger (label + standard 5-field cron).
@@ -143,6 +144,26 @@ function SubWorkflowConfig({ workspaceId, currentWorkflowId, config, onPick }) {
         <code>{'{{' + 'node-id.field}}'}</code>.
       </p>
     </div>
+  )
+}
+
+// Shared help for FXL-powered fields (condition expression, filter predicate).
+// FXL reads live values from the node's data rather than substituting {{...}}
+// templates — a distinction worth calling out where the two styles meet.
+function ExpressionHint({ kind }) {
+  const scope =
+    kind === 'filter'
+      ? "each item's fields (plus item, index, items)"
+      : "the incoming data's fields (plus input)"
+  return (
+    <p className="config-panel__hint">
+      Write a rule over {scope}. Supports <code>&&</code> <code>||</code>{' '}
+      <code>==</code> <code>in</code> comparisons, arithmetic, and helpers like{' '}
+      <code>len()</code>, <code>upper()</code>, <code>contains()</code>. Unlike a{' '}
+      <code>{'{{…}}'}</code> template it reads values directly, so use bare names
+      (<code>amount</code>, not <code>{'{{node.amount}}'}</code>). Check ▸ Issues
+      flags a bad expression before you run.
+    </p>
   )
 }
 
@@ -337,17 +358,10 @@ export default function NodeConfigPanel({
             />
           </label>
         )
-      case 'condition':
+      case 'condition': {
+        const isExpression = config.operator === 'expression'
         return (
           <>
-            <label className="config-panel__field">
-              <span>Left value (supports {'{{node-id.field}}'})</span>
-              <input
-                value={config.left || ''}
-                placeholder="{{node-id.status}}"
-                onChange={(e) => setConfig('left', e.target.value)}
-              />
-            </label>
             <label className="config-panel__field">
               <span>Operator</span>
               <select
@@ -359,13 +373,65 @@ export default function NodeConfigPanel({
                 ))}
               </select>
             </label>
+            {isExpression ? (
+              <>
+                <label className="config-panel__field">
+                  <span>Expression (true / false)</span>
+                  <textarea
+                    className="config-panel__code"
+                    rows={3}
+                    value={config.expression || ''}
+                    placeholder={'amount > 1000 && status in ["pending", "review"]'}
+                    onChange={(e) => setConfig('expression', e.target.value)}
+                  />
+                </label>
+                <ExpressionHint kind="condition" />
+              </>
+            ) : (
+              <>
+                <label className="config-panel__field">
+                  <span>Left value (supports {'{{node-id.field}}'})</span>
+                  <input
+                    value={config.left || ''}
+                    placeholder="{{node-id.status}}"
+                    onChange={(e) => setConfig('left', e.target.value)}
+                  />
+                </label>
+                <label className="config-panel__field">
+                  <span>Right value</span>
+                  <input
+                    value={config.right || ''}
+                    onChange={(e) => setConfig('right', e.target.value)}
+                  />
+                </label>
+              </>
+            )}
+          </>
+        )
+      }
+      case 'filter':
+        return (
+          <>
             <label className="config-panel__field">
-              <span>Right value</span>
-              <input
-                value={config.right || ''}
-                onChange={(e) => setConfig('right', e.target.value)}
+              <span>Source list (array — supports {'{{node-id.field}}'})</span>
+              <textarea
+                rows={2}
+                value={config.source || ''}
+                placeholder={'{{http-1.body}}  or  [1, 2, 3]'}
+                onChange={(e) => setConfig('source', e.target.value)}
               />
             </label>
+            <label className="config-panel__field">
+              <span>Keep items where (expression)</span>
+              <textarea
+                className="config-panel__code"
+                rows={3}
+                value={config.predicate || ''}
+                placeholder={'price > 10 && inStock'}
+                onChange={(e) => setConfig('predicate', e.target.value)}
+              />
+            </label>
+            <ExpressionHint kind="filter" />
           </>
         )
       case 'approval':
