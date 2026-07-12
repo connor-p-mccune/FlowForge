@@ -8,7 +8,9 @@ canvas:
 - a **Filter** node's *predicate* — a boolean rule evaluated once per list item
   to decide what to keep; and
 - a **Map** node's *mapping* — an expression (usually an object literal)
-  evaluated once per list item to build a new shape.
+  evaluated once per list item to build a new shape; and
+- an **Aggregate** node's *value* and *group-by* — expressions evaluated per
+  item to roll a list up to count / sum / avg / min / max, optionally grouped.
 
 It exists so a single node can express real logic —
 `amount > 1000 && status in ["pending", "review"]` — without FlowForge ever
@@ -32,6 +34,7 @@ for how it's built and why.
 | Condition expression | every field of the node's incoming data, plus `input` (the whole incoming object) |
 | Filter predicate | every field of the current item (when it's an object), plus `item`, `index` (0-based), and `items` (the whole list) |
 | Map mapping | same as the Filter predicate — each item's fields, plus `item`, `index`, `items` |
+| Aggregate value / group-by | same per-item scope as Filter/Map |
 
 ```
 # condition, incoming data { amount: 1500, status: "pending", user: { role: "admin" } }
@@ -172,6 +175,9 @@ total >= 100 && nowMs() - createdMs < 7 * 86400000
 
 # reshape each row (Map mapping)
 { id: item.id, name: upper(trim(name)), total: round(price * qty, 2) }
+
+# revenue per region (Aggregate: value `price * qty`, group-by `region`)
+price * qty
 
 # defend against missing data
 get(payload, "customer.tier", "standard") == "gold"
