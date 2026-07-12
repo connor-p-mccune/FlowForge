@@ -5,6 +5,7 @@ const auth = require('../middleware/auth')
 const { getExecutionQueue } = require('../config/queue')
 const { requestCancel } = require('../services/executionControl')
 const { admitRun } = require('../services/concurrencyGate')
+const { computeCriticalPath } = require('../services/criticalPath')
 
 const router = express.Router()
 
@@ -145,7 +146,19 @@ router.get('/executions/:id', auth, (req, res) => {
          FROM execution_approvals a LEFT JOIN users u ON u.id = a.responded_by
         WHERE a.execution_id = ? ORDER BY a.requested_at`
     ).all(execution.id)
-    res.json({ execution, steps, childExecutions, approvals })
+
+    // Critical path: the longest dependency-respecting chain of steps, computed
+    // from the run's recorded timings against the workflow's current edges
+    // (matching the timeline, which also works off current graph + recorded
+    // steps). Best-effort — a malformed graph_json just yields an empty path.
+    let criticalPath = { path: [], totalMs: 0, durationsMs: {} }
+    try {
+      criticalPath = computeCriticalPath(JSON.parse(workflow.graph_json), steps)
+    } catch {
+      /* unparseable graph — leave the empty critical path */
+    }
+
+    res.json({ execution, steps, childExecutions, approvals, criticalPath })
   } catch (err) {
     console.error(err)
     res.status(500).json({ error: 'Internal server error' })
