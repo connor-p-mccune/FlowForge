@@ -155,6 +155,19 @@ function lintNodeConfig(node, { workflowTargets }) {
         )
       }
       break
+    case 'map':
+      requireExpression(config.mapping, 'the map expression')
+      if (isBlank(config.source)) {
+        issues.push(
+          issue(
+            'warning',
+            'missing-config',
+            `${name}: no source list — the map falls back to the node input`,
+            node.id
+          )
+        )
+      }
+      break
     case 'approval': {
       // Invalid values don't fail the run — the runner falls back to its
       // defaults — but silently waiting 60 minutes when the author typed "5m"

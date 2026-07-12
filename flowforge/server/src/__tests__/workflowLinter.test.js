@@ -224,6 +224,17 @@ describe('lintGraph', () => {
       const broken = withTrigger(node('f1', 'filter', { predicate: 'price >', source: '{{t1.list}}' }))
       expect(lintGraph(broken).find((i) => i.code === 'invalid-expression')).toMatchObject({ nodeId: 'f1' })
     })
+
+    it('validates a map expression', () => {
+      const ok = withTrigger(node('m1', 'map', { mapping: '{ id: item.id }', source: '{{t1.list}}' }))
+      expect(codes(lintGraph(ok))).not.toEqual(expect.arrayContaining(['invalid-expression', 'missing-config']))
+
+      const broken = withTrigger(node('m1', 'map', { mapping: '{ id: }', source: '{{t1.list}}' }))
+      expect(lintGraph(broken).find((i) => i.code === 'invalid-expression')).toMatchObject({ nodeId: 'm1' })
+
+      const blank = withTrigger(node('m1', 'map', { mapping: '', source: '{{t1.list}}' }))
+      expect(lintGraph(blank).find((i) => i.nodeId === 'm1')).toMatchObject({ code: 'missing-config' })
+    })
   })
 
   it('warns about half-wired approval branches with approved/rejected names', () => {

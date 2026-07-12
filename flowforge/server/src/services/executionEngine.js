@@ -18,6 +18,7 @@ const runners = {
   'action-slack': require('./nodeRunners/sendSlack'),
   'transform': require('./nodeRunners/transform'),
   'filter': require('./nodeRunners/filter'),
+  'map': require('./nodeRunners/map'),
   'condition': require('./nodeRunners/condition'),
   'ai-prompt': require('./nodeRunners/llmPrompt'),
   'ai-classify': require('./nodeRunners/classify'),
