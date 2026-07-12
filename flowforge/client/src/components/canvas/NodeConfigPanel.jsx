@@ -152,7 +152,7 @@ function SubWorkflowConfig({ workspaceId, currentWorkflowId, config, onPick }) {
 // templates — a distinction worth calling out where the two styles meet.
 function ExpressionHint({ kind }) {
   const scope =
-    kind === 'filter'
+    kind === 'filter' || kind === 'map'
       ? "each item's fields (plus item, index, items)"
       : "the incoming data's fields (plus input)"
   return (
@@ -432,6 +432,31 @@ export default function NodeConfigPanel({
               />
             </label>
             <ExpressionHint kind="filter" />
+          </>
+        )
+      case 'map':
+        return (
+          <>
+            <label className="config-panel__field">
+              <span>Source list (array — supports {'{{node-id.field}}'})</span>
+              <textarea
+                rows={2}
+                value={config.source || ''}
+                placeholder={'{{http-1.body}}  or  [1, 2, 3]'}
+                onChange={(e) => setConfig('source', e.target.value)}
+              />
+            </label>
+            <label className="config-panel__field">
+              <span>Map each item to (expression)</span>
+              <textarea
+                className="config-panel__code"
+                rows={3}
+                value={config.mapping || ''}
+                placeholder={'{ id: item.id, name: upper(name) }'}
+                onChange={(e) => setConfig('mapping', e.target.value)}
+              />
+            </label>
+            <ExpressionHint kind="map" />
           </>
         )
       case 'approval':

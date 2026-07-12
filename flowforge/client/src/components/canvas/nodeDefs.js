@@ -54,6 +54,13 @@ export const NODE_DEFS = {
     subtype: 'filter',
     config: { source: '', predicate: '' },
   },
+  // Map: reshape each item of a list with an FXL expression (usually an object
+  // literal). Same source + per-item scope as Filter; mapping replaces predicate.
+  'map': {
+    label: 'Map',
+    subtype: 'map',
+    config: { source: '', mapping: '' },
+  },
   // Approval: pauses the run until a workspace member approves or rejects,
   // then routes down the matching branch. timeoutMinutes bounds the wait;
   // onTimeout picks what an expired wait does ('reject' the branch, or 'fail'
@@ -116,6 +123,7 @@ export const TOOLBAR_BUTTONS = [
   { type: 'action-slack', label: 'Slack', className: 'toolbar-btn--action' },
   { type: 'transform', label: 'Transform', className: 'toolbar-btn--action' },
   { type: 'filter', label: 'Filter', className: 'toolbar-btn--action' },
+  { type: 'map', label: 'Map', className: 'toolbar-btn--action' },
   { type: 'condition', label: 'Condition', className: 'toolbar-btn--condition' },
   { type: 'approval', label: 'Approval', className: 'toolbar-btn--approval' },
   { type: 'ai-prompt', label: 'AI', className: 'toolbar-btn--ai' },

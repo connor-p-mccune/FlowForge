@@ -26,4 +26,14 @@ describe('Filter node wiring', () => {
     expect(TOOLBAR_BUTTONS.some((b) => b.type === 'filter')).toBe(true)
     expect(nodeTypes.filter).toBe(ActionNode)
   })
+
+  it('registers the Map node alongside it', () => {
+    expect(NODE_DEFS.map).toMatchObject({
+      label: 'Map',
+      subtype: 'map',
+      config: { source: '', mapping: '' },
+    })
+    expect(TOOLBAR_BUTTONS.some((b) => b.type === 'map')).toBe(true)
+    expect(nodeTypes.map).toBe(ActionNode)
+  })
 })

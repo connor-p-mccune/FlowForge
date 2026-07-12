@@ -69,6 +69,13 @@ describe('NodeConfigPanel rendering', () => {
     expect(screen.getByDisplayValue('price > 10')).toBeInTheDocument()
   })
 
+  it('renders source + mapping editors for the map node', () => {
+    setup(mk('map', { config: { source: '{{h1.body}}', mapping: '{ id: item.id }' } }))
+    expect(screen.getByText(/Source list/)).toBeInTheDocument()
+    expect(screen.getByText(/Map each item to/)).toBeInTheDocument()
+    expect(screen.getByDisplayValue('{ id: item.id }')).toBeInTheDocument()
+  })
+
   it('renders approval fields with the timeout policy for approval', () => {
     setup(mk('approval', { config: { message: 'Ship it?', timeoutMinutes: 30, onTimeout: 'fail' } }))
     expect(screen.getByText(/Message for approvers/)).toBeInTheDocument()

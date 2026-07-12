@@ -20,6 +20,7 @@ export const nodeTypes = {
   'action-slack': ActionNode,
   'transform': ActionNode,
   'filter': ActionNode,
+  'map': ActionNode,
   'condition': ConditionNode,
   'approval': ApprovalNode,
   'ai-prompt': AINode,
