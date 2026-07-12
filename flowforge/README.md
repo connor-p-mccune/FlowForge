@@ -43,7 +43,8 @@ order while streaming live progress back to every collaborator on the canvas.
   anywhere** — a string is inert data, calls reach only the vetted stdlib, and
   member access is prototype-safe and step-bounded. The linter parses every
   expression up front, so a syntax error or a typo'd function name is caught
-  before the run. See [docs/EXPRESSIONS.md](./docs/EXPRESSIONS.md).
+  before the run, and every expression field has an **inline playground** to
+  evaluate it against sample data. See [docs/EXPRESSIONS.md](./docs/EXPRESSIONS.md).
 - **Human-in-the-loop approvals** — drop an **Approval** gate anywhere in a
   workflow: the run pauses, every workspace member is notified, and whoever
   decides first routes the run down the approved or rejected branch — from the

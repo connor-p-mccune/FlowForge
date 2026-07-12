@@ -27,6 +27,17 @@ for how it's built and why.
 
 ---
 
+## Trying an expression
+
+Every FXL field on the canvas has a **Try this expression** panel: type sample
+data as JSON and evaluate the field's expression against it, seeing the typed
+result — or the syntax/runtime error — inline. It runs the same parser,
+evaluator, and safety bounds the engine uses (`POST /api/expressions/evaluate`),
+so a green result there is exactly what the node will compute. It's the fastest
+way to check a rule before wiring it into a graph.
+
+---
+
 ## Scope: what names are available
 
 | Where | In scope |

@@ -343,7 +343,11 @@ engine's template resolver leaves an expression untouched (it contains no
 placeholders), and the two reference styles coexist without either having to
 know about the other. The same module also exposes `analyze()` — a parse plus an
 AST walk for unknown function calls — which is what lets the linter flag a
-broken expression statically (next section).
+broken expression statically (next section). And because the evaluator is a pure
+function of `(ast, scope)` with no side effects, the authoring UI can expose it
+directly: `POST /api/expressions/evaluate` runs the very same pipeline against
+caller-supplied sample data, so the canvas's "Try this expression" playground
+computes exactly what a node would — no separate interpreter to drift.
 
 ---
 
