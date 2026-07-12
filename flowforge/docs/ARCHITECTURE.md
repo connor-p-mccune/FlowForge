@@ -9,6 +9,7 @@ relative to `flowforge/`.
 - [Real-time collaboration](#real-time-collaboration)
 - [Jobs and reliability](#jobs-and-reliability)
 - [Outbound webhooks](#outbound-webhooks)
+- [The expression language](#the-expression-language)
 - [Static analysis (the linter)](#static-analysis-the-linter)
 - [Security architecture](#security-architecture)
 - [Observability](#observability)
@@ -266,13 +267,69 @@ existed rather than inventing new ones:
 
 ---
 
+## The expression language
+
+`services/expression/` is FXL — a small language the engine evaluates against a
+scope to power the condition node's expression operator and the Filter node's
+predicate. A rules editor needs real logic (`amount > 1000 && status in
+["pending", "review"]`), but the project's first security rule is that no user
+input reaches `eval`, `new Function`, or `vm` anywhere in the server. FXL is how
+those two demands coexist: it's a hand-written interpreter, not an escape hatch
+into the host. The user-facing reference is
+[EXPRESSIONS.md](./EXPRESSIONS.md); this is the how-and-why.
+
+The pipeline is the textbook three stages, each a small file:
+
+- **Lexer** (`lexer.js`) scans the source into tokens. Hand-rolled because the
+  grammar is small enough that a scanner is a few `switch` statements, and it
+  keeps the interpretation of user input off any regex-driven or generated path.
+- **Parser** (`parser.js`) is a Pratt / precedence-climbing parser producing a
+  plain-object AST. Pratt parsing puts operator precedence in one table instead
+  of a cascade of grammar rules, which is why the whole language stays under a
+  few hundred lines with no parser-generator dependency. The AST is JSON-able,
+  so a compiled program can be cached or inspected.
+- **Evaluator** (`evaluate.js`) walks the AST against a scope object.
+
+Three decisions are load-bearing:
+
+- **Explicit operator semantics.** `==`, the relational operators, and `+`
+  don't defer to JavaScript's own coercions — they're defined in the evaluator
+  (numbers compare numerically, objects/arrays structurally, `+` concatenates
+  only when a side is a string, arithmetic throws on non-numeric input). A rule
+  therefore behaves identically every run regardless of the JS engine under it,
+  and none of JS `==`'s stranger corners leak into a user's mental model.
+- **First-order, function-only.** There are no methods on values, no `this`, no
+  globals, and no lambdas. Calls resolve only against a vetted stdlib
+  (`functions.js`) of pure helpers; identifiers resolve only against the scope
+  the caller passes in. That's the whole reason the evaluator can never reach a
+  host method — `payload.constructor` or `"x".toUpperCase()` doesn't even parse
+  (`Only named functions can be called`). The cost is no `map`/`filter` taking a
+  callback; the Filter node lives *outside* the language for exactly that reason.
+- **Bounded and prototype-safe.** Member access refuses `__proto__` /
+  `prototype` / `constructor`; a per-evaluation step counter and a
+  recursion-depth cap stop a crafted expression from monopolising a worker; and
+  the parser rejects a pathologically large AST up front.
+
+Integration is deliberately thin. The condition runner and Filter runner both
+`compile` once and evaluate against a per-call (or per-item) scope, so a Filter
+predicate over a thousand-item list pays the parse cost a single time. Because
+FXL reads live values from its scope rather than substituting `{{…}}`, the
+engine's template resolver leaves an expression untouched (it contains no
+placeholders), and the two reference styles coexist without either having to
+know about the other. The same module also exposes `analyze()` — a parse plus an
+AST walk for unknown function calls — which is what lets the linter flag a
+broken expression statically (next section).
+
+---
+
 ## Static analysis (the linter)
 
 `services/workflowLinter.js` inspects a graph without running it. Severity
 is a contract: **error** means the run will (almost certainly) fail or
 misfire — cycles, dangling edges, missing required config, references that
-can never resolve, unknown secret names, undeployed sub-workflow targets;
-**warning** means legal but probably unintended — unreachable branches,
+can never resolve, unknown secret names, undeployed sub-workflow targets, an
+FXL expression that doesn't parse or calls a function the stdlib doesn't
+define; **warning** means legal but probably unintended — unreachable branches,
 half-wired conditions, references to nodes that aren't ancestors (which
 resolve to empty at runtime).
 

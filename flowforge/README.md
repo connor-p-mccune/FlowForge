@@ -29,9 +29,20 @@ order while streaming live progress back to every collaborator on the canvas.
   and **undo/redo** (`Ctrl/⌘-Z`) that broadcasts each step to collaborators so
   everyone converges on the same state.
 - **Rich node library** — manual, webhook & schedule triggers; HTTP request,
-  delay, email, Slack, and transform actions; branching conditions; AI prompt /
-  classify / extract nodes; log outputs; **sub-workflows** (call a workflow as a
-  step) and **for-each** (fan a workflow out over a list).
+  delay, email, Slack, and transform actions; branching conditions; a **filter**
+  node that trims a list to the items matching a rule; AI prompt / classify /
+  extract nodes; log outputs; **sub-workflows** (call a workflow as a step) and
+  **for-each** (fan a workflow out over a list).
+- **Safe expression language (FXL)** — write real logic where a dropdown
+  comparison runs out: a condition's **matches expression** operator and the
+  filter node's predicate both take expressions like
+  `amount > 1000 && status in ["pending", "review"]`, with a curated function
+  library (`len`, `upper`, `contains`, `round`, …). It's a hand-written
+  lexer → Pratt parser → tree-walking evaluator with **no `eval`/`Function`/`vm`
+  anywhere** — a string is inert data, calls reach only the vetted stdlib, and
+  member access is prototype-safe and step-bounded. The linter parses every
+  expression up front, so a syntax error or a typo'd function name is caught
+  before the run. See [docs/EXPRESSIONS.md](./docs/EXPRESSIONS.md).
 - **Human-in-the-loop approvals** — drop an **Approval** gate anywhere in a
   workflow: the run pauses, every workspace member is notified, and whoever
   decides first routes the run down the approved or rejected branch — from the
@@ -361,7 +372,7 @@ flowforge/
 ├── server/        Express API, Socket.io, Bull worker, SQLite
 ├── ai-service/    Flask microservice for LLM-backed features
 ├── cli/           Zero-dependency terminal client for the public API
-├── docs/          API reference + architecture deep dive
+├── docs/          API reference, architecture deep dive, FXL reference
 ├── docker-compose.yml
 ├── .env.example
 ├── .env.production.example
