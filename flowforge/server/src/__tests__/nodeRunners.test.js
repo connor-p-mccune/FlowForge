@@ -335,6 +335,42 @@ describe('condition runner', () => {
   it('throws on an unknown operator', async () => {
     await expect(condition({ left: 1, operator: 'spaceship', right: 2 })).rejects.toThrow(/unknown operator/)
   })
+
+  describe('expression operator', () => {
+    it('evaluates a boolean expression against the merged input', async () => {
+      const out = await condition(
+        { operator: 'expression', expression: 'amount > 1000 && status == "pending"' },
+        { amount: 1500, status: 'pending' }
+      )
+      expect(out).toEqual({ result: true })
+    })
+
+    it('exposes the whole input as the `input` alias', async () => {
+      const out = await condition(
+        { operator: 'expression', expression: 'input.user.role == "admin"' },
+        { user: { role: 'admin' } }
+      )
+      expect(out).toEqual({ result: true })
+    })
+
+    it('coerces the result to a boolean with FXL truthiness', async () => {
+      expect(await condition({ operator: 'expression', expression: 'len(items) > 0' }, { items: [] }))
+        .toEqual({ result: false })
+      expect(await condition({ operator: 'expression', expression: 'status in ["a", "b"]' }, { status: 'b' }))
+        .toEqual({ result: true })
+    })
+
+    it('requires a non-empty expression', async () => {
+      await expect(condition({ operator: 'expression' }, {})).rejects.toThrow(/expression is required/)
+      await expect(condition({ operator: 'expression', expression: '  ' }, {})).rejects.toThrow(/expression is required/)
+    })
+
+    it('surfaces an expression error as a node failure', async () => {
+      await expect(
+        condition({ operator: 'expression', expression: '"abc" * 2' }, {})
+      ).rejects.toThrow(/as a number/)
+    })
+  })
 })
 
 describe('outputLog runner', () => {
