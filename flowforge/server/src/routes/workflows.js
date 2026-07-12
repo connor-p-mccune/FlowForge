@@ -1,7 +1,10 @@
 const express = require('express')
+const crypto = require('crypto')
 const { v4: uuidv4 } = require('uuid')
 const db = require('../config/database')
 const auth = require('../middleware/auth')
+const { webhookLimiter } = require('../middleware/rateLimit')
+const { statusBadgeSvg } = require('../services/statusBadge')
 const { validate } = require('../middleware/validate')
 const scheduler = require('../services/scheduler')
 const activityService = require('../services/activityService')
@@ -436,6 +439,96 @@ router.post('/workflows/:id/test-node', auth, async (req, res) => {
         error: redact(err.message),
       })
     }
+  } catch (err) {
+    console.error(err)
+    res.status(500).json({ error: 'Internal server error' })
+  }
+})
+
+// ---------------------------------------------------------------------------
+// Status badges
+// ---------------------------------------------------------------------------
+
+// Constant-time equality that tolerates length mismatches (timingSafeEqual
+// throws on unequal-length buffers).
+function safeEqual(a, b) {
+  if (typeof a !== 'string' || typeof b !== 'string') return false
+  const ab = Buffer.from(a)
+  const bb = Buffer.from(b)
+  if (ab.length !== bb.length) return false
+  return crypto.timingSafeEqual(ab, bb)
+}
+
+// Render a never-cached-wrong SVG badge. Split out so both the valid and the
+// unknown paths share the response shape.
+function sendBadge(res, status) {
+  res.set('Content-Type', 'image/svg+xml; charset=utf-8')
+  // Short cache so an embedded badge refreshes within a minute, but a CDN /
+  // GitHub camo still absorbs bursts. no-transform stops proxies mangling it.
+  res.set('Cache-Control', 'public, max-age=60, no-transform')
+  res.send(statusBadgeSvg(status))
+}
+
+// GET /api/workflows/:id/badge.svg?token=… — PUBLIC (no session), guarded by
+// the per-workflow badge token so status can be embedded in a README or
+// dashboard. An invalid/missing token renders a neutral 'unknown' badge with
+// 200 (never a broken image, and never a confirmation that the id exists);
+// a valid token renders the latest real run's status. Rate-limited like the
+// public webhook trigger, since it's an unauthenticated, oft-fetched asset.
+router.get('/workflows/:id/badge.svg', webhookLimiter, (req, res) => {
+  try {
+    const workflow = db
+      .prepare('SELECT id, badge_token FROM workflows WHERE id = ?')
+      .get(req.params.id)
+    const token = typeof req.query.token === 'string' ? req.query.token : ''
+    if (!workflow || !workflow.badge_token || !safeEqual(token, workflow.badge_token)) {
+      return sendBadge(res, 'unknown')
+    }
+    // Latest run that a person actually cares about — dry runs (test mode)
+    // don't move the badge.
+    const run = db
+      .prepare(
+        `SELECT status FROM executions
+          WHERE workflow_id = ? AND (trigger_type IS NULL OR trigger_type != 'dry-run')
+          ORDER BY created_at DESC, rowid DESC LIMIT 1`
+      )
+      .get(workflow.id)
+    sendBadge(res, run ? run.status : 'none')
+  } catch (err) {
+    console.error(err)
+    // Even on error, hand back a badge rather than a broken image.
+    sendBadge(res, 'unknown')
+  }
+})
+
+// POST /api/workflows/:id/badge-token — mint (or rotate) the workflow's badge
+// token. Any workspace member can; returns the token so the client can build
+// the embed URL. Rotating invalidates the previous badge URL immediately.
+router.post('/workflows/:id/badge-token', auth, (req, res) => {
+  try {
+    const workflow = db.prepare('SELECT * FROM workflows WHERE id = ?').get(req.params.id)
+    if (!workflow || !isMember(workflow.workspace_id, req.user.id)) {
+      return res.status(404).json({ error: 'Workflow not found' })
+    }
+    const token = crypto.randomBytes(24).toString('base64url')
+    db.prepare('UPDATE workflows SET badge_token = ? WHERE id = ?').run(token, workflow.id)
+    res.status(201).json({ badgeToken: token })
+  } catch (err) {
+    console.error(err)
+    res.status(500).json({ error: 'Internal server error' })
+  }
+})
+
+// DELETE /api/workflows/:id/badge-token — turn the badge off. The badge URL
+// then renders 'unknown' for everyone.
+router.delete('/workflows/:id/badge-token', auth, (req, res) => {
+  try {
+    const workflow = db.prepare('SELECT * FROM workflows WHERE id = ?').get(req.params.id)
+    if (!workflow || !isMember(workflow.workspace_id, req.user.id)) {
+      return res.status(404).json({ error: 'Workflow not found' })
+    }
+    db.prepare('UPDATE workflows SET badge_token = NULL WHERE id = ?').run(workflow.id)
+    res.status(204).end()
   } catch (err) {
     console.error(err)
     res.status(500).json({ error: 'Internal server error' })

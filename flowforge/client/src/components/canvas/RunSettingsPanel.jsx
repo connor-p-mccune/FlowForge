@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { apiFetch } from '../../services/api'
 import { useToast } from '../../hooks/useToast'
+import StatusBadgeSection from './StatusBadgeSection'
 
 // Per-workflow run limits: cap how many of this workflow's runs may be active
 // at once, and choose what happens to a run submitted at the cap — park it
@@ -111,6 +112,7 @@ export default function RunSettingsPanel({ workflowId, open, onClose }) {
               <button className="webhook-panel__create" onClick={handleSave} disabled={saving}>
                 {saving ? 'Saving…' : 'Save limits'}
               </button>
+              <StatusBadgeSection workflowId={workflowId} initialToken={workflow.badge_token} />
             </>
           )
         )}

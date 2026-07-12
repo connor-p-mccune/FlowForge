@@ -1661,6 +1661,51 @@ html, body, #root {
   font-size: 13px;
   background: #fff;
 }
+
+/* Status badge section (StatusBadgeSection) inside the run-settings panel. */
+.badge-section {
+  margin-top: 16px;
+  padding-top: 12px;
+  border-top: 1px solid #f0f0f0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.badge-section__preview {
+  align-self: flex-start;
+  height: 20px;
+}
+.badge-section__markdown {
+  display: block;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  background: #f5f5f5;
+  padding: 6px 8px;
+  border-radius: 6px;
+  word-break: break-all;
+}
+.badge-section__actions {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.badge-section__btn {
+  padding: 5px 10px;
+  border: 1px solid #d1d5db;
+  background: #fff;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #374151;
+  cursor: pointer;
+}
+.badge-section__btn:hover {
+  background: #f9fafb;
+}
+.badge-section__btn--danger {
+  border-color: #fecaca;
+  color: #dc2626;
+}
 .webhook-panel__body { padding: 10px 14px 14px; }
 .webhook-panel__hint { color: #777; font-size: 12px; margin: 4px 0 10px; }
 .webhook-panel__error { color: #b91c1c; font-size: 13px; margin: 8px 0; }

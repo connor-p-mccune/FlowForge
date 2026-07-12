@@ -71,6 +71,13 @@ ensureColumn('webhooks', 'signing_secret', 'TEXT')
 // still queued is finalized directly by the route, and the worker skips it.
 ensureColumn('executions', 'cancel_requested', 'INTEGER NOT NULL DEFAULT 0')
 
+// Status badges (services/statusBadge.js): an opt-in per-workflow token that
+// makes GET /api/workflows/:id/badge.svg?token=… return a public SVG of the
+// workflow's latest run status (like a CI badge). NULL = no badge minted;
+// without a valid token the endpoint renders a neutral 'unknown' badge, so it
+// never confirms a workflow's existence.
+ensureColumn('workflows', 'badge_token', 'TEXT')
+
 // Per-workflow run concurrency (services/concurrencyGate.js):
 // max_concurrent_runs caps how many of a workflow's runs may be active at once
 // (NULL/0 = unlimited); concurrency_policy decides what happens to a run
