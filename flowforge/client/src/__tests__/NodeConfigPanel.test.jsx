@@ -76,6 +76,14 @@ describe('NodeConfigPanel rendering', () => {
     expect(screen.getByDisplayValue('{ id: item.id }')).toBeInTheDocument()
   })
 
+  it('renders source + value + group-by editors for the aggregate node', () => {
+    setup(mk('aggregate', { config: { source: '{{h1.body}}', value: 'price * qty', groupBy: 'item.region' } }))
+    expect(screen.getByText(/Value to aggregate/)).toBeInTheDocument()
+    expect(screen.getByText(/Group by/)).toBeInTheDocument()
+    expect(screen.getByDisplayValue('price * qty')).toBeInTheDocument()
+    expect(screen.getByDisplayValue('item.region')).toBeInTheDocument()
+  })
+
   it('renders approval fields with the timeout policy for approval', () => {
     setup(mk('approval', { config: { message: 'Ship it?', timeoutMinutes: 30, onTimeout: 'fail' } }))
     expect(screen.getByText(/Message for approvers/)).toBeInTheDocument()

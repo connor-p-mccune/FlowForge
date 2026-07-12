@@ -21,6 +21,7 @@ export const nodeTypes = {
   'transform': ActionNode,
   'filter': ActionNode,
   'map': ActionNode,
+  'aggregate': ActionNode,
   'condition': ConditionNode,
   'approval': ApprovalNode,
   'ai-prompt': AINode,

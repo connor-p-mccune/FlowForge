@@ -36,4 +36,14 @@ describe('Filter node wiring', () => {
     expect(TOOLBAR_BUTTONS.some((b) => b.type === 'map')).toBe(true)
     expect(nodeTypes.map).toBe(ActionNode)
   })
+
+  it('registers the Aggregate node alongside it', () => {
+    expect(NODE_DEFS.aggregate).toMatchObject({
+      label: 'Aggregate',
+      subtype: 'aggregate',
+      config: { source: '', value: '', groupBy: '' },
+    })
+    expect(TOOLBAR_BUTTONS.some((b) => b.type === 'aggregate')).toBe(true)
+    expect(nodeTypes.aggregate).toBe(ActionNode)
+  })
 })

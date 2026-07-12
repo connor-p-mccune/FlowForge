@@ -151,10 +151,10 @@ function SubWorkflowConfig({ workspaceId, currentWorkflowId, config, onPick }) {
 // FXL reads live values from the node's data rather than substituting {{...}}
 // templates — a distinction worth calling out where the two styles meet.
 function ExpressionHint({ kind }) {
-  const scope =
-    kind === 'filter' || kind === 'map'
-      ? "each item's fields (plus item, index, items)"
-      : "the incoming data's fields (plus input)"
+  const perItem = kind === 'filter' || kind === 'map' || kind === 'aggregate'
+  const scope = perItem
+    ? "each item's fields (plus item, index, items)"
+    : "the incoming data's fields (plus input)"
   return (
     <p className="config-panel__hint">
       Write a rule over {scope}. Supports <code>&&</code> <code>||</code>{' '}
@@ -457,6 +457,47 @@ export default function NodeConfigPanel({
               />
             </label>
             <ExpressionHint kind="map" />
+          </>
+        )
+      case 'aggregate':
+        return (
+          <>
+            <label className="config-panel__field">
+              <span>Source list (array — supports {'{{node-id.field}}'})</span>
+              <textarea
+                rows={2}
+                value={config.source || ''}
+                placeholder={'{{http-1.body}}  or  [1, 2, 3]'}
+                onChange={(e) => setConfig('source', e.target.value)}
+              />
+            </label>
+            <label className="config-panel__field">
+              <span>Value to aggregate (expression — optional)</span>
+              <textarea
+                className="config-panel__code"
+                rows={2}
+                value={config.value || ''}
+                placeholder={'price * qty'}
+                onChange={(e) => setConfig('value', e.target.value)}
+              />
+            </label>
+            <label className="config-panel__field">
+              <span>Group by (expression — optional)</span>
+              <textarea
+                className="config-panel__code"
+                rows={2}
+                value={config.groupBy || ''}
+                placeholder={'item.region'}
+                onChange={(e) => setConfig('groupBy', e.target.value)}
+              />
+            </label>
+            <p className="config-panel__hint">
+              Rolls the list up to <code>count</code>, <code>sum</code>,{' '}
+              <code>avg</code>, <code>min</code>, <code>max</code> over the value
+              (omit it for a plain count). With a group-by, results come back as{' '}
+              <code>{'{{' + node.id + '.groups}}'}</code>.
+            </p>
+            <ExpressionHint kind="aggregate" />
           </>
         )
       case 'approval':

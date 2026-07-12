@@ -61,6 +61,13 @@ export const NODE_DEFS = {
     subtype: 'map',
     config: { source: '', mapping: '' },
   },
+  // Aggregate: roll a list up to { count, sum, avg, min, max } over an optional
+  // value expression, optionally grouped by an FXL key.
+  'aggregate': {
+    label: 'Aggregate',
+    subtype: 'aggregate',
+    config: { source: '', value: '', groupBy: '' },
+  },
   // Approval: pauses the run until a workspace member approves or rejects,
   // then routes down the matching branch. timeoutMinutes bounds the wait;
   // onTimeout picks what an expired wait does ('reject' the branch, or 'fail'
@@ -124,6 +131,7 @@ export const TOOLBAR_BUTTONS = [
   { type: 'transform', label: 'Transform', className: 'toolbar-btn--action' },
   { type: 'filter', label: 'Filter', className: 'toolbar-btn--action' },
   { type: 'map', label: 'Map', className: 'toolbar-btn--action' },
+  { type: 'aggregate', label: 'Aggregate', className: 'toolbar-btn--action' },
   { type: 'condition', label: 'Condition', className: 'toolbar-btn--condition' },
   { type: 'approval', label: 'Approval', className: 'toolbar-btn--approval' },
   { type: 'ai-prompt', label: 'AI', className: 'toolbar-btn--ai' },
