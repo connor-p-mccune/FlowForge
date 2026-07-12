@@ -28,6 +28,7 @@ Bull worker. The notable trust boundaries and the threats against them:
 | T9 | **Credential theft from stored workflows** | API keys pasted into node configs land in `graph_json`, execution step logs, and exports — one database leak exposes every integration. | **Mitigated** — encrypted workspace secrets + log redaction (see below). |
 | T10 | **API token compromise** | A personal access token for the public `/api/v1` API leaks (CI logs, dotfiles) and is replayed. | **Mitigated** — hash-only storage, scopes, expiry, revocation, per-token rate limit. |
 | T11 | **Operational-data disclosure via metrics** | `GET /metrics` (Prometheus) exposes traffic patterns and run volumes to anyone who can reach the port. | **Mitigated** — metric labels are route *patterns* (never resource ids or user data), and setting `METRICS_TOKEN` gates scrapes behind a bearer token; recommended whenever the server has a public domain. |
+| T12 | **Status-badge surface** | `GET /api/workflows/:id/badge.svg` is unauthenticated (embedded by a caching image proxy), so it could leak run status or confirm which workflow ids exist. | **Mitigated** — opt-in per-workflow token compared in constant time; a missing/invalid token returns a neutral `unknown` badge with `200` (no existence oracle); output is XML-escaped; rate-limited; dry runs excluded. |
 
 ---
 
@@ -215,6 +216,30 @@ gated on **workspace membership** in `socket/handlers.js`, mirroring the REST la
 actually joined, so a socket cannot inject collaboration events into a workflow it
 has no access to. The personal `user:<id>` room is derived from the verified token,
 so a socket can only ever join its own. Tested in `__tests__/socketHandlers.test.js`.
+
+### Status badges — unauthenticated public surface (T12)
+
+`GET /api/workflows/:id/badge.svg` (`routes/workflows.js` +
+`services/statusBadge.js`) is deliberately unauthenticated so a caching image
+proxy (GitHub camo) can embed it. That makes it the one public read surface on
+the session API, so it's built to leak nothing:
+
+- **Opt-in token, constant-time compared.** A workflow has no badge until a
+  member mints `badge_token`; the badge URL carries it as a query parameter,
+  compared with `crypto.timingSafeEqual` (length-guarded).
+- **No existence oracle.** A missing or wrong token — and a nonexistent
+  workflow id — all render the same neutral `unknown` badge with `200`. The
+  endpoint never `404`s, so it can't be used to probe which ids exist, and an
+  embedded badge never shows a broken image.
+- **Escaped output.** Every dynamic value is XML-escaped, so a status string
+  can't inject markup into the SVG.
+- **Dry runs excluded.** The badge reflects the latest *real* run, so a test
+  run can't flip a public badge to failing.
+- **Rate-limited** like the public webhook trigger, and served with a short
+  `max-age` (fast refresh, CDN still absorbs bursts). Rotating or deleting the
+  token revokes the URL immediately.
+
+Tested in `server/src/__tests__/statusBadge.test.js`.
 
 ---
 

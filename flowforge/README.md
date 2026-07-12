@@ -77,6 +77,10 @@ order while streaming live progress back to every collaborator on the canvas.
   preview any version, restore it (reversibly), or **diff it against the live
   canvas** — nodes added/removed, changed config fields, and rewired
   connections.
+- **Status badges** — mint a per-workflow badge token and embed a live SVG of
+  its latest run status (passing / failing / running) in a README or dashboard,
+  just like a CI badge — hand-rendered, cached, and revocable by rotating the
+  token.
 - **Command palette** — `Ctrl/⌘-K` fuzzy-jumps to any workflow, page, or action
   across every workspace.
 - **Live execution streaming** — step-by-step status updates pushed to the UI

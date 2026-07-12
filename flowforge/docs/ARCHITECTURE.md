@@ -309,6 +309,31 @@ error inline rather than treating it as a request error.
 
 ---
 
+## Status badges
+
+`services/statusBadge.js` hand-renders shields.io-style flat SVG — the same
+call as the metrics exporter: the app needs one badge shape, not an image
+library, so the SVG is a template with per-character width estimation. The
+interesting part is the security model, because a badge is fetched
+**unauthenticated** by a caching image proxy (GitHub's camo) and embedded in
+public pages:
+
+- **Opt-in per-workflow token.** A workflow has no badge until a member mints
+  one (`badge_token`). The badge URL carries the token as a query parameter,
+  compared in **constant time**.
+- **No existence oracle.** A missing or wrong token renders a neutral
+  `unknown` badge with a `200` — never a `404`, both so a README never shows a
+  broken image and so the endpoint can't be used to probe which workflow ids
+  exist. Rotating the token (re-mint) invalidates the old URL immediately.
+- **Escaped output.** Every dynamic value is XML-escaped, so a status string
+  can never inject markup into the SVG.
+- **Dry runs don't count.** The badge reflects the latest *real* run, so a test
+  run never flips a workflow to failing on someone's README.
+
+The endpoint is rate-limited like the public webhook trigger (it's an
+unauthenticated, oft-fetched asset) and served with a short `max-age` so an
+embedded badge refreshes within a minute while a CDN still absorbs bursts.
+
 ## Security architecture
 
 [SECURITY.md](../SECURITY.md) is the authoritative threat model. The load-
