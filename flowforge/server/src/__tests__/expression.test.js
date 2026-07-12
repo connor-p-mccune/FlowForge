@@ -131,6 +131,46 @@ describe('FXL comparison and logic', () => {
   })
 })
 
+describe('FXL array and object literals', () => {
+  it('builds array literals with evaluated elements', () => {
+    expect(evalExpr('[1, 2, 3]')).toEqual([1, 2, 3])
+    expect(evalExpr('[a, a * 2, "x"]', { a: 5 })).toEqual([5, 10, 'x'])
+    expect(evalExpr('[]')).toEqual([])
+  })
+
+  it('builds object literals with identifier and string keys', () => {
+    expect(evalExpr('{ a: 1, b: "two" }')).toEqual({ a: 1, b: 'two' })
+    expect(evalExpr('{ "full name": name, age: age + 1 }', { name: 'Ada', age: 35 }))
+      .toEqual({ 'full name': 'Ada', age: 36 })
+    expect(evalExpr('{}')).toEqual({})
+  })
+
+  it('nests objects and arrays', () => {
+    expect(evalExpr('{ id: item.id, tags: [item.a, item.b] }', { item: { id: 7, a: 'x', b: 'y' } }))
+      .toEqual({ id: 7, tags: ['x', 'y'] })
+  })
+
+  it('computes fields with functions and ternaries', () => {
+    expect(
+      evalExpr('{ name: upper(name), tier: total > 100 ? "gold" : "standard" }', {
+        name: 'ada',
+        total: 150,
+      })
+    ).toEqual({ name: 'ADA', tier: 'gold' })
+  })
+
+  it('drops prototype-polluting keys from an object literal', () => {
+    const result = evalExpr('{ __proto__: 1, safe: 2 }')
+    expect(result).toEqual({ safe: 2 })
+    expect(Object.getPrototypeOf(result)).toBe(Object.prototype)
+  })
+
+  it('reports a malformed object literal', () => {
+    expect(() => parse('{ a 1 }')).toThrow(/Expected ":"/)
+    expect(() => parse('{ 1: 2 }')).toThrow(/Expected a property name/)
+  })
+})
+
 describe('FXL member and index access', () => {
   it('reads nested object properties', () => {
     expect(evalExpr('user.profile.name', { user: { profile: { name: 'Ada' } } })).toBe('Ada')

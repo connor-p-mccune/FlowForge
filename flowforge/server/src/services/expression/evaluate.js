@@ -133,6 +133,19 @@ function evaluate(ast, scope = {}, options = {}) {
       case 'Array':
         return node.elements.map((el) => walk(el, depth + 1))
 
+      case 'Object': {
+        const out = {}
+        for (const prop of node.properties) {
+          const value = walk(prop.value, depth + 1)
+          // A blocked key is dropped rather than assigned — never let an object
+          // literal be the vector that sets a prototype. (Plain assignment of a
+          // non-blocked key is safe.)
+          if (BLOCKED_KEYS.has(prop.key)) continue
+          out[prop.key] = value
+        }
+        return out
+      }
+
       case 'Member': {
         const base = walk(node.object, depth + 1)
         const key = node.computed ? walk(node.property, depth + 1) : node.property

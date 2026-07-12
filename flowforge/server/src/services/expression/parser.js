@@ -9,6 +9,7 @@
 //   { type: 'Literal', value }
 //   { type: 'Identifier', name }
 //   { type: 'Array', elements: [...] }
+//   { type: 'Object', properties: [{ key, value }] }   // { a: 1, "b": x }
 //   { type: 'Member', object, property, computed }   // a.b  |  a[expr]
 //   { type: 'Call', callee: name, args: [...] }        // fn(...)
 //   { type: 'Unary', op, argument }
@@ -198,6 +199,37 @@ function parse(source) {
           }
           expectPunct(']')
           return node({ type: 'Array', elements })
+        }
+        if (t.value === '{') {
+          next()
+          const properties = []
+          if (!(peek().type === 'punct' && peek().value === '}')) {
+            for (;;) {
+              const keyToken = peek()
+              // Keys are an identifier (name: …) or a string literal ("full name": …).
+              let key
+              if (keyToken.type === 'ident' || keyToken.type === 'string') {
+                key = keyToken.value
+                next()
+              } else {
+                throw new ExpressionError('Expected a property name in object literal', keyToken.position)
+              }
+              const colon = peek()
+              if (colon.type !== 'op' || colon.value !== ':') {
+                throw new ExpressionError('Expected ":" after a property name', colon.position)
+              }
+              next() // ':'
+              properties.push(node({ key, value: parseExpression(0) }))
+              const sep = peek()
+              if (sep.type === 'punct' && sep.value === ',') {
+                next()
+                continue
+              }
+              break
+            }
+          }
+          expectPunct('}')
+          return node({ type: 'Object', properties })
         }
         break
       default:

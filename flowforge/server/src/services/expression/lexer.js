@@ -134,8 +134,13 @@ function tokenize(source) {
       continue
     }
 
-    // Grouping / member / call / list punctuation.
-    if (ch === '(' || ch === ')' || ch === '[' || ch === ']' || ch === '.' || ch === ',') {
+    // Grouping / member / call / list / object punctuation. (":" stays an
+    // operator — the ternary parser consumes it there — and doubles as the
+    // key/value separator inside an object literal.)
+    if (
+      ch === '(' || ch === ')' || ch === '[' || ch === ']' ||
+      ch === '{' || ch === '}' || ch === '.' || ch === ','
+    ) {
       push('punct', ch, i)
       i++
       continue
