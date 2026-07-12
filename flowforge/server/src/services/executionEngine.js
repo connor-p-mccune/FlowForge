@@ -17,6 +17,7 @@ const runners = {
   'action-email': require('./nodeRunners/sendEmail'),
   'action-slack': require('./nodeRunners/sendSlack'),
   'transform': require('./nodeRunners/transform'),
+  'filter': require('./nodeRunners/filter'),
   'condition': require('./nodeRunners/condition'),
   'ai-prompt': require('./nodeRunners/llmPrompt'),
   'ai-classify': require('./nodeRunners/classify'),
