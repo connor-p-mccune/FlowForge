@@ -130,7 +130,8 @@ function numericValue(program, scope, index, total) {
   } catch (err) {
     throw new Error(`Aggregate value failed on item ${index + 1}/${total}: ${err.message}`)
   }
-  const n = typeof raw === 'boolean' ? Number(raw) : Number(raw)
+  // Number() also folds booleans (true → 1) so `sum` can count flags.
+  const n = Number(raw)
   if (!Number.isFinite(n)) {
     throw new Error(`Aggregate value on item ${index + 1}/${total} is not a number`)
   }
