@@ -327,7 +327,9 @@ Three decisions are load-bearing:
   the caller passes in. That's the whole reason the evaluator can never reach a
   host method — `payload.constructor` or `"x".toUpperCase()` doesn't even parse
   (`Only named functions can be called`). The cost is no `map`/`filter` taking a
-  callback; the Filter node lives *outside* the language for exactly that reason.
+  callback; the Filter and Map nodes live *outside* the language for exactly
+  that reason — each drives one FXL expression per item, so iteration stays in
+  the engine (bounded, observable) and the language stays a pure expression.
 - **Bounded and prototype-safe.** Member access refuses `__proto__` /
   `prototype` / `constructor`; a per-evaluation step counter and a
   recursion-depth cap stop a crafted expression from monopolising a worker; and

@@ -29,10 +29,10 @@ order while streaming live progress back to every collaborator on the canvas.
   and **undo/redo** (`Ctrl/⌘-Z`) that broadcasts each step to collaborators so
   everyone converges on the same state.
 - **Rich node library** — manual, webhook & schedule triggers; HTTP request,
-  delay, email, Slack, and transform actions; branching conditions; a **filter**
-  node that trims a list to the items matching a rule; AI prompt / classify /
-  extract nodes; log outputs; **sub-workflows** (call a workflow as a step) and
-  **for-each** (fan a workflow out over a list).
+  delay, email, Slack, and transform actions; branching conditions; **filter**
+  and **map** nodes that trim a list to matching items or reshape each one; AI
+  prompt / classify / extract nodes; log outputs; **sub-workflows** (call a
+  workflow as a step) and **for-each** (fan a workflow out over a list).
 - **Safe expression language (FXL)** — write real logic where a dropdown
   comparison runs out: a condition's **matches expression** operator and the
   filter node's predicate both take expressions like

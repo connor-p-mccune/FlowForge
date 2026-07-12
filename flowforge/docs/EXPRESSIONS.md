@@ -4,9 +4,11 @@ FXL is a small, safe expression language you can use in two places on the
 canvas:
 
 - a **Condition** node's *matches expression…* operator — a boolean rule that
-  routes the run down the true / false branch; and
+  routes the run down the true / false branch;
 - a **Filter** node's *predicate* — a boolean rule evaluated once per list item
-  to decide what to keep.
+  to decide what to keep; and
+- a **Map** node's *mapping* — an expression (usually an object literal)
+  evaluated once per list item to build a new shape.
 
 It exists so a single node can express real logic —
 `amount > 1000 && status in ["pending", "review"]` — without FlowForge ever
@@ -29,6 +31,7 @@ for how it's built and why.
 |-------|----------|
 | Condition expression | every field of the node's incoming data, plus `input` (the whole incoming object) |
 | Filter predicate | every field of the current item (when it's an object), plus `item`, `index` (0-based), and `items` (the whole list) |
+| Map mapping | same as the Filter predicate — each item's fields, plus `item`, `index`, `items` |
 
 ```
 # condition, incoming data { amount: 1500, status: "pending", user: { role: "admin" } }
@@ -49,8 +52,10 @@ so a rule against a missing field simply reads as empty.
 ## Types
 
 Numbers (`42`, `3.14`, `1e3`), strings (`"hi"` or `'hi'`), booleans
-(`true`/`false`), `null`, arrays (`[1, 2, 3]`), and the objects/arrays that
-arrive in scope. String escapes: `\n \t \r \\ \" \' \/`.
+(`true`/`false`), `null`, array literals (`[1, 2, 3]`), object literals
+(`{ id: item.id, name: upper(name) }` — keys are an identifier or a string,
+values any expression), and the objects/arrays that arrive in scope. String
+escapes: `\n \t \r \\ \" \' \/`.
 
 **Truthiness** (used by `!`, `&&`, `||`, `? :`, and both boolean sinks): falsy
 values are `false`, `null`, `0`, `NaN`, and the empty string `""`. Everything
@@ -164,6 +169,9 @@ endsWith(upper(trim(user.email)), "@ACME.COM")
 
 # keep recent, high-value orders (Filter predicate)
 total >= 100 && nowMs() - createdMs < 7 * 86400000
+
+# reshape each row (Map mapping)
+{ id: item.id, name: upper(trim(name)), total: round(price * qty, 2) }
 
 # defend against missing data
 get(payload, "customer.tier", "standard") == "gold"
