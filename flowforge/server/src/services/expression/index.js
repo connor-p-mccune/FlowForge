@@ -18,6 +18,7 @@
 
 const { parse } = require('./parser')
 const { evaluate } = require('./evaluate')
+const { analyze } = require('./analyze')
 const { ExpressionError } = require('./errors')
 const { toBool, FUNCTION_NAMES } = require('./functions')
 
@@ -68,6 +69,7 @@ module.exports = {
   parse,
   compile,
   check,
+  analyze,
   evaluateExpression,
   evaluateBoolean,
   ExpressionError,

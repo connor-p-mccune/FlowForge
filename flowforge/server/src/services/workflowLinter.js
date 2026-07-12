@@ -15,6 +15,7 @@
 
 const cron = require('node-cron')
 const { buildAdjacency, topoSort } = require('./dagParser')
+const { analyze } = require('./expression')
 
 const PLACEHOLDER = /\{\{\s*([\w-]+(?:\.[\w-]+)*)\s*\}\}/g
 
@@ -64,6 +65,29 @@ function lintNodeConfig(node, { workflowTargets }) {
     }
   }
 
+  // Static-check an FXL expression the same way the linter checks everything
+  // else: a blank required field, a syntax error, or a call to a function the
+  // stdlib doesn't define all fail the run, so all three are errors the author
+  // can see now instead of at 3am.
+  const requireExpression = (source, what) => {
+    const result = analyze(source)
+    if (result.empty) {
+      issues.push(issue('error', 'missing-config', `${name}: ${what} is required`, node.id))
+      return
+    }
+    if (!result.ok) {
+      issues.push(
+        issue('error', 'invalid-expression', `${name}: ${what} has a syntax error — ${result.error}`, node.id)
+      )
+      return
+    }
+    for (const fn of result.unknownFunctions) {
+      issues.push(
+        issue('error', 'unknown-function', `${name}: ${what} calls unknown function "${fn}()"`, node.id)
+      )
+    }
+  }
+
   switch (node.type) {
     case 'trigger-schedule':
       if (isBlank(config.cron) || !cron.validate(String(config.cron))) {
@@ -103,12 +127,29 @@ function lintNodeConfig(node, { workflowTargets }) {
       requireField('fields', 'fields to extract')
       break
     case 'condition':
-      if (isBlank(config.left)) {
+      // Expression mode is statically analysable; the simple comparison isn't
+      // beyond noticing a blank left operand.
+      if (config.operator === 'expression') {
+        requireExpression(config.expression, 'the condition expression')
+      } else if (isBlank(config.left)) {
         issues.push(
           issue(
             'warning',
             'missing-config',
             `${name}: the left value is empty — the comparison always sees ""`,
+            node.id
+          )
+        )
+      }
+      break
+    case 'filter':
+      requireExpression(config.predicate, 'the filter predicate')
+      if (isBlank(config.source)) {
+        issues.push(
+          issue(
+            'warning',
+            'missing-config',
+            `${name}: no source list — the filter falls back to the node input`,
             node.id
           )
         )

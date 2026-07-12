@@ -166,6 +166,66 @@ describe('lintGraph', () => {
     expect(issues.find((i) => i.code === 'unwired-branch').message).toMatch(/false branch/)
   })
 
+  describe('FXL expression static analysis', () => {
+    const withTrigger = (n) => ({
+      nodes: [node('t1', 'trigger-manual'), n],
+      edges: [edge('t1', n.id)],
+    })
+
+    it('accepts a valid condition expression', () => {
+      const graph = withTrigger(
+        node('c1', 'condition', { operator: 'expression', expression: 'amount > 1000 && status == "open"' })
+      )
+      expect(codes(lintGraph(graph))).not.toEqual(expect.arrayContaining(['invalid-expression', 'missing-config']))
+    })
+
+    it('flags a syntax error in a condition expression as an error', () => {
+      const graph = withTrigger(
+        node('c1', 'condition', { operator: 'expression', expression: 'amount > ' })
+      )
+      const found = lintGraph(graph).find((i) => i.code === 'invalid-expression')
+      expect(found).toMatchObject({ nodeId: 'c1', severity: 'error' })
+      expect(found.message).toMatch(/syntax error/)
+    })
+
+    it('requires a non-empty condition expression', () => {
+      const graph = withTrigger(
+        node('c1', 'condition', { operator: 'expression', expression: '' })
+      )
+      expect(lintGraph(graph).find((i) => i.nodeId === 'c1')).toMatchObject({
+        code: 'missing-config',
+        severity: 'error',
+      })
+    })
+
+    it('flags a call to an unknown function', () => {
+      const graph = withTrigger(
+        node('c1', 'condition', { operator: 'expression', expression: 'uppr(name) == "X"' })
+      )
+      const found = lintGraph(graph).find((i) => i.code === 'unknown-function')
+      expect(found).toMatchObject({ nodeId: 'c1', severity: 'error' })
+      expect(found.message).toMatch(/uppr/)
+    })
+
+    it('does not analyse the simple comparison operator as an expression', () => {
+      const graph = withTrigger(
+        node('c1', 'condition', { left: '{{t1.x}}', operator: 'equals', right: '1' })
+      )
+      expect(codes(lintGraph(graph))).not.toEqual(expect.arrayContaining(['invalid-expression']))
+    })
+
+    it('validates a filter predicate and warns on a missing source', () => {
+      const graph = withTrigger(
+        node('f1', 'filter', { predicate: 'price > 10', source: '' })
+      )
+      const issues = lintGraph(graph)
+      expect(issues.find((i) => i.nodeId === 'f1' && i.severity === 'warning').message).toMatch(/source/)
+
+      const broken = withTrigger(node('f1', 'filter', { predicate: 'price >', source: '{{t1.list}}' }))
+      expect(lintGraph(broken).find((i) => i.code === 'invalid-expression')).toMatchObject({ nodeId: 'f1' })
+    })
+  })
+
   it('warns about half-wired approval branches with approved/rejected names', () => {
     const graph = {
       nodes: [
