@@ -97,9 +97,12 @@ order while streaming live progress back to every collaborator on the canvas.
 - **Live execution streaming** — step-by-step status updates pushed to the UI
   over WebSockets as a run progresses, with a **Stop** button for cooperative
   cancellation.
-- **Run timeline** — any finished run renders as a Gantt chart: per-step bars
-  inside the run's wall-time window make parallel branches and slow steps
-  obvious at a glance.
+- **Run timeline & critical path** — any finished run renders as a Gantt chart:
+  per-step bars inside the run's wall-time window make parallel branches and
+  slow steps obvious at a glance, and the **critical path** — the longest
+  dependency chain that actually set the run's duration, found with the classic
+  critical path method — is highlighted, so what's worth optimising is one look
+  away.
 - **Real-time collaboration** — multiple people edit the same workflow at once
   with shared cursors, presence, and last-write-wins sync.
 - **Webhook triggers** — generate a public URL that fires a workflow on POST;

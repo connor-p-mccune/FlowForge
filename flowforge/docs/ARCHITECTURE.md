@@ -163,6 +163,29 @@ workflow out over a list sequentially — deliberate, because iterations
 usually hit the same external API — with a cap (`FOREACH_MAX_ITEMS`) and an
 opt-in continue-on-error mode.
 
+### Critical-path analysis
+
+Because the scheduler runs independent branches in parallel, a run's
+wall-clock time isn't the sum of its steps — it's the longest
+dependency-respecting chain of them. `services/criticalPath.js` recovers that
+chain with the classic **critical path method**: a longest-path search over the
+run's *executed* subgraph, each node weighted by its step's recorded duration.
+Kahn's algorithm gives a topological order, a single DP pass computes the
+longest path to each node, and a back-pointer walk reconstructs it source →
+sink. `GET /api/executions/:id` returns it and the timeline highlights it.
+
+The subgraph is exactly the steps that ran — `succeeded`, `failed`, or `reused`
+— and edges whose *both* endpoints ran. That framing makes the tricky cases
+fall out for free: a condition's dead branch was skipped, so it's absent and
+its edges drop; a failed run's path ends at the failing node because everything
+downstream was skipped; a resumed run's reused prefix contributes zero-duration
+links that keep the chain connected without inflating it. Like the timeline (and
+like replay/resume), it reads the run's recorded steps against the workflow's
+*current* edges, so a graph edited since the run simply contributes fewer edges
+rather than lying — and a cycle introduced by such an edit yields an empty path
+instead of a wrong one. The payoff is a direct answer to "what do I optimise?":
+shortening a step that isn't on the path cannot make the run finish sooner.
+
 ---
 
 ## Real-time collaboration
