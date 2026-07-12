@@ -3,6 +3,16 @@ import cronstrue from 'cronstrue'
 import { apiFetch } from '../../services/api'
 import VariableExplorer from './VariableExplorer'
 import NodeTester from './NodeTester'
+import ExpressionTester from './ExpressionTester'
+
+// Starter sample data for the inline FXL playground, per node kind. Condition
+// sees the incoming data's fields; the list nodes see one item's scope.
+const SAMPLE_SCOPE = {
+  condition: '{\n  "amount": 1500,\n  "status": "open"\n}',
+  filter: '{\n  "price": 20,\n  "inStock": true,\n  "index": 0\n}',
+  map: '{\n  "id": 1,\n  "name": "ada",\n  "index": 0\n}',
+  aggregate: '{\n  "amount": 100,\n  "region": "EU",\n  "index": 0\n}',
+}
 
 const OPERATORS = [
   { value: 'equals', label: 'equals' },
@@ -386,6 +396,7 @@ export default function NodeConfigPanel({
                   />
                 </label>
                 <ExpressionHint kind="condition" />
+                <ExpressionTester expression={config.expression || ''} sampleScope={SAMPLE_SCOPE.condition} />
               </>
             ) : (
               <>
@@ -432,6 +443,7 @@ export default function NodeConfigPanel({
               />
             </label>
             <ExpressionHint kind="filter" />
+            <ExpressionTester expression={config.predicate || ''} sampleScope={SAMPLE_SCOPE.filter} />
           </>
         )
       case 'map':
@@ -457,6 +469,7 @@ export default function NodeConfigPanel({
               />
             </label>
             <ExpressionHint kind="map" />
+            <ExpressionTester expression={config.mapping || ''} sampleScope={SAMPLE_SCOPE.map} />
           </>
         )
       case 'aggregate':
@@ -498,6 +511,7 @@ export default function NodeConfigPanel({
               <code>{'{{' + node.id + '.groups}}'}</code>.
             </p>
             <ExpressionHint kind="aggregate" />
+            <ExpressionTester expression={config.value || ''} sampleScope={SAMPLE_SCOPE.aggregate} />
           </>
         )
       case 'approval':
