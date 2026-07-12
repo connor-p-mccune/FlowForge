@@ -19,6 +19,7 @@ const runners = {
   'transform': require('./nodeRunners/transform'),
   'filter': require('./nodeRunners/filter'),
   'map': require('./nodeRunners/map'),
+  'aggregate': require('./nodeRunners/aggregate'),
   'condition': require('./nodeRunners/condition'),
   'ai-prompt': require('./nodeRunners/llmPrompt'),
   'ai-classify': require('./nodeRunners/classify'),

@@ -235,6 +235,18 @@ describe('lintGraph', () => {
       const blank = withTrigger(node('m1', 'map', { mapping: '', source: '{{t1.list}}' }))
       expect(lintGraph(blank).find((i) => i.nodeId === 'm1')).toMatchObject({ code: 'missing-config' })
     })
+
+    it('treats aggregate value / group-by as optional but still syntax-checks them', () => {
+      // Count-only aggregate (no value, no groupBy) with a source is clean.
+      const clean = withTrigger(node('g1', 'aggregate', { source: '{{t1.list}}' }))
+      expect(codes(lintGraph(clean))).not.toEqual(
+        expect.arrayContaining(['invalid-expression', 'missing-config'])
+      )
+
+      // A broken value expression is still an error.
+      const broken = withTrigger(node('g1', 'aggregate', { source: '{{t1.list}}', value: 'amount +' }))
+      expect(lintGraph(broken).find((i) => i.code === 'invalid-expression')).toMatchObject({ nodeId: 'g1' })
+    })
   })
 
   it('warns about half-wired approval branches with approved/rejected names', () => {

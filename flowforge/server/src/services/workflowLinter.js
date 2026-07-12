@@ -69,12 +69,7 @@ function lintNodeConfig(node, { workflowTargets }) {
   // else: a blank required field, a syntax error, or a call to a function the
   // stdlib doesn't define all fail the run, so all three are errors the author
   // can see now instead of at 3am.
-  const requireExpression = (source, what) => {
-    const result = analyze(source)
-    if (result.empty) {
-      issues.push(issue('error', 'missing-config', `${name}: ${what} is required`, node.id))
-      return
-    }
+  const reportExpressionIssues = (result, what) => {
     if (!result.ok) {
       issues.push(
         issue('error', 'invalid-expression', `${name}: ${what} has a syntax error — ${result.error}`, node.id)
@@ -86,6 +81,20 @@ function lintNodeConfig(node, { workflowTargets }) {
         issue('error', 'unknown-function', `${name}: ${what} calls unknown function "${fn}()"`, node.id)
       )
     }
+  }
+  const requireExpression = (source, what) => {
+    const result = analyze(source)
+    if (result.empty) {
+      issues.push(issue('error', 'missing-config', `${name}: ${what} is required`, node.id))
+      return
+    }
+    reportExpressionIssues(result, what)
+  }
+  // For optional FXL fields (aggregate's value / group-by): a blank field is
+  // fine, but a non-blank one is still held to the same syntax/function checks.
+  const optionalExpression = (source, what) => {
+    if (isBlank(source)) return
+    reportExpressionIssues(analyze(source), what)
   }
 
   switch (node.type) {
@@ -163,6 +172,22 @@ function lintNodeConfig(node, { workflowTargets }) {
             'warning',
             'missing-config',
             `${name}: no source list — the map falls back to the node input`,
+            node.id
+          )
+        )
+      }
+      break
+    case 'aggregate':
+      // value and group-by are both optional (count-only, whole-list are valid),
+      // but a non-blank one is still syntax-checked.
+      optionalExpression(config.value, 'the value expression')
+      optionalExpression(config.groupBy, 'the group-by expression')
+      if (isBlank(config.source)) {
+        issues.push(
+          issue(
+            'warning',
+            'missing-config',
+            `${name}: no source list — the aggregate falls back to the node input`,
             node.id
           )
         )
