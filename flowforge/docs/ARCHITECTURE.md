@@ -282,6 +282,31 @@ of "resolvable" cannot drift apart. The lint route accepts the canvas's
 live, unsaved graph and enriches it with real workspace context (secret
 names, sub-workflow target status).
 
+### The node test bench
+
+`POST /workflows/:id/test-node` runs a single node in isolation — a sample
+input, no execution row, dry-run by default. The design constraint is that a
+bench run must behave *identically* to how the node runs inside a real
+execution, or it would give false confidence. So the route doesn't
+re-implement anything: it imports the engine's own `getRunner`,
+`loadWorkspaceSecrets`, `buildRedactor`, `redactDeep`, and `resolveTemplates`
+and drives the node through the same pipeline. Secrets resolve into the
+node's config through the exact scope the engine uses, and the same redactor
+scrubs their values from the response — so testing an HTTP node that sends
+`Authorization: Bearer {{secrets.API_KEY}}` fires the real header but never
+echoes the key back.
+
+Two node classes are excluded. Side-effecting runners (email/Slack/HTTP)
+honor the dry-run flag like they do in a real run, so they're safe to bench;
+`live: true` opts into firing. Engine-only types (approval, sub-workflow,
+for-each) are refused up front — they only mean anything inside a full run
+(a human decision, a nested execution, a fan-out), so there's nothing
+coherent to bench in isolation. A per-call timeout (`NODE_TEST_TIMEOUT_MS`)
+bounds the request, since a node's own config (a delay set to minutes) could
+otherwise hang it. A node that throws is reported as a *failed verdict* with
+a 200 — a failing test is a successful bench run — so the client renders the
+error inline rather than treating it as a request error.
+
 ---
 
 ## Security architecture

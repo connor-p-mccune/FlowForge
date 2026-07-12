@@ -64,6 +64,11 @@ order while streaming live progress back to every collaborator on the canvas.
 - **CLI** — `flowforge trigger <id> --watch` runs a workflow and exits non-zero
   unless it completed, turning any workflow into a one-line CI gate. Zero
   dependencies; see [cli/README.md](./cli/README.md).
+- **Node test bench** — run a single node in isolation from its config panel
+  with a sample input, without executing the whole graph: dry-run by default
+  (side-effecting nodes report what they'd send), or fire for real. Reuses the
+  engine's own runner + secret-redaction pipeline, so a bench run behaves
+  exactly like the node would inside a run.
 - **Workflow linter** — one click checks the canvas before you run it: cycles,
   dead branches, missing config, references to nodes that aren't upstream,
   unknown `{{secrets.*}}` names, undeployed sub-workflow targets. Click an
@@ -219,6 +224,7 @@ Copy `.env.example` to `.env` before running. **Never commit `.env`.**
 | `LOG_LEVEL`       | no       | `debug` \| `info` (default) \| `warn` \| `error` \| `silent` |
 | `LOG_FORMAT`      | no       | `pretty` for human-readable dev logs (default: one JSON line per event) |
 | `SHUTDOWN_TIMEOUT_MS` | no   | Hard deadline for the graceful-shutdown drain (default 30000) |
+| `NODE_TEST_TIMEOUT_MS` | no  | Per-node timeout for the single-node test bench (default 30000) |
 | `WEBHOOK_MAX_ATTEMPTS` | no  | Delivery attempts per outbound webhook event (default 5) |
 | `WEBHOOK_DISPATCH_INTERVAL_MS` | no | Outbound webhook delivery-queue poll interval (default 5000) |
 | `EXECUTION_RETENTION_DAYS` | no | Prune terminal runs older than this many days (default: keep forever) |
@@ -252,7 +258,9 @@ SMTP_USER=        SMTP_PASS=         EMAIL_FROM=flowforge@example.com
    **Insert data from upstream** section lists what's available and copies
    references for you.
 5. **Check** the workflow with 🔎 Issues — the linter flags anything that would
-   fail before you run it; click a finding to jump to the node.
+   fail before you run it; click a finding to jump to the node. Use a node's
+   **Test this node** section to bench it in isolation with a sample input
+   before wiring up the whole graph.
 6. **Run** with the ▶ button and watch steps stream into the execution panel;
    **Stop** cancels a run cooperatively. In run history, flip to the
    **Timeline** view to see a Gantt chart of where the time went.
