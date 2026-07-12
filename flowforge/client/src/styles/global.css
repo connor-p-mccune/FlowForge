@@ -947,6 +947,110 @@ html, body, #root {
   line-height: 1.5;
 }
 
+/* Node test bench (NodeTester) — a "run this one node" section in the panel. */
+.node-tester {
+  margin: 12px 0;
+  border-top: 1px solid #f0f0f0;
+  padding-top: 10px;
+}
+.node-tester__toggle {
+  background: none;
+  border: none;
+  padding: 2px 0;
+  font-size: 12px;
+  font-weight: 600;
+  color: #4338ca;
+  cursor: pointer;
+}
+.node-tester__body {
+  margin-top: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.node-tester__field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+  color: #374151;
+}
+.node-tester__input {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  padding: 6px 8px;
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+  resize: vertical;
+}
+.node-tester__live {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: #374151;
+}
+.node-tester__run {
+  align-self: flex-start;
+  padding: 6px 12px;
+  background: #eef2ff;
+  border: 1px solid #c7d2fe;
+  color: #4338ca;
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.node-tester__run:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+.node-tester__error {
+  color: #b91c1c;
+  font-size: 12px;
+  margin: 0;
+}
+.node-tester__result {
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+  padding: 8px;
+  background: #fafafa;
+}
+.node-tester__result--failed {
+  background: #fef2f2;
+  border-color: #fecaca;
+}
+.node-tester__result-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+.node-tester__dry {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #b45309;
+  background: #fef3c7;
+  padding: 1px 6px;
+  border-radius: 8px;
+}
+.node-tester__duration {
+  margin-left: auto;
+  font-size: 11px;
+  color: #9ca3af;
+}
+.node-tester__output {
+  margin: 0;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 180px;
+  overflow: auto;
+}
+
 .config-panel__node-id {
   font-size: 11px;
   color: #999;

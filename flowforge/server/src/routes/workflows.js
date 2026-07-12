@@ -6,6 +6,13 @@ const { validate } = require('../middleware/validate')
 const scheduler = require('../services/scheduler')
 const activityService = require('../services/activityService')
 const { lintGraph } = require('../services/workflowLinter')
+const {
+  getRunner,
+  loadWorkspaceSecrets,
+  buildRedactor,
+  redactDeep,
+  resolveTemplates,
+} = require('../services/executionEngine')
 
 const router = express.Router()
 
@@ -331,6 +338,104 @@ router.post('/workflows/:id/lint', auth, (req, res) => {
         warnings: issues.filter((i) => i.severity === 'warning').length,
       },
     })
+  } catch (err) {
+    console.error(err)
+    res.status(500).json({ error: 'Internal server error' })
+  }
+})
+
+// ---------------------------------------------------------------------------
+// Node test bench
+// ---------------------------------------------------------------------------
+
+// Node types that only make sense inside a full engine run.
+const BENCH_UNSUPPORTED = {
+  approval: 'Approval nodes wait on a human decision — run the workflow to test the gate',
+  'sub-workflow': 'Sub-workflow nodes run a whole other workflow — use a test run instead',
+  'for-each': 'For-each nodes fan a workflow out over a list — use a test run instead',
+}
+
+// A bench run must not hang the HTTP request it rides on (e.g. a delay node
+// configured for minutes). Read per call so tests can shrink it.
+function benchTimeoutMs() {
+  const n = parseInt(process.env.NODE_TEST_TIMEOUT_MS || '30000', 10)
+  return Number.isFinite(n) && n >= 100 ? n : 30000
+}
+
+const raceTimeout = (promise, ms) =>
+  Promise.race([
+    promise,
+    new Promise((_, reject) =>
+      setTimeout(() => reject(new Error(`Node test timed out after ${ms}ms`)), ms).unref?.()
+    ),
+  ])
+
+// POST /api/workflows/:id/test-node — run a single node in isolation with a
+// sample input, without creating an execution. The body carries the node as
+// the canvas currently has it (possibly unsaved), an optional `input` object
+// handed to the runner, and an optional `context` object that stands in for
+// upstream outputs when resolving {{node-id.field}} templates. Dry-run by
+// default — side-effecting runners report what they *would* have sent —
+// `live: true` opts into firing the real call.
+//
+// This reuses the engine's own pipeline (runner lookup, workspace-secret
+// loading, redaction), so a bench run behaves exactly like the node would in
+// a real run — and secret values are scrubbed from the response the same way
+// they are scrubbed from persisted step rows.
+router.post('/workflows/:id/test-node', auth, async (req, res) => {
+  try {
+    const workflow = db.prepare('SELECT * FROM workflows WHERE id = ?').get(req.params.id)
+    if (!workflow || !isMember(workflow.workspace_id, req.user.id)) {
+      return res.status(404).json({ error: 'Workflow not found' })
+    }
+
+    const { node, input, context, live } = req.body || {}
+    if (!node || typeof node !== 'object' || typeof node.type !== 'string') {
+      return res.status(400).json({ error: 'A node with a type is required' })
+    }
+    if (BENCH_UNSUPPORTED[node.type]) {
+      return res.status(400).json({ error: BENCH_UNSUPPORTED[node.type] })
+    }
+    let runner
+    try {
+      runner = getRunner(node.type)
+    } catch {
+      return res.status(400).json({ error: `Unknown node type "${node.type}"` })
+    }
+
+    const benchInput = input && typeof input === 'object' && !Array.isArray(input) ? input : {}
+    const benchContext =
+      context && typeof context === 'object' && !Array.isArray(context) ? context : {}
+
+    const secrets = loadWorkspaceSecrets(workflow.workspace_id)
+    const redact = buildRedactor(Object.values(secrets))
+    const config = resolveTemplates(node.data?.config || {}, { ...benchContext, secrets })
+
+    const dryRun = live !== true
+    const startedAt = Date.now()
+    try {
+      // Single attempt, no engine ctx: runners that reach back into the engine
+      // are excluded above, and a bench run should surface the first failure,
+      // not retry through it.
+      const output = await raceTimeout(
+        Promise.resolve(runner(config, benchInput, dryRun, {})),
+        benchTimeoutMs()
+      )
+      res.json({
+        status: 'succeeded',
+        dryRun,
+        durationMs: Date.now() - startedAt,
+        output: redactDeep(output ?? {}, redact),
+      })
+    } catch (err) {
+      // A failing node is a *successful bench run* with a failed verdict.
+      res.json({
+        status: 'failed',
+        dryRun,
+        durationMs: Date.now() - startedAt,
+        error: redact(err.message),
+      })
+    }
   } catch (err) {
     console.error(err)
     res.status(500).json({ error: 'Internal server error' })

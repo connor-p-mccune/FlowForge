@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import cronstrue from 'cronstrue'
 import { apiFetch } from '../../services/api'
 import VariableExplorer from './VariableExplorer'
+import NodeTester from './NodeTester'
 
 const OPERATORS = [
   { value: 'equals', label: 'equals' },
@@ -568,6 +569,7 @@ export default function NodeConfigPanel({
         </label>
         {renderFields()}
         <VariableExplorer node={node} nodes={nodes} edges={edges} />
+        <NodeTester workflowId={currentWorkflowId} node={node} />
         <div className="config-panel__node-id">
           Node ID: <code>{node.id}</code>
         </div>

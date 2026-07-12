@@ -565,4 +565,15 @@ async function runExecution(
   return {}
 }
 
-module.exports = { runExecution, resolveTemplates }
+module.exports = {
+  runExecution,
+  resolveTemplates,
+  // Shared with the node test bench (routes/workflows.js test-node): running a
+  // single node outside a run needs the same runner lookup, secret loading,
+  // and redaction pipeline the engine uses — re-implementing them would let
+  // the two paths drift.
+  getRunner,
+  loadWorkspaceSecrets,
+  buildRedactor,
+  redactDeep,
+}
