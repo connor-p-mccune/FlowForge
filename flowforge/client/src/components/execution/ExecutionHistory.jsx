@@ -170,11 +170,14 @@ export default function ExecutionHistory({ workflowId, nodes, autoOpenId }) {
     setPendingResume(null)
     setDetailView('steps')
     try {
-      const { execution, steps, childExecutions } = await apiFetch(`/api/executions/${executionId}`)
+      const { execution, steps, childExecutions, criticalPath } = await apiFetch(
+        `/api/executions/${executionId}`
+      )
       setSelected({
         execution,
         steps: parseSteps(steps),
         childExecutionsByNode: buildChildMap(childExecutions),
+        criticalPath,
       })
     } catch (err) {
       setError(err.message)
@@ -298,7 +301,11 @@ export default function ExecutionHistory({ workflowId, nodes, autoOpenId }) {
           </button>
         </div>
         {detailView === 'timeline' ? (
-          <ExecutionTimeline steps={selected.steps} nodes={nodes} />
+          <ExecutionTimeline
+            steps={selected.steps}
+            nodes={nodes}
+            criticalPath={selected.criticalPath}
+          />
         ) : (
           <StepList
             steps={selected.steps}

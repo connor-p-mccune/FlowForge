@@ -1455,6 +1455,41 @@ html, body, #root {
 .exec-timeline__bar--running { background: #3b82f6; }
 .exec-timeline__bar--pending { background: #d1d5db; }
 
+/* Critical path: the steps that set the run's duration. The bar keeps its
+   status colour but gains an indigo ring, and its row's label is emphasised, so
+   the determining chain stands out without hiding the status of each step. */
+.exec-timeline__critical-note {
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+  font-size: 12px;
+  line-height: 1.45;
+  color: #4338ca;
+  background: #eef2ff;
+  border: 1px solid #c7d2fe;
+  border-radius: 6px;
+  padding: 7px 9px;
+  margin-bottom: 10px;
+}
+
+.exec-timeline__critical-swatch {
+  flex: 0 0 12px;
+  height: 12px;
+  margin-top: 2px;
+  border-radius: 3px;
+  background: #22c55e;
+  box-shadow: 0 0 0 2px #6366f1;
+}
+
+.exec-timeline__row--critical .exec-timeline__label {
+  color: #3730a3;
+  font-weight: 600;
+}
+
+.exec-timeline__bar--critical {
+  box-shadow: 0 0 0 2px #6366f1;
+}
+
 .exec-timeline__duration {
   flex: 0 0 52px;
   font-size: 11px;

@@ -51,4 +51,22 @@ describe('ExecutionTimeline', () => {
     render(<ExecutionTimeline steps={[{ nodeId: 'x', status: 'pending' }]} nodes={[]} />)
     expect(screen.getByText(/no timing data/i)).toBeInTheDocument()
   })
+
+  it('highlights the critical path when one is provided', () => {
+    const criticalPath = { path: ['a'], totalMs: 1000, durationsMs: { a: 1000 } }
+    const { container } = render(
+      <ExecutionTimeline steps={steps} nodes={nodes} criticalPath={criticalPath} />
+    )
+    // The summary note names the chain and its share of wall time.
+    expect(screen.getByText(/Critical path/)).toBeInTheDocument()
+    expect(screen.getByText(/1 step/)).toBeInTheDocument()
+    // Only the critical step's bar carries the ring modifier and title suffix.
+    expect(container.querySelectorAll('.exec-timeline__bar--critical')).toHaveLength(1)
+    expect(screen.getByTitle(/Fetch users: succeeded — 1\.0s \(critical path\)/)).toBeInTheDocument()
+  })
+
+  it('renders no critical-path note when none is provided', () => {
+    render(<ExecutionTimeline steps={steps} nodes={nodes} />)
+    expect(screen.queryByText(/Critical path/)).not.toBeInTheDocument()
+  })
 })
