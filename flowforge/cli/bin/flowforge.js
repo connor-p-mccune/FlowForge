@@ -16,6 +16,7 @@ const COMMANDS = {
   runs: require('../src/commands/runs'),
   insights: require('../src/commands/insights'),
   forecast: require('../src/commands/forecast'),
+  schedule: require('../src/commands/schedule'),
   check: require('../src/commands/check'),
   run: require('../src/commands/run'),
   cancel: require('../src/commands/cancel'),
@@ -34,6 +35,7 @@ Usage:
   flowforge runs <workflow-id> [--limit N]         Recent runs for a workflow
   flowforge insights <workflow-id> [--limit N]     Duration percentiles, success rate, anomalies
   flowforge forecast <workflow-id>                 Predicted next-run duration and bottleneck
+  flowforge schedule <workflow-id> [--count N]     Upcoming scheduled run times (UTC)
   flowforge check <workflow-id> [--strict]         Gate CI on workflow health (exits non-zero on a breach)
   flowforge run <execution-id> [--watch]           One run with its steps
   flowforge cancel <execution-id>                  Stop a queued or running run

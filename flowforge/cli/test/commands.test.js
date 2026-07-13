@@ -10,6 +10,7 @@ const trigger = require('../src/commands/trigger')
 const runs = require('../src/commands/runs')
 const insights = require('../src/commands/insights')
 const forecast = require('../src/commands/forecast')
+const schedule = require('../src/commands/schedule')
 const check = require('../src/commands/check')
 const runCmd = require('../src/commands/run')
 const cancel = require('../src/commands/cancel')
@@ -278,6 +279,60 @@ test('forecast without a workflow id prints usage and exits 1', async () => {
   const stub = await startStub(() => ({ json: {} }))
   const ctx = makeCtx(stub.api)
   const code = await forecast({ positionals: [], flags: {} }, ctx)
+  await stub.close()
+  assert.equal(code, 1)
+  assert.equal(stub.requests.length, 0)
+})
+
+test('schedule lists upcoming fire times and passes --count through', async () => {
+  const stub = await startStub((method, url) => {
+    assert.equal(url, '/api/v1/workflows/wf-1/schedule?count=2')
+    return {
+      json: {
+        workflowId: 'wf-1',
+        scheduled: true,
+        active: true,
+        cron: '0 9 * * *',
+        reachable: true,
+        nextRuns: ['2026-01-15T09:00:00.000Z', '2026-01-16T09:00:00.000Z'],
+      },
+    }
+  })
+  const ctx = makeCtx(stub.api)
+  const code = await schedule({ positionals: ['wf-1'], flags: { count: '2' } }, ctx)
+  await stub.close()
+
+  assert.equal(code, 0)
+  assert.match(ctx.output(), /Schedule/)
+  assert.match(ctx.output(), /0 9 \* \* \*/)
+  assert.match(ctx.output(), /2026-01-15 09:00 UTC/)
+  assert.match(ctx.output(), /2026-01-16 09:00 UTC/)
+})
+
+test('schedule reports a workflow with no schedule trigger', async () => {
+  const stub = await startStub(() => ({ json: { workflowId: 'wf-1', scheduled: false, nextRuns: [] } }))
+  const ctx = makeCtx(stub.api)
+  const code = await schedule({ positionals: ['wf-1'], flags: {} }, ctx)
+  await stub.close()
+  assert.equal(code, 0)
+  assert.match(ctx.output(), /no schedule trigger/)
+})
+
+test('schedule warns when a valid schedule never fires', async () => {
+  const stub = await startStub(() => ({
+    json: { workflowId: 'wf-1', scheduled: true, active: true, cron: '0 0 30 2 *', reachable: false, nextRuns: [] },
+  }))
+  const ctx = makeCtx(stub.api)
+  const code = await schedule({ positionals: ['wf-1'], flags: {} }, ctx)
+  await stub.close()
+  assert.equal(code, 0)
+  assert.match(ctx.output(), /never fires/)
+})
+
+test('schedule without a workflow id prints usage and exits 1', async () => {
+  const stub = await startStub(() => ({ json: {} }))
+  const ctx = makeCtx(stub.api)
+  const code = await schedule({ positionals: [], flags: {} }, ctx)
   await stub.close()
   assert.equal(code, 1)
   assert.equal(stub.requests.length, 0)
