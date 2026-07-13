@@ -41,11 +41,15 @@ sequentially. Instead it runs a ready-set scheduler:
 - When nothing can launch, the scheduler awaits `Promise.race` over the
   in-flight set and re-runs the round when any node settles.
 
-An edge is *active* when its source succeeded — and, for condition nodes,
-when the edge's handle (`true`/`false`) matches the branch the condition
-took. A join node's input is the merged output of all of its active upstream
-edges, so a diamond's two branches genuinely run in parallel and merge at
-the join.
+An edge is *active* when its source succeeded — and, for branching nodes,
+when the edge's handle matches the branch the node took. That one rule covers
+condition (`true`/`false`), approval (approved/rejected), and the **switch**
+node (the matched case's label, or `default`): each settles a `result` string
+and the engine activates the outgoing edge whose `sourceHandle` equals it, so a
+multi-way switch needed no new scheduling concept — only its type added to the
+set the activation check treats as branching. A join node's input is the merged
+output of all of its active upstream edges, so a diamond's two branches
+genuinely run in parallel and merge at the join.
 
 ### Failure semantics
 
