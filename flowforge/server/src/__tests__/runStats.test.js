@@ -6,6 +6,7 @@ const {
   medianSorted,
   medianAbsoluteDeviation,
   modifiedZScores,
+  mannKendall,
   isSlowOutlier,
   severityFor,
   summarizeDurations,
@@ -105,6 +106,54 @@ describe('modifiedZScores (Iglewicz & Hoaglin)', () => {
     const scores = modifiedZScores([100, 1, 2, 3, 4, 5])
     expect(isSlowOutlier(scores[0])).toBe(true)
     expect(scores.slice(1).every((s) => !isSlowOutlier(s))).toBe(true)
+  })
+})
+
+describe('mannKendall (monotonic trend test)', () => {
+  it('detects a strong increasing trend', () => {
+    const r = mannKendall([1, 2, 3, 4, 5, 6, 7, 8, 9, 10])
+    expect(r.s).toBe(45) // every pair concordant
+    expect(r.tau).toBe(1)
+    expect(r.z).toBeCloseTo(3.9355, 3) // (45-1)/sqrt(125)
+    expect(r.significant).toBe(true)
+    expect(r.trend).toBe('increasing')
+  })
+
+  it('detects a strong decreasing trend (mirror image)', () => {
+    const r = mannKendall([10, 9, 8, 7, 6, 5, 4, 3, 2, 1])
+    expect(r.s).toBe(-45)
+    expect(r.tau).toBe(-1)
+    expect(r.z).toBeCloseTo(-3.9355, 3)
+    expect(r.trend).toBe('decreasing')
+  })
+
+  it('calls a constant series flat with zero statistic', () => {
+    const r = mannKendall([5, 5, 5, 5, 5, 5])
+    expect(r.s).toBe(0)
+    expect(r.tau).toBe(0)
+    expect(r.z).toBe(0)
+    expect(r.significant).toBe(false)
+    expect(r.trend).toBe('flat')
+  })
+
+  it('does not call a trend on noisy, trendless data', () => {
+    const r = mannKendall([5, 3, 6, 2, 7, 1, 8, 4, 6, 3])
+    expect(r.significant).toBe(false)
+    expect(r.trend).toBe('flat')
+  })
+
+  it('still finds an upward trend through ties', () => {
+    const r = mannKendall([1, 1, 2, 2, 3, 3, 4, 4, 5, 5])
+    expect(r.trend).toBe('increasing')
+    expect(r.significant).toBe(true)
+    // Kendall's tau stays within [-1, 1].
+    expect(r.tau).toBeGreaterThan(0)
+    expect(r.tau).toBeLessThanOrEqual(1)
+  })
+
+  it('reports insufficient data below three points', () => {
+    expect(mannKendall([10, 20]).trend).toBe('insufficient')
+    expect(mannKendall([]).trend).toBe('insufficient')
   })
 })
 

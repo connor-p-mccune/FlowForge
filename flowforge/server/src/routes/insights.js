@@ -8,7 +8,12 @@
 const express = require('express')
 const db = require('../config/database')
 const auth = require('../middleware/auth')
-const { summarizeDurations, classifyRuns } = require('../services/runStats')
+const { summarizeDurations, classifyRuns, mannKendall } = require('../services/runStats')
+
+// Minimum completed runs before a duration trend is reported. The Mann-Kendall
+// normal approximation is unreliable on a handful of points, and "getting
+// slower" shouldn't be claimed from noise.
+const TREND_MIN_RUNS = 8
 
 const router = express.Router()
 
@@ -82,6 +87,27 @@ function computeInsights(workflowId, limit) {
     .filter((r) => r.status === 'completed' && typeof r.duration_ms === 'number')
     .map((r) => r.duration_ms)
   const durationSummary = summarizeDurations(completedDurations)
+
+  // Duration trend: is the workflow getting slower over time? Mann-Kendall over
+  // the completed durations in chronological order (rows are newest-first, so
+  // reverse). An increasing duration series is degrading; decreasing is
+  // improving. Null until there's enough history to judge.
+  let trend = null
+  const chronological = rows
+    .filter((r) => r.status === 'completed' && typeof r.duration_ms === 'number')
+    .map((r) => r.duration_ms)
+    .reverse()
+  if (chronological.length >= TREND_MIN_RUNS) {
+    const mk = mannKendall(chronological)
+    trend = {
+      direction: mk.trend === 'increasing' ? 'degrading' : mk.trend === 'decreasing' ? 'improving' : 'flat',
+      significant: mk.significant,
+      tau: mk.tau == null ? null : Number(mk.tau.toFixed(3)),
+      z: mk.z == null ? null : Number(mk.z.toFixed(2)),
+      samples: mk.n,
+      method: 'mann-kendall',
+    }
+  }
 
   // Anomaly flags are scored on the same completed-run durations, then attached
   // back to those runs; every other run is 'unknown' (it has no comparable
@@ -189,6 +215,7 @@ function computeInsights(workflowId, limit) {
       p95: round(durationSummary.p95),
       p99: round(durationSummary.p99),
     },
+    trend,
     anomalyCount,
     slowestSteps,
     recentRuns,

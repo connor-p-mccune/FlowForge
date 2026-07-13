@@ -573,6 +573,21 @@ const spec = {
               p99: { type: 'integer', nullable: true },
             },
           },
+          trend: {
+            type: 'object',
+            nullable: true,
+            description:
+              'Duration trend over completed runs (Mann-Kendall). Null until ' +
+              'there are enough runs to judge.',
+            properties: {
+              direction: { type: 'string', enum: ['improving', 'degrading', 'flat'] },
+              significant: { type: 'boolean' },
+              tau: { type: 'number', nullable: true, description: 'Kendall’s τ effect size, [-1, 1].' },
+              z: { type: 'number', nullable: true },
+              samples: { type: 'integer' },
+              method: { type: 'string', example: 'mann-kendall' },
+            },
+          },
           anomalyCount: { type: 'integer' },
           slowestSteps: {
             type: 'array',

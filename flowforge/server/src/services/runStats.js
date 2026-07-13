@@ -112,6 +112,53 @@ function modifiedZScores(values) {
   return values.map(() => 0)
 }
 
+// Two-sided z at the 95% confidence level — the significance cut-off for the
+// Mann-Kendall trend test below.
+const TREND_Z_95 = 1.96
+
+// Mann-Kendall test for a monotonic trend in a time-ordered series. A
+// non-parametric test (it ranks pairs, never assumes normality or linearity),
+// which suits run durations: it answers "is this workflow trending slower?"
+// without pretending the trend is a straight line or the noise is Gaussian.
+//
+// S = Σ_{i<j} sign(xⱼ − xᵢ) counts how many later values exceed earlier ones vs.
+// the reverse. Under the no-trend null, S is ~normal with mean 0 and variance
+//
+//   Var(S) = [ n(n−1)(2n+5) − Σ_g t_g(t_g−1)(2t_g+5) ] / 18
+//
+// where the tie correction sums over groups of t_g equal values (durations
+// repeat, so the correction matters). The test statistic applies a continuity
+// correction (±1), Kendall's τ = S / (n(n−1)/2) is the effect size, and a trend
+// is called only when |z| clears the 95% cut-off. `values` must be in
+// chronological order (oldest → newest).
+function mannKendall(values) {
+  const n = values.length
+  if (n < 3) return { n, s: 0, tau: null, z: null, trend: 'insufficient', significant: false }
+
+  let s = 0
+  for (let i = 0; i < n - 1; i++) {
+    for (let j = i + 1; j < n; j++) s += Math.sign(values[j] - values[i])
+  }
+
+  const counts = new Map()
+  for (const v of values) counts.set(v, (counts.get(v) || 0) + 1)
+  let tieCorrection = 0
+  for (const t of counts.values()) if (t > 1) tieCorrection += t * (t - 1) * (2 * t + 5)
+
+  const varS = (n * (n - 1) * (2 * n + 5) - tieCorrection) / 18
+  const tau = s / ((n * (n - 1)) / 2)
+
+  let z = 0
+  if (varS > 0) {
+    if (s > 0) z = (s - 1) / Math.sqrt(varS)
+    else if (s < 0) z = (s + 1) / Math.sqrt(varS)
+  }
+
+  const significant = Math.abs(z) > TREND_Z_95
+  const trend = significant ? (s > 0 ? 'increasing' : 'decreasing') : 'flat'
+  return { n, s, tau, z, trend, significant }
+}
+
 // A value is a *slow* outlier when its modified z-score exceeds the threshold —
 // one-sided on purpose. For run durations only "slower than usual" is
 // actionable; a run that finishes unusually fast is good news, not an alert.
@@ -180,6 +227,7 @@ module.exports = {
   medianSorted,
   medianAbsoluteDeviation,
   modifiedZScores,
+  mannKendall,
   isSlowOutlier,
   severityFor,
   summarizeDurations,

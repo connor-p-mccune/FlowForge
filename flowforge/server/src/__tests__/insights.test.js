@@ -176,6 +176,28 @@ describe('GET /api/workflows/:id/insights', () => {
     expect(body.throughput.perDay).toBeGreaterThan(0)
   })
 
+  it('detects a degrading duration trend via Mann-Kendall', async () => {
+    const { body } = await request(app)
+      .get(`/api/workflows/${wf.id}/insights`)
+      .set('Authorization', `Bearer ${token}`)
+    // The completed runs' durations climb monotonically over time (…1090ms →
+    // 20000ms), so the trend is a significant degradation.
+    expect(body.trend.method).toBe('mann-kendall')
+    expect(body.trend.direction).toBe('degrading')
+    expect(body.trend.significant).toBe(true)
+  })
+
+  it('reports no trend for a workflow without enough completed runs', async () => {
+    const sparse = insertWorkflow(wsId, userId, 'Sparse Flow', ['trigger-manual'])
+    for (let i = 0; i < 3; i++) {
+      insertRun(sparse.id, userId, { status: 'completed', durMs: 1000, createdMinutesAgo: 100 - i })
+    }
+    const { body } = await request(app)
+      .get(`/api/workflows/${sparse.id}/insights`)
+      .set('Authorization', `Bearer ${token}`)
+    expect(body.trend).toBeNull() // < TREND_MIN_RUNS
+  })
+
   it('reports no SLA block until targets are set', async () => {
     const { body } = await request(app)
       .get(`/api/workflows/${wf.id}/insights`)
