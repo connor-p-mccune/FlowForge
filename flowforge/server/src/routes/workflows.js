@@ -205,6 +205,25 @@ function validateConcurrency(body) {
   return null
 }
 
+// Optional per-workflow SLA targets (services/slaMonitor.js). Both are nullable
+// (null clears the objective), so they're validated here rather than in the
+// shared workflowRule. Returns an error string or null.
+function validateSla(body) {
+  if ('sla_max_duration_ms' in body && body.sla_max_duration_ms !== null) {
+    const n = body.sla_max_duration_ms
+    if (!Number.isInteger(n) || n < 1) {
+      return 'sla_max_duration_ms must be a positive integer (milliseconds), or null to clear it'
+    }
+  }
+  if ('sla_min_success_rate' in body && body.sla_min_success_rate !== null) {
+    const r = body.sla_min_success_rate
+    if (typeof r !== 'number' || !Number.isFinite(r) || r < 0 || r > 1) {
+      return 'sla_min_success_rate must be a number between 0 and 1, or null to clear it'
+    }
+  }
+  return null
+}
+
 router.put('/workflows/:id', auth, validate(workflowRule), (req, res) => {
   try {
     const workflow = db.prepare('SELECT * FROM workflows WHERE id = ?').get(req.params.id)
@@ -215,15 +234,22 @@ router.put('/workflows/:id', auth, validate(workflowRule), (req, res) => {
 
     const concurrencyError = validateConcurrency(req.body)
     if (concurrencyError) return res.status(400).json({ error: concurrencyError })
+    const slaError = validateSla(req.body)
+    if (slaError) return res.status(400).json({ error: slaError })
     const maxConcurrent =
       'max_concurrent_runs' in req.body ? req.body.max_concurrent_runs : workflow.max_concurrent_runs
     const policy =
       'concurrency_policy' in req.body ? req.body.concurrency_policy : workflow.concurrency_policy
+    const slaMaxDuration =
+      'sla_max_duration_ms' in req.body ? req.body.sla_max_duration_ms : workflow.sla_max_duration_ms
+    const slaMinSuccess =
+      'sla_min_success_rate' in req.body ? req.body.sla_min_success_rate : workflow.sla_min_success_rate
 
     const now = new Date().toISOString()
     db.prepare(
-      'UPDATE workflows SET name = ?, description = ?, max_concurrent_runs = ?, concurrency_policy = ?, updated_at = ? WHERE id = ?'
-    ).run(name, description ?? workflow.description, maxConcurrent, policy, now, req.params.id)
+      `UPDATE workflows SET name = ?, description = ?, max_concurrent_runs = ?, concurrency_policy = ?,
+         sla_max_duration_ms = ?, sla_min_success_rate = ?, updated_at = ? WHERE id = ?`
+    ).run(name, description ?? workflow.description, maxConcurrent, policy, slaMaxDuration, slaMinSuccess, now, req.params.id)
 
     const updated = db.prepare('SELECT * FROM workflows WHERE id = ?').get(req.params.id)
     activityService.logEvent(workflow.workspace_id, req.user.id, 'workflow.updated', {

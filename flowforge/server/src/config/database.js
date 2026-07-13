@@ -93,6 +93,17 @@ ensureColumn('workflows', 'concurrency_policy', "TEXT NOT NULL DEFAULT 'queue'")
 // source run detaches the resume rather than deleting it.
 ensureColumn('executions', 'resumed_from_execution_id', 'TEXT REFERENCES executions(id) ON DELETE SET NULL')
 
+// Per-workflow SLA targets (services/slaMonitor.js). Both optional and
+// independent: sla_max_duration_ms is the wall-time budget a completed run
+// should stay under, and sla_min_success_rate (0..1) is the floor the rolling
+// success rate over recent runs must hold. NULL on either = that objective is
+// unset. When a top-level run finishes, the monitor checks the run against these
+// (plus the statistical anomaly check, which needs no config) and raises a
+// notification + activity event on a breach. Added here (idempotent ALTER) so
+// existing databases pick up the columns without a wipe.
+ensureColumn('workflows', 'sla_max_duration_ms', 'INTEGER')
+ensureColumn('workflows', 'sla_min_success_rate', 'REAL')
+
 // Two-factor authentication (TOTP). Optional, opt-in per user. totp_enabled stays
 // 0 until the user verifies a code from their authenticator, so a half-finished
 // setup never locks them out of login. totp_backup_codes is a JSON array of
