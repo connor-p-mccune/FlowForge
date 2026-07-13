@@ -4,7 +4,23 @@ const { runExecution } = require('../services/executionEngine')
 const { createNotification } = require('../services/notificationService')
 const { acquireSlot, releaseSlot } = require('../services/concurrencyGate')
 const { recordRunDeferred } = require('../services/metrics')
+const { evaluateRun } = require('../services/slaMonitor')
 const db = require('../config/database')
+
+// After a top-level run settles, check it against its workflow's SLA targets and
+// the statistical anomaly baseline, raising an alert on a breach. Best-effort:
+// evaluateRun swallows its own errors, and this wrapper guards the require path
+// too so a monitoring fault can never surface as a run failure. The worker only
+// ever handles top-level runs (sub-workflow child runs execute inside the parent
+// engine loop), so this is exactly the "top-level, settled, real run" hook the
+// monitor wants.
+function evaluateRunSla(executionId) {
+  try {
+    evaluateRun(executionId)
+  } catch (err) {
+    console.error('SLA evaluation failed:', err.message)
+  }
+}
 
 // If the run ended in failure, notify the workflow's owner. Reads the final
 // status back from the DB (the engine handles node failures itself and returns
@@ -75,11 +91,13 @@ function startWorker() {
         "UPDATE executions SET status = 'failed', finished_at = ? WHERE id = ?"
       ).run(new Date().toISOString(), executionId)
       notifyExecutionFailed(executionId)
+      evaluateRunSla(executionId)
       throw err
     } finally {
       if (gated) releaseSlot(workflowId)
     }
     notifyExecutionFailed(executionId)
+    evaluateRunSla(executionId)
   })
 
   console.log(`Execution worker started (concurrency=${CONCURRENCY})`)
