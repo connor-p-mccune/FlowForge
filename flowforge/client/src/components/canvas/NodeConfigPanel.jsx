@@ -40,6 +40,70 @@ function describeCron(expr) {
   }
 }
 
+// An ISO-8601 UTC instant → "Wed, Jan 15, 09:00 UTC". cronstrue describes the
+// *rule*; this shows the actual upcoming instants the server-side cron engine
+// computes, which cronstrue can't.
+function formatFireTime(iso) {
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return iso
+  return d.toLocaleString('en-US', {
+    weekday: 'short', month: 'short', day: 'numeric',
+    hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'UTC',
+  }) + ' UTC'
+}
+
+// Live "next runs" preview under the cron field. Debounces the expression and
+// asks the server (services/cronExpression.js) for the actual upcoming fire
+// times — the piece cronstrue's rule description can't provide. Silent while the
+// expression is invalid (the description line already flags that) so the panel
+// never shows two errors for the same typo.
+function SchedulePreview({ cron }) {
+  const [runs, setRuns] = useState(null) // null = nothing to show yet
+  const [unreachable, setUnreachable] = useState(false)
+
+  useEffect(() => {
+    const expr = (cron || '').trim()
+    if (!expr) {
+      setRuns(null)
+      setUnreachable(false)
+      return
+    }
+    let cancelled = false
+    const timer = setTimeout(() => {
+      apiFetch('/api/schedule/preview', { method: 'POST', body: { cron: expr, count: 3 } })
+        .then((data) => {
+          if (cancelled) return
+          setRuns(data.nextRuns || [])
+          setUnreachable(data.reachable === false)
+        })
+        .catch(() => {
+          // Invalid expression (400) or a transient error: fall back to the
+          // description line rather than surfacing a second, redundant error.
+          if (!cancelled) {
+            setRuns(null)
+            setUnreachable(false)
+          }
+        })
+    }, 400)
+    return () => {
+      cancelled = true
+      clearTimeout(timer)
+    }
+  }, [cron])
+
+  if (unreachable) {
+    return <p className="schedule-nextruns schedule-nextruns--empty">This schedule never fires.</p>
+  }
+  if (!runs || runs.length === 0) return null
+  return (
+    <ul className="schedule-nextruns">
+      {runs.map((iso) => (
+        <li key={iso} className="schedule-nextruns__item">↳ {formatFireTime(iso)}</li>
+      ))}
+    </ul>
+  )
+}
+
 // Node count of a workflow from its stored graph_json, for the dropdown preview.
 function countNodes(graphJson) {
   try {
@@ -228,6 +292,7 @@ export default function NodeConfigPanel({
               {desc.error ? '⚠ ' : '🕑 '}
               {desc.text}
             </p>
+            {!desc.error && <SchedulePreview cron={cronValue} />}
             <div className="schedule-quickpicks">
               {SCHEDULE_PRESETS.map((p) => (
                 <button
