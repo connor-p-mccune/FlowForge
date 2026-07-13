@@ -150,6 +150,10 @@ third:
 - an in-app **notification to the workflow owner**, the same channel a failed run
   uses.
 
+Each breach also increments `flowforge_sla_breaches_total{type}` on the
+Prometheus exporter, so a Grafana alert can fire on a rising breach rate for a
+given objective — the same series a dashboard would already scrape.
+
 ---
 
 ## Where the hook lives (and why)

@@ -17,6 +17,7 @@ const { v4: uuidv4 } = require('uuid')
 const { app } = require('../index')
 const db = require('../config/database')
 const { evaluateRun } = require('../services/slaMonitor')
+const metrics = require('../services/metrics')
 
 let userId
 let wsId
@@ -156,6 +157,16 @@ describe('edge-triggered success-rate floor', () => {
     insertRun(wf, { status: 'failed', durMs: 100 })
     const last = insertRun(wf, { status: 'failed', durMs: 100 })
     expect(evaluateRun(last)).toEqual([])
+  })
+})
+
+describe('metrics', () => {
+  it('increments flowforge_sla_breaches_total by breach type', async () => {
+    const wf = makeWorkflow({ maxDuration: 1000 })
+    const run = insertRun(wf, { status: 'completed', durMs: 9000 })
+    evaluateRun(run)
+    const text = await metrics.renderPrometheus()
+    expect(text).toMatch(/flowforge_sla_breaches_total\{type="duration"\} [1-9]/)
   })
 })
 

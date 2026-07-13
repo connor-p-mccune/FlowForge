@@ -23,6 +23,7 @@
 
 const db = require('../config/database')
 const { classifyRuns } = require('./runStats')
+const { recordSlaBreach } = require('./metrics')
 
 // How many recent settled runs to pull as the evaluation context. Generous
 // enough to cover both windows below with room for a stable robust estimate.
@@ -205,7 +206,16 @@ function evaluateRun(executionId) {
       checkSuccessRate(workflow, execution, settled),
     ].filter(Boolean)
 
-    if (breaches.length > 0) raiseAlert(workflow, execution, breaches)
+    if (breaches.length > 0) {
+      for (const b of breaches) {
+        try {
+          recordSlaBreach(b.type)
+        } catch {
+          /* metrics must never break monitoring */
+        }
+      }
+      raiseAlert(workflow, execution, breaches)
+    }
     return breaches
   } catch (err) {
     console.error('slaMonitor.evaluateRun failed:', err.message)

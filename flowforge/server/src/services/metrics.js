@@ -182,6 +182,16 @@ const runsDeferred = counter(
   'Runs re-parked at worker pickup because their workflow was at its concurrency limit.'
 )
 
+// SLA & anomaly monitoring (services/slaMonitor.js). A rising counter for a
+// given type means a workflow is repeatedly missing that objective — the
+// signal a Grafana alert would fire on. type: 'duration' | 'anomaly' |
+// 'success_rate'.
+const slaBreaches = counter(
+  'flowforge_sla_breaches_total',
+  'Run SLA / anomaly breaches detected on completion, by type.',
+  ['type']
+)
+
 const processUptime = gauge('process_uptime_seconds', 'Process uptime in seconds.')
 const processMemory = gauge(
   'process_resident_memory_bytes',
@@ -224,6 +234,11 @@ function recordRunDeferred() {
   runsDeferred.inc({})
 }
 
+// Called by the SLA monitor for each breach a finished run trips.
+function recordSlaBreach(type) {
+  slaBreaches.inc({ type })
+}
+
 module.exports = {
   counter,
   gauge,
@@ -234,6 +249,7 @@ module.exports = {
   recordExecution,
   recordWebhookDelivery,
   recordRunDeferred,
+  recordSlaBreach,
   queueJobs,
   webhookPending,
 }
