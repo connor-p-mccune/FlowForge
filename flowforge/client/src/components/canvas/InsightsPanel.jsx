@@ -17,6 +17,20 @@ function fmtPct(v) {
   return v == null ? '—' : `${(v * 100).toFixed(1)}%`
 }
 
+// Duration trend → a glyph + label. A significant degradation is the only one
+// worth alarming on; a significant improvement is quietly good; everything else
+// (flat, or a direction the test couldn't confirm) reads as steady.
+function trendDisplay(trend) {
+  if (!trend) return null
+  if (trend.direction === 'degrading' && trend.significant) {
+    return { glyph: '↗', label: 'Slower over time', cls: 'insights__trend--bad' }
+  }
+  if (trend.direction === 'improving' && trend.significant) {
+    return { glyph: '↘', label: 'Faster over time', cls: 'insights__trend--good' }
+  }
+  return { glyph: '→', label: 'Steady', cls: 'insights__trend--flat' }
+}
+
 // A tiny inline sparkline of recent durations, oldest → newest, with anomalous
 // runs drawn as red dots. Hand-rendered SVG (no chart dependency) — the panel
 // needs one shape, and the anomaly overlay is the whole point.
@@ -121,6 +135,16 @@ export default function InsightsPanel({ workflowId, open, onClose, nodes = [] })
             </div>
 
             <Sparkline runs={data.recentRuns} />
+
+            {(() => {
+              const t = trendDisplay(data.trend)
+              return t ? (
+                <div className={`insights__trend ${t.cls}`} title={`Mann-Kendall trend test${data.trend.tau != null ? ` · τ=${data.trend.tau}` : ''}`}>
+                  <span className="insights__trend-glyph" aria-hidden="true">{t.glyph}</span>
+                  {t.label}
+                </div>
+              ) : null
+            })()}
 
             <div className="insights__section">Duration · completed runs</div>
             <div className="insights__percentiles">

@@ -19,6 +19,7 @@ const BUNDLE = {
   sla: { maxDurationMs: 1500, minSuccessRate: 0.95, durationCompliant: false, successRateCompliant: true },
   throughput: { runs: 30, spanDays: 8, perDay: 3.75 },
   duration: { count: 27, min: 900, max: 20000, mean: 1200, stdev: 300, p50: 1000, p90: 1300, p95: 1800, p99: 3000 },
+  trend: { direction: 'degrading', significant: true, tau: 0.42, z: 3.1, samples: 27, method: 'mann-kendall' },
   anomalyCount: 1,
   slowestSteps: [
     { nodeId: 'http-1', nodeType: 'action-http', runs: 27, avgDurationMs: 800, maxDurationMs: 1900 },
@@ -67,6 +68,18 @@ describe('InsightsPanel', () => {
     // One anomalous run → one red dot on the sparkline.
     const dots = container.querySelectorAll('circle')
     expect(dots).toHaveLength(1)
+  })
+
+  it('shows a degrading trend indicator', async () => {
+    apiFetch.mockResolvedValue(BUNDLE)
+    setup()
+    expect(await screen.findByText(/slower over time/i)).toBeInTheDocument()
+  })
+
+  it('shows a steady indicator for a flat trend', async () => {
+    apiFetch.mockResolvedValue({ ...BUNDLE, trend: { direction: 'flat', significant: false, tau: 0.02, z: 0.3, samples: 27, method: 'mann-kendall' } })
+    setup()
+    expect(await screen.findByText(/steady/i)).toBeInTheDocument()
   })
 
   it('renders the SLA scorecard, flagging the breached target', async () => {

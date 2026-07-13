@@ -1861,6 +1861,19 @@ html, body, #root {
   height: 44px;
   margin: 4px 0 6px;
 }
+.insights__trend {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 3px 8px;
+  border-radius: 999px;
+}
+.insights__trend-glyph { font-size: 14px; line-height: 1; }
+.insights__trend--bad { color: #b91c1c; background: #fef2f2; }
+.insights__trend--good { color: #047857; background: #ecfdf5; }
+.insights__trend--flat { color: #6b7280; background: #f3f4f6; }
 .insights__section {
   margin: 14px 0 6px;
   font-size: 11px;
