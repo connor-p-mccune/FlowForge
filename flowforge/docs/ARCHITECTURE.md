@@ -327,6 +327,15 @@ existed rather than inventing new ones:
   subscribers) plus an owner notification — the same two surfaces a failed run
   uses. No third alerting channel was invented.
 
+- **The forecast reuses the critical path method, run forward.**
+  `runForecast.js` estimates a run's duration *before* it happens by weighting
+  the current graph with each node's *expected* step time (p50/p95 from history)
+  and taking the longest path — the same algorithm `criticalPath.js` runs over a
+  finished run's observed times. It's a worst-case over branches (a static graph
+  can't know which branch fires) with a coverage ratio as its confidence signal.
+  Critical-path analysis is retrospective; the forecast is the same math pointed
+  the other way.
+
 ## The expression language
 
 `services/expression/` is FXL — a small language the engine evaluates against a

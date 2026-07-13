@@ -45,6 +45,7 @@ export FLOWFORGE_TOKEN=ffp_…
 | `flowforge trigger <id> [--data <json>] [--key <k>] [--watch]` | Start a run; `--key` sets an [`Idempotency-Key`](../docs/API.md#trigger-a-workflow) so retries are safe |
 | `flowforge runs <id> [--limit N]` | A workflow's recent runs |
 | `flowforge insights <id> [--limit N]` | Duration percentiles, success rate, throughput, and anomalous runs ([docs](../docs/INSIGHTS.md)) |
+| `flowforge forecast <id>` | Predicted next-run duration and bottleneck ([docs](../docs/INSIGHTS.md#forecasting-the-next-run)) |
 | `flowforge run <exec-id> [--watch]` | One run with its steps |
 | `flowforge cancel <exec-id>` | Stop a queued or running run (cooperative) |
 | `flowforge resume <exec-id> [--watch]` | Continue a failed/cancelled run — succeeded steps are reused, only the failed part re-runs |

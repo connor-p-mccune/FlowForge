@@ -190,6 +190,32 @@ Dry-runs are excluded. `limit` is 1–500, default 50. See
 
 Requires the `read` scope.
 
+### Forecast the next run
+
+```bash
+curl -s "https://your-flowforge-host/api/v1/workflows/6f0c…/forecast" \
+  -H "Authorization: Bearer $FLOWFORGE_TOKEN"
+```
+
+Response `200` — a predictive estimate of the workflow's next-run duration,
+computed as the critical path over each node's historical step timing. `coverage`
+says how much of the graph has history. `available: false` (with `reason`) for an
+empty or cyclic graph.
+
+```json
+{
+  "workflowId": "6f0c…",
+  "available": true,
+  "criticalPath": ["trigger", "fetch", "transform", "notify"],
+  "estimatedMs": 1840,
+  "estimatedP95Ms": 3120,
+  "bottleneck": { "nodeId": "fetch", "nodeType": "action-http", "p50": 1200, "p95": 2400 },
+  "coverage": { "nodesWithHistory": 3, "workNodes": 3, "ratio": 1 }
+}
+```
+
+Requires the `read` scope.
+
 ### Poll an execution
 
 ```bash

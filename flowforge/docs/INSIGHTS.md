@@ -11,6 +11,7 @@ panel, `flowforge insights` in the terminal, and
 - [Why a robust anomaly score](#why-a-robust-anomaly-score)
 - [SLA targets and the monitor](#sla-targets-and-the-monitor)
 - [Where the hook lives](#where-the-hook-lives-and-why)
+- [Forecasting the next run](#forecasting-the-next-run)
 - [Surfaces](#surfaces)
 
 ---
@@ -172,6 +173,41 @@ failure. Monitoring the run must never be able to break the run.
 
 ---
 
+## Forecasting the next run
+
+Everything above is retrospective — it describes runs that happened. The
+**forecast** (`services/runForecast.js`, `GET /workflows/:id/forecast`) is
+prospective: *before* you run a workflow, how long will it take, and what will be
+the bottleneck?
+
+It reuses the **critical path method** — the same longest-path-over-a-DAG that
+[critical-path analysis](./ARCHITECTURE.md#critical-path-analysis) applies to a
+*finished* run — but runs it **forward** over the current graph, weighting each
+node by its *expected* step time (p50 and p95 from recent completed runs) rather
+than a single run's observed time. Where critical-path analysis says where a
+run's time *went*, the forecast says where the next run's time will *go*.
+
+Three properties keep it honest:
+
+- **Worst-case over branches.** A static graph doesn't know which branch a
+  condition will take, so the forecast assumes any branch might run and takes the
+  longest path through the *whole* graph — a defensible ceiling ("this could take
+  up to…"), not a fabricated average.
+- **Coverage is the confidence signal.** A node the workflow has never
+  successfully run contributes zero time and counts against a `coverage` ratio.
+  An estimate over a graph that's barely run is a guess, and the ratio says so
+  rather than pretending to precision.
+- **Reads the current graph.** Like replay, resume, and the timeline, the
+  forecast maps history onto the *current* definition — an edited or brand-new
+  node simply has no history yet (lowering coverage) rather than skewing the
+  estimate. An empty or cyclic graph reports `available: false`.
+
+The bottleneck is the node contributing the most time on the estimated critical
+path — the first thing to optimise, since shortening anything off the path can't
+make the run finish sooner.
+
+---
+
 ## Surfaces
 
 Everything reads the one `computeInsights`, so the panel, the CLI, and the public
@@ -182,8 +218,11 @@ API can't drift:
   percentile grid, an SLA scorecard, and the slowest steps by node label.
 - **CLI** — `flowforge insights <workflow-id> [--limit N]` prints the same
   rollup, so a chat-ops bot or a dashboard cron can surface it.
-- **Public API** — `GET /api/v1/workflows/:id/insights` (`read` scope),
-  documented in the [OpenAPI spec](./API.md#machine-readable-spec).
+- **Public API** — `GET /api/v1/workflows/:id/insights` and
+  `GET /api/v1/workflows/:id/forecast` (`read` scope), documented in the
+  [OpenAPI spec](./API.md#machine-readable-spec).
+- **Forecast** — the panel's *Forecast · next run* section, `flowforge forecast
+  <id>`, and the public forecast endpoint all read one `computeForecast`.
 
 ### Tuning
 

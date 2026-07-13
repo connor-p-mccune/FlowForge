@@ -119,6 +119,13 @@ order while streaming live progress back to every collaborator on the canvas.
   outage alerts once, not on every run. Available in the panel, via
   `flowforge insights`, and on the public API. See
   [docs/INSIGHTS.md](./docs/INSIGHTS.md).
+- **Predictive run forecast** — *before* running a workflow, estimate how long
+  it will take and which step is the bottleneck. It reuses the critical-path
+  method — the same longest-path-over-a-DAG that analyses a finished run — run
+  **forward** over the current graph, weighting each node by its historical step
+  time (p50/p95). It reports a typical and worst-case makespan and a **coverage**
+  ratio, so an estimate over a barely-run graph is marked as the guess it is.
+  In the insights panel, `flowforge forecast <id>`, and the public API.
 - **Real-time collaboration** — multiple people edit the same workflow at once
   with shared cursors, presence, and last-write-wins sync.
 - **Webhook triggers** — generate a public URL that fires a workflow on POST;
