@@ -10,6 +10,7 @@ const trigger = require('../src/commands/trigger')
 const runs = require('../src/commands/runs')
 const insights = require('../src/commands/insights')
 const forecast = require('../src/commands/forecast')
+const check = require('../src/commands/check')
 const runCmd = require('../src/commands/run')
 const cancel = require('../src/commands/cancel')
 const resume = require('../src/commands/resume')
@@ -277,6 +278,94 @@ test('forecast without a workflow id prints usage and exits 1', async () => {
   const stub = await startStub(() => ({ json: {} }))
   const ctx = makeCtx(stub.api)
   const code = await forecast({ positionals: [], flags: {} }, ctx)
+  await stub.close()
+  assert.equal(code, 1)
+  assert.equal(stub.requests.length, 0)
+})
+
+const healthyInsights = {
+  workflowId: 'wf-1',
+  successRate: 0.99,
+  duration: { p95: 1200 },
+  sla: { maxDurationMs: 5000, minSuccessRate: 0.95, durationCompliant: true, successRateCompliant: true },
+  trend: { direction: 'flat', significant: false },
+  anomalyCount: 0,
+}
+
+test('check passes a healthy workflow and exits 0', async () => {
+  const stub = await startStub((method, url) => {
+    assert.equal(url, '/api/v1/workflows/wf-1/insights')
+    return { json: healthyInsights }
+  })
+  const ctx = makeCtx(stub.api)
+  const code = await check({ positionals: ['wf-1'], flags: {} }, ctx)
+  await stub.close()
+  assert.equal(code, 0)
+  assert.match(ctx.output(), /healthy/)
+})
+
+test('check fails when the SLA success floor is breached', async () => {
+  const stub = await startStub(() => ({
+    json: { ...healthyInsights, successRate: 0.7 },
+  }))
+  const ctx = makeCtx(stub.api)
+  const code = await check({ positionals: ['wf-1'], flags: {} }, ctx)
+  await stub.close()
+  assert.equal(code, 1)
+  assert.match(ctx.output(), /Success rate/)
+  assert.match(ctx.output(), /failed/)
+})
+
+test('check fails on a significant degrading trend', async () => {
+  const stub = await startStub(() => ({
+    json: { ...healthyInsights, trend: { direction: 'degrading', significant: true } },
+  }))
+  const ctx = makeCtx(stub.api)
+  const code = await check({ positionals: ['wf-1'], flags: {} }, ctx)
+  await stub.close()
+  assert.equal(code, 1)
+  assert.match(ctx.output(), /Duration trend/)
+})
+
+test('check honours an explicit --max-p95 threshold', async () => {
+  const stub = await startStub(() => ({ json: { ...healthyInsights, sla: null } }))
+  const ctx = makeCtx(stub.api)
+  // p95 is 1200ms; a 1s budget fails.
+  const code = await check({ positionals: ['wf-1'], flags: { 'max-p95': '1' } }, ctx)
+  await stub.close()
+  assert.equal(code, 1)
+  assert.match(ctx.output(), /p95 duration/)
+})
+
+test('check fails on anomalies only under --strict', async () => {
+  const withAnomalies = { ...healthyInsights, anomalyCount: 2 }
+  const lenient = await startStub(() => ({ json: withAnomalies }))
+  let ctx = makeCtx(lenient.api)
+  let code = await check({ positionals: ['wf-1'], flags: {} }, ctx)
+  await lenient.close()
+  assert.equal(code, 0) // anomalies alone don't fail by default
+
+  const strict = await startStub(() => ({ json: withAnomalies }))
+  ctx = makeCtx(strict.api)
+  code = await check({ positionals: ['wf-1'], flags: { strict: true } }, ctx)
+  await strict.close()
+  assert.equal(code, 1)
+  assert.match(ctx.output(), /Anomalies/)
+})
+
+test('check reports nothing to gate on when there are no thresholds', async () => {
+  const stub = await startStub(() => ({ json: { workflowId: 'wf-1', successRate: null, duration: {}, sla: null } }))
+  const ctx = makeCtx(stub.api)
+  const code = await check({ positionals: ['wf-1'], flags: {} }, ctx)
+  await stub.close()
+  assert.equal(code, 0)
+  assert.match(ctx.output(), /No health thresholds/)
+})
+
+test('check without a workflow id prints usage and exits 1', async () => {
+  const stub = await startStub(() => ({ json: {} }))
+  const ctx = makeCtx(stub.api)
+  const code = await check({ positionals: [], flags: {} }, ctx)
   await stub.close()
   assert.equal(code, 1)
   assert.equal(stub.requests.length, 0)

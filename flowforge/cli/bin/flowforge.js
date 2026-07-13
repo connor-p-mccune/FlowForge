@@ -16,6 +16,7 @@ const COMMANDS = {
   runs: require('../src/commands/runs'),
   insights: require('../src/commands/insights'),
   forecast: require('../src/commands/forecast'),
+  check: require('../src/commands/check'),
   run: require('../src/commands/run'),
   cancel: require('../src/commands/cancel'),
   resume: require('../src/commands/resume'),
@@ -33,6 +34,7 @@ Usage:
   flowforge runs <workflow-id> [--limit N]         Recent runs for a workflow
   flowforge insights <workflow-id> [--limit N]     Duration percentiles, success rate, anomalies
   flowforge forecast <workflow-id>                 Predicted next-run duration and bottleneck
+  flowforge check <workflow-id> [--strict]         Gate CI on workflow health (exits non-zero on a breach)
   flowforge run <execution-id> [--watch]           One run with its steps
   flowforge cancel <execution-id>                  Stop a queued or running run
   flowforge resume <execution-id> [--watch]        Re-run only the failed part of a run
@@ -45,7 +47,8 @@ Configuration:
   as CI secrets and skip login entirely. NO_COLOR disables colors.
 
 Exit codes:
-  0 success · 1 error, or a watched run that failed/was cancelled`
+  0 success · 1 error, a watched run that failed/was cancelled, or a
+  'check' whose workflow breached its health thresholds`
 
 async function main() {
   const argv = process.argv.slice(2)

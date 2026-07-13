@@ -3,7 +3,7 @@
 // `--flag=value`, and boolean flags (a --flag followed by another flag, or by
 // nothing, is `true`).
 
-const BOOLEAN_FLAGS = new Set(['watch', 'help', 'version', 'json'])
+const BOOLEAN_FLAGS = new Set(['watch', 'help', 'version', 'json', 'strict'])
 
 function parseArgs(argv) {
   const positionals = []
