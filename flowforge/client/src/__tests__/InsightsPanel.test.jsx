@@ -32,6 +32,24 @@ const BUNDLE = {
   ],
 }
 
+const FORECAST = {
+  workflowId: 'wf1',
+  available: true,
+  criticalPath: ['t', 'http-1', 'log-1'],
+  estimatedMs: 1350,
+  estimatedP95Ms: 2100,
+  bottleneck: { nodeId: 'http-1', nodeType: 'action-http', p50: 800, p95: 1900 },
+  coverage: { nodesWithHistory: 2, workNodes: 2, ratio: 1 },
+}
+
+// Resolve insights and forecast to their own payloads; the panel fetches both.
+function mockByPath({ insights = BUNDLE, forecast = FORECAST } = {}) {
+  apiFetch.mockImplementation((path) => {
+    if (path.endsWith('/forecast')) return Promise.resolve(forecast)
+    return Promise.resolve(insights)
+  })
+}
+
 beforeEach(() => {
   vi.clearAllMocks()
 })
@@ -98,6 +116,26 @@ describe('InsightsPanel', () => {
     await screen.findByText('93.1%')
     expect(screen.getByText('Fetch orders')).toBeInTheDocument()
     expect(screen.getByText('Log result')).toBeInTheDocument()
+  })
+
+  it('renders the forecast section with the estimate and bottleneck', async () => {
+    mockByPath()
+    const { container } = setup()
+    await screen.findByText('93.1%')
+    expect(screen.getByText(/Forecast · next run/i)).toBeInTheDocument()
+    expect(screen.getByText('1.4s')).toBeInTheDocument() // estimatedMs 1350
+    expect(screen.getByText(/at p95/i)).toBeInTheDocument()
+    // Bottleneck resolved to its node label, scoped to its own row.
+    const bottleneck = container.querySelector('.insights__forecast-bottleneck')
+    expect(bottleneck.textContent).toMatch(/Fetch orders/)
+    expect(bottleneck.textContent).toMatch(/800ms/)
+  })
+
+  it('hides the forecast when it is unavailable', async () => {
+    mockByPath({ forecast: { available: false, reason: 'cycle' } })
+    setup()
+    await screen.findByText('93.1%')
+    expect(screen.queryByText(/Forecast · next run/i)).not.toBeInTheDocument()
   })
 
   it('shows an empty state for a workflow with no runs', async () => {

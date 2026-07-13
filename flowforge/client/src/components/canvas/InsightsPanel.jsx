@@ -78,6 +78,7 @@ function SlaRow({ ok, children }) {
 
 export default function InsightsPanel({ workflowId, open, onClose, nodes = [] }) {
   const [data, setData] = useState(null)
+  const [forecast, setForecast] = useState(null)
   const [error, setError] = useState(null)
 
   useEffect(() => {
@@ -85,12 +86,22 @@ export default function InsightsPanel({ workflowId, open, onClose, nodes = [] })
     let cancelled = false
     setError(null)
     setData(null)
+    setForecast(null)
     apiFetch(`/api/workflows/${workflowId}/insights`)
       .then((d) => {
         if (!cancelled) setData(d)
       })
       .catch((e) => {
         if (!cancelled) setError(e.message)
+      })
+    // The forecast is a separate, non-blocking fetch — an unavailable forecast
+    // shouldn't hide the insights, and vice versa.
+    apiFetch(`/api/workflows/${workflowId}/forecast`)
+      .then((f) => {
+        if (!cancelled) setForecast(f)
+      })
+      .catch(() => {
+        /* forecast is best-effort in the panel */
       })
     return () => {
       cancelled = true
@@ -155,6 +166,28 @@ export default function InsightsPanel({ workflowId, open, onClose, nodes = [] })
                 </div>
               ))}
             </div>
+
+            {forecast && forecast.available && (
+              <>
+                <div className="insights__section">Forecast · next run</div>
+                <div className="insights__forecast">
+                  <span className="insights__forecast-est">{fmtMs(forecast.estimatedMs)}</span>
+                  <span className="insights__forecast-p95">{fmtMs(forecast.estimatedP95Ms)} at p95</span>
+                </div>
+                {forecast.bottleneck && (
+                  <div className="insights__forecast-bottleneck">
+                    Bottleneck: <strong>{labelFor(forecast.bottleneck.nodeId)}</strong>{' '}
+                    {fmtMs(forecast.bottleneck.p50)}
+                  </div>
+                )}
+                {forecast.coverage && forecast.coverage.ratio < 1 && (
+                  <p className="webhook-panel__hint">
+                    {forecast.coverage.nodesWithHistory}/{forecast.coverage.workNodes} steps have
+                    timing history — the estimate sharpens as the workflow runs.
+                  </p>
+                )}
+              </>
+            )}
 
             {data.sla && (
               <>
