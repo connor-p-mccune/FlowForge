@@ -46,6 +46,13 @@ export const NODE_DEFS = {
     subtype: 'condition',
     config: { left: '', operator: 'equals', right: '' },
   },
+  // Switch: multi-way routing. Each case has a label (its branch handle) and an
+  // FXL boolean; the run takes the first matching case's branch, or 'default'.
+  'switch': {
+    label: 'Switch',
+    subtype: 'switch',
+    config: { cases: [{ label: 'case-1', expression: '' }] },
+  },
   // Filter: keep the items of a list that satisfy an FXL predicate. source is a
   // template resolving to an array; predicate is a boolean expression evaluated
   // per item (item fields in scope directly, plus item / index / items).
@@ -133,6 +140,7 @@ export const TOOLBAR_BUTTONS = [
   { type: 'map', label: 'Map', className: 'toolbar-btn--action' },
   { type: 'aggregate', label: 'Aggregate', className: 'toolbar-btn--action' },
   { type: 'condition', label: 'Condition', className: 'toolbar-btn--condition' },
+  { type: 'switch', label: 'Switch', className: 'toolbar-btn--condition' },
   { type: 'approval', label: 'Approval', className: 'toolbar-btn--approval' },
   { type: 'ai-prompt', label: 'AI', className: 'toolbar-btn--ai' },
   { type: 'ai-classify', label: 'Classify', className: 'toolbar-btn--ai' },

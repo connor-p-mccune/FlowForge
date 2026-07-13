@@ -179,4 +179,51 @@ describe('NodeConfigPanel interactions', () => {
     fireEvent.click(screen.getByText('Every Monday'))
     expect(onChange).toHaveBeenCalledWith('n1', { config: { cron: '0 9 * * 1' } })
   })
+
+  describe('switch case editor', () => {
+    const switchNode = (cases) => mk('switch', { config: { cases } })
+
+    it('renders a label and expression field per case', () => {
+      setup(switchNode([{ label: 'high', expression: 'amount > 1000' }]))
+      expect(screen.getByDisplayValue('high')).toBeInTheDocument()
+      expect(screen.getByDisplayValue('amount > 1000')).toBeInTheDocument()
+    })
+
+    it('editing a case label merges the updated cases array', () => {
+      const { onChange } = setup(switchNode([{ label: 'high', expression: 'x > 1' }]))
+      fireEvent.change(screen.getByLabelText('Case 1 label'), { target: { value: 'huge' } })
+      expect(onChange).toHaveBeenCalledWith('n1', {
+        config: { cases: [{ label: 'huge', expression: 'x > 1' }] },
+      })
+    })
+
+    it('editing a case expression merges the updated cases array', () => {
+      const { onChange } = setup(switchNode([{ label: 'high', expression: 'x > 1' }]))
+      fireEvent.change(screen.getByLabelText('Case 1 expression'), { target: { value: 'x > 5' } })
+      expect(onChange).toHaveBeenCalledWith('n1', {
+        config: { cases: [{ label: 'high', expression: 'x > 5' }] },
+      })
+    })
+
+    it('adding a case appends a new blank case', () => {
+      const { onChange } = setup(switchNode([{ label: 'high', expression: 'x > 1' }]))
+      fireEvent.click(screen.getByText('+ Add case'))
+      expect(onChange).toHaveBeenCalledWith('n1', {
+        config: { cases: [{ label: 'high', expression: 'x > 1' }, { label: 'case-2', expression: '' }] },
+      })
+    })
+
+    it('removing a case drops it from the array', () => {
+      const { onChange } = setup(
+        switchNode([
+          { label: 'a', expression: 'x > 1' },
+          { label: 'b', expression: 'x > 2' },
+        ])
+      )
+      fireEvent.click(screen.getByLabelText('Remove case 1'))
+      expect(onChange).toHaveBeenCalledWith('n1', {
+        config: { cases: [{ label: 'b', expression: 'x > 2' }] },
+      })
+    })
+  })
 })

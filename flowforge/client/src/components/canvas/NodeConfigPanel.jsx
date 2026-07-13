@@ -485,6 +485,57 @@ export default function NodeConfigPanel({
           </>
         )
       }
+      case 'switch': {
+        const cases = Array.isArray(config.cases) ? config.cases : []
+        const updateCase = (i, field, value) =>
+          setConfig('cases', cases.map((c, j) => (j === i ? { ...c, [field]: value } : c)))
+        const addCase = () =>
+          setConfig('cases', [...cases, { label: `case-${cases.length + 1}`, expression: '' }])
+        const removeCase = (i) => setConfig('cases', cases.filter((_, j) => j !== i))
+        return (
+          <>
+            <p className="config-panel__hint">
+              The run takes the <strong>first</strong> case whose expression is true,
+              or the <code>default</code> branch if none match. Each case’s label is
+              its branch — wire it from the matching outlet on the node.
+            </p>
+            {cases.map((c, i) => (
+              <div key={i} className="switch-case">
+                <div className="switch-case__head">
+                  <input
+                    className="switch-case__label"
+                    value={c.label || ''}
+                    placeholder={`case-${i + 1}`}
+                    aria-label={`Case ${i + 1} label`}
+                    onChange={(e) => updateCase(i, 'label', e.target.value)}
+                  />
+                  <button
+                    type="button"
+                    className="switch-case__remove"
+                    aria-label={`Remove case ${i + 1}`}
+                    onClick={() => removeCase(i)}
+                  >
+                    ✕
+                  </button>
+                </div>
+                <textarea
+                  className="config-panel__code"
+                  rows={2}
+                  value={c.expression || ''}
+                  placeholder={'amount > 1000'}
+                  aria-label={`Case ${i + 1} expression`}
+                  onChange={(e) => updateCase(i, 'expression', e.target.value)}
+                />
+                <ExpressionTester expression={c.expression || ''} sampleScope={SAMPLE_SCOPE.condition} />
+              </div>
+            ))}
+            <button type="button" className="switch-case__add" onClick={addCase}>
+              + Add case
+            </button>
+            <ExpressionHint kind="condition" />
+          </>
+        )
+      }
       case 'filter':
         return (
           <>

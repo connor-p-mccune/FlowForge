@@ -5,6 +5,7 @@ import { ReactFlowProvider } from 'reactflow'
 import TriggerNode from '../components/canvas/nodes/TriggerNode'
 import ActionNode from '../components/canvas/nodes/ActionNode'
 import ConditionNode from '../components/canvas/nodes/ConditionNode'
+import SwitchNode from '../components/canvas/nodes/SwitchNode'
 import ApprovalNode from '../components/canvas/nodes/ApprovalNode'
 import AINode from '../components/canvas/nodes/AINode'
 import OutputNode from '../components/canvas/nodes/OutputNode'
@@ -128,6 +129,43 @@ describe('ConditionNode', () => {
     expect(sources(container)).toHaveLength(2)
     expect(container.querySelector('[data-handleid="true"]')).toBeInTheDocument()
     expect(container.querySelector('[data-handleid="false"]')).toBeInTheDocument()
+  })
+})
+
+describe('SwitchNode', () => {
+  const data = { label: 'Route', config: { cases: [{ label: 'high' }, { label: 'mid' }] } }
+
+  it('renders a labelled outlet per case plus a default', () => {
+    renderNode(<SwitchNode data={data} selected={false} />)
+    expect(screen.getByText('Route')).toBeInTheDocument()
+    expect(screen.getByText('high')).toBeInTheDocument()
+    expect(screen.getByText('mid')).toBeInTheDocument()
+    expect(screen.getByText('default')).toBeInTheDocument()
+  })
+
+  it('exposes one source handle per case plus the default handle, ids matching labels', () => {
+    const { container } = renderNode(<SwitchNode data={data} selected={false} />)
+    expect(targets(container)).toHaveLength(1)
+    expect(sources(container)).toHaveLength(3) // high, mid, default
+    expect(container.querySelector('[data-handleid="high"]')).toBeInTheDocument()
+    expect(container.querySelector('[data-handleid="mid"]')).toBeInTheDocument()
+    expect(container.querySelector('[data-handleid="default"]')).toBeInTheDocument()
+  })
+
+  it('drops blank, duplicate, and reserved-"default" case labels from the outlets', () => {
+    const messy = {
+      config: { cases: [{ label: 'a' }, { label: '' }, { label: 'a' }, { label: 'default' }] },
+    }
+    const { container } = renderNode(<SwitchNode data={messy} selected={false} />)
+    // Only the single valid 'a' outlet plus the trailing default.
+    expect(sources(container)).toHaveLength(2)
+    expect(container.querySelector('[data-handleid="a"]')).toBeInTheDocument()
+  })
+
+  it('shows just the default outlet when there are no cases', () => {
+    const { container } = renderNode(<SwitchNode data={{ config: { cases: [] } }} selected={false} />)
+    expect(sources(container)).toHaveLength(1)
+    expect(container.querySelector('[data-handleid="default"]')).toBeInTheDocument()
   })
 })
 

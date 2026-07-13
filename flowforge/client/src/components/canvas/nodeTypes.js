@@ -4,6 +4,7 @@
 import TriggerNode from './nodes/TriggerNode'
 import ActionNode from './nodes/ActionNode'
 import ConditionNode from './nodes/ConditionNode'
+import SwitchNode from './nodes/SwitchNode'
 import AINode from './nodes/AINode'
 import OutputNode from './nodes/OutputNode'
 import SubWorkflowNode from './nodes/SubWorkflowNode'
@@ -23,6 +24,7 @@ export const nodeTypes = {
   'map': ActionNode,
   'aggregate': ActionNode,
   'condition': ConditionNode,
+  'switch': SwitchNode,
   'approval': ApprovalNode,
   'ai-prompt': AINode,
   'ai-classify': AINode,

@@ -499,6 +499,36 @@ html, body, #root {
 .node__condition-label--true { color: #22c55e; }
 .node__condition-label--false { color: #ef4444; }
 
+/* Switch node: one outlet label per case, plus the default. */
+.node--switch {
+  border-color: #f59e0b;
+  background: #fffbeb;
+}
+.node--switch.node--selected {
+  border-color: #d97706;
+}
+.node__switch-cases {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 6px;
+  justify-content: center;
+}
+.node__switch-case {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #b45309;
+  background: #fef3c7;
+  border-radius: 4px;
+  padding: 1px 5px;
+}
+.node__switch-case--default {
+  color: #6b7280;
+  background: #f3f4f6;
+}
+
 /* Test mode (dry run): "Would send" badge + read-only payload popover */
 .node__dry-run-badge {
   margin-top: 8px;
@@ -3667,6 +3697,56 @@ html, body, #root {
   font-size: 12px;
   color: #b45309;
   margin: 6px 0 0;
+}
+
+/* Switch node config: one editable block per case (label + FXL expression). */
+.switch-case {
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  padding: 8px;
+  margin-bottom: 8px;
+  background: #fafafa;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.switch-case__head {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+.switch-case__label {
+  flex: 1;
+  font-weight: 600;
+}
+.switch-case__remove {
+  border: 1px solid #e5e7eb;
+  background: #fff;
+  border-radius: 6px;
+  width: 26px;
+  height: 26px;
+  cursor: pointer;
+  color: #9ca3af;
+}
+.switch-case__remove:hover {
+  color: #ef4444;
+  border-color: #fecaca;
+  background: #fef2f2;
+}
+.switch-case__add {
+  align-self: flex-start;
+  border: 1px dashed #d1d5db;
+  background: #fff;
+  border-radius: 6px;
+  padding: 5px 10px;
+  font-size: 13px;
+  color: #374151;
+  cursor: pointer;
+  margin-bottom: 8px;
+}
+.switch-case__add:hover {
+  border-color: #f59e0b;
+  color: #b45309;
 }
 
 /* Quick-pick buttons that fill in a common cron expression. */
