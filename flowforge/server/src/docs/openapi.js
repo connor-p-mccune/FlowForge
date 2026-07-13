@@ -233,6 +233,43 @@ const spec = {
         },
       },
     },
+    '/workflows/{workflowId}/schedule': {
+      get: {
+        tags: ['workflows'],
+        summary: 'Preview a workflow’s upcoming scheduled runs',
+        description:
+          'The next fire times of the workflow’s schedule trigger, computed from ' +
+          'its cron expression (UTC, ISO-8601). `scheduled: false` when the ' +
+          'workflow has no schedule trigger; `active` reflects whether the ' +
+          'schedule is live (the workflow is deployed). `?count` caps the number ' +
+          'of upcoming runs returned (default 5, max 25). Requires the `read` scope.',
+        operationId: 'getWorkflowSchedule',
+        parameters: [
+          { $ref: '#/components/parameters/WorkflowId' },
+          {
+            name: 'count',
+            in: 'query',
+            required: false,
+            schema: { type: 'integer', minimum: 1, maximum: 25, default: 5 },
+            description: 'How many upcoming fire times to return.',
+          },
+        ],
+        responses: {
+          200: {
+            description: 'The workflow’s upcoming scheduled runs.',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/Schedule' },
+              },
+            },
+          },
+          401: { $ref: '#/components/responses/Unauthorized' },
+          403: { $ref: '#/components/responses/Forbidden' },
+          404: { $ref: '#/components/responses/NotFound' },
+          429: { $ref: '#/components/responses/RateLimited' },
+        },
+      },
+    },
     '/executions/{executionId}': {
       get: {
         tags: ['executions'],
@@ -727,6 +764,30 @@ const spec = {
               workNodes: { type: 'integer' },
               ratio: { type: 'number' },
             },
+          },
+        },
+      },
+      Schedule: {
+        type: 'object',
+        properties: {
+          workflowId: { type: 'string' },
+          scheduled: {
+            type: 'boolean',
+            description: 'False when the workflow has no schedule trigger.',
+          },
+          active: {
+            type: 'boolean',
+            description: 'True when the schedule is live (the workflow is deployed).',
+          },
+          cron: { type: 'string', description: 'The schedule trigger’s cron expression.' },
+          reachable: {
+            type: 'boolean',
+            description: 'False for a valid but impossible schedule (e.g. Feb 30) that never fires.',
+          },
+          nextRuns: {
+            type: 'array',
+            items: { type: 'string', format: 'date-time' },
+            description: 'Upcoming fire times, UTC ISO-8601, oldest first.',
           },
         },
       },

@@ -20,6 +20,7 @@ const { requestCancel } = require('../services/executionControl')
 const { respondToApproval } = require('../services/approvals')
 const { admitRun } = require('../services/concurrencyGate')
 const { computeInsights, forecastFor, parseLimit } = require('./insights')
+const { scheduleExpressionOf, previewFor, parseCount } = require('./schedule')
 
 const router = express.Router()
 
@@ -214,6 +215,31 @@ router.get('/workflows/:id/forecast', tokenAuth('read'), (req, res) => {
     const workflow = getWorkflowForMember(req.params.id, req.user.id)
     if (!workflow) return res.status(404).json({ error: 'Workflow not found' })
     res.json({ workflowId: workflow.id, ...forecastFor(workflow.id) })
+  } catch (err) {
+    console.error(err)
+    res.status(500).json({ error: 'Internal server error' })
+  }
+})
+
+// GET /api/v1/workflows/:id/schedule — the next fire times of the workflow's
+// schedule trigger (UTC ISO-8601), so an external dashboard or bot can show
+// "next run in 4h" without reimplementing cron. Read-only; `read` scope.
+// ?count caps the number of upcoming runs (default 5, max 25).
+router.get('/workflows/:id/schedule', tokenAuth('read'), (req, res) => {
+  try {
+    const workflow = getWorkflowForMember(req.params.id, req.user.id)
+    if (!workflow) return res.status(404).json({ error: 'Workflow not found' })
+
+    const expression = scheduleExpressionOf(workflow)
+    if (!expression) {
+      return res.json({ workflowId: workflow.id, scheduled: false, nextRuns: [] })
+    }
+    res.json({
+      workflowId: workflow.id,
+      scheduled: true,
+      active: workflow.status === 'deployed',
+      ...previewFor(expression, parseCount(req.query.count)),
+    })
   } catch (err) {
     console.error(err)
     res.status(500).json({ error: 'Internal server error' })
