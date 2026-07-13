@@ -151,6 +151,45 @@ execution for those). `limit` is 1–100, default 20:
 
 Requires the `read` scope.
 
+### Workflow run insights
+
+```bash
+curl -s "https://your-flowforge-host/api/v1/workflows/6f0c…/insights?limit=100" \
+  -H "Authorization: Bearer $FLOWFORGE_TOKEN"
+```
+
+Response `200` — a statistical rollup of the workflow's recent runs: duration
+percentiles over completed runs, success rate over settled runs, throughput, the
+slowest steps, per-run anomaly flags, and SLA compliance (when targets are set).
+Dry-runs are excluded. `limit` is 1–500, default 50. See
+[docs/INSIGHTS.md](./INSIGHTS.md) for what each field means.
+
+```json
+{
+  "workflowId": "6f0c…",
+  "window": { "limit": 100, "runs": 128, "since": "2026-07-01T…", "until": "2026-07-09T…" },
+  "counts": { "total": 128, "completed": 121, "failed": 5, "cancelled": 2, "running": 0 },
+  "successRate": 0.9603,
+  "sla": {
+    "maxDurationMs": 5000, "minSuccessRate": 0.95,
+    "durationCompliant": true, "successRateCompliant": true
+  },
+  "throughput": { "runs": 128, "spanDays": 8.02, "perDay": 15.96 },
+  "duration": { "count": 121, "min": 812, "max": 21044, "mean": 1180, "stdev": 640,
+    "p50": 1010, "p90": 1450, "p95": 1820, "p99": 3110 },
+  "anomalyCount": 1,
+  "slowestSteps": [
+    { "nodeId": "http-1", "nodeType": "action-http", "runs": 121, "avgDurationMs": 780, "maxDurationMs": 20110 }
+  ],
+  "recentRuns": [
+    { "id": "e91a…", "status": "completed", "durationMs": 21044,
+      "anomalyScore": 39.7, "severity": "severe", "isAnomaly": true }
+  ]
+}
+```
+
+Requires the `read` scope.
+
 ### Poll an execution
 
 ```bash

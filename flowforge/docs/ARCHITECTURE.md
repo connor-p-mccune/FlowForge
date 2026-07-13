@@ -9,6 +9,7 @@ relative to `flowforge/`.
 - [Real-time collaboration](#real-time-collaboration)
 - [Jobs and reliability](#jobs-and-reliability)
 - [Outbound webhooks](#outbound-webhooks)
+- [Run insights & SLA monitoring](#run-insights--sla-monitoring)
 - [The expression language](#the-expression-language)
 - [Static analysis (the linter)](#static-analysis-the-linter)
 - [Security architecture](#security-architecture)
@@ -289,6 +290,42 @@ existed rather than inventing new ones:
   friendlier failure than a delivery that can never succeed.
 
 ---
+
+## Run insights & SLA monitoring
+
+`services/runStats.js` turns recorded run history into statistics, and
+`services/slaMonitor.js` acts on them. The full treatment is in
+[INSIGHTS.md](./INSIGHTS.md); the load-bearing decisions:
+
+- **Robust, not classical, outlier detection.** "Was this run abnormally slow?"
+  is asked over a heavy-tailed distribution, where a classic z-score's mean and
+  standard deviation are dragged toward the very outliers you're hunting — the
+  outlier inflates its own yardstick. The monitor uses the **modified z-score**
+  (Iglewicz & Hoaglin): median and median-absolute-deviation, whose ~50%
+  breakdown point means half the sample can be pathological before the baseline
+  moves. It carries the documented mean-absolute-deviation fallback for the
+  MAD = 0 case and is one-sided (only *slower* is an alert). `runStats.js` is a
+  pure function of number arrays, so the panel, the CLI, the public API, and the
+  monitor all share exactly one implementation and can't drift.
+
+- **The hook lives in the worker, not the engine.** SLA evaluation runs once,
+  after a run settles, from the execution worker — which only ever processes
+  top-level runs (sub-workflow child runs execute inside the parent's engine
+  loop). So "top-level, settled, real run", precisely the monitor's contract,
+  falls out of *where* the call sits rather than needing a flag, and the engine's
+  hot scheduling loop stays untouched. Every path is best-effort: monitoring a
+  run can never fail the run.
+
+- **Edge-triggered success-rate alerts.** The rolling success-rate check alerts
+  on the run that *crosses* the floor, not on every run while degraded — it
+  compares the window ending at this run against the window ending just before
+  it and fires only on the transition. The previous window *is* the prior state,
+  so there's no "already alerted" flag to keep and reconcile.
+
+- **Reuse the existing fan-out.** A breach is an `execution.sla_breached`
+  activity event (which the outbound-webhook dispatcher already relays to
+  subscribers) plus an owner notification — the same two surfaces a failed run
+  uses. No third alerting channel was invented.
 
 ## The expression language
 

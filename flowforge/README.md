@@ -105,6 +105,18 @@ order while streaming live progress back to every collaborator on the canvas.
   dependency chain that actually set the run's duration, found with the classic
   critical path method — is highlighted, so what's worth optimising is one look
   away.
+- **Run insights & SLA monitoring** — every workflow gets a **📊 Insights**
+  panel: duration percentiles (p50–p99), success rate, throughput, the slowest
+  steps, and a sparkline of recent runs with **anomalous runs flagged** by a
+  robust **modified z-score** (median + MAD, so a heavy tail of slow runs can't
+  mask itself). Declare optional **SLA targets** — a max run duration and a min
+  success rate — and a finished run that breaches one (too slow, statistically
+  abnormal, or a success rate that dips below the floor) notifies the owner and
+  streams an `execution.sla_breached` event to the activity feed and any
+  outbound webhook. The success-rate check is edge-triggered, so a sustained
+  outage alerts once, not on every run. Available in the panel, via
+  `flowforge insights`, and on the public API. See
+  [docs/INSIGHTS.md](./docs/INSIGHTS.md).
 - **Real-time collaboration** — multiple people edit the same workflow at once
   with shared cursors, presence, and last-write-wins sync.
 - **Webhook triggers** — generate a public URL that fires a workflow on POST;
@@ -248,6 +260,9 @@ Copy `.env.example` to `.env` before running. **Never commit `.env`.**
 | `WEBHOOK_MAX_ATTEMPTS` | no  | Delivery attempts per outbound webhook event (default 5) |
 | `WEBHOOK_DISPATCH_INTERVAL_MS` | no | Outbound webhook delivery-queue poll interval (default 5000) |
 | `EXECUTION_RETENTION_DAYS` | no | Prune terminal runs older than this many days (default: keep forever) |
+| `SLA_SUCCESS_RATE_WINDOW` | no | Runs in the rolling success-rate window for SLA monitoring (default 20) |
+| `SLA_SUCCESS_RATE_MIN_RUNS` | no | Minimum settled runs before the success-rate floor check fires (default 5) |
+| `SLA_ANOMALY_MIN_RUNS` | no | Minimum completed-run baseline before an anomaly alert fires (default 20) |
 | `WEBHOOK_DELIVERY_RETENTION_DAYS` | no | Prune settled delivery-log rows after this many days (default 30; 0 = keep) |
 
 \* The app runs without it, but any AI node or the Suggest button will error
