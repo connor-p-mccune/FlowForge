@@ -1813,6 +1813,104 @@ html, body, #root {
   font-size: 13px;
   background: #fff;
 }
+.run-settings__section {
+  margin: 16px 0 6px;
+  padding-top: 12px;
+  border-top: 1px solid #f0f0f0;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: #6b7280;
+}
+
+/* Run insights panel (InsightsPanel) — shares the webhook panel shell. */
+.insights__stats {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+  margin: 8px 0 12px;
+}
+.insights__stat {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 8px 4px;
+  background: #f8fafc;
+  border: 1px solid #eef2f7;
+  border-radius: 8px;
+}
+.insights__stat--alert {
+  background: #fef2f2;
+  border-color: #fecaca;
+}
+.insights__stat-value {
+  font-size: 17px;
+  font-weight: 700;
+  color: #111827;
+}
+.insights__stat--alert .insights__stat-value { color: #dc2626; }
+.insights__stat-label {
+  font-size: 11px;
+  color: #6b7280;
+}
+.insights__spark {
+  display: block;
+  width: 100%;
+  height: 44px;
+  margin: 4px 0 6px;
+}
+.insights__section {
+  margin: 14px 0 6px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: #6b7280;
+}
+.insights__percentiles {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 6px;
+}
+.insights__pct {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 6px 2px;
+  background: #f8fafc;
+  border-radius: 6px;
+}
+.insights__pct-label { font-size: 10px; color: #9ca3af; font-weight: 600; }
+.insights__pct-value { font-size: 13px; font-weight: 600; color: #1f2937; }
+.insights__sla { list-style: none; margin: 0; padding: 0; }
+.insights__sla-item {
+  font-size: 12px;
+  padding: 3px 0;
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+.insights__sla-item--ok { color: #059669; }
+.insights__sla-item--breach { color: #dc2626; font-weight: 600; }
+.insights__steps { list-style: none; margin: 0; padding: 0; }
+.insights__step {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 12px;
+  padding: 4px 0;
+  border-bottom: 1px solid #f5f5f5;
+}
+.insights__step-name {
+  color: #374151;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.insights__step-time { color: #6b7280; font-variant-numeric: tabular-nums; }
 
 /* Status badge section (StatusBadgeSection) inside the run-settings panel. */
 .badge-section {

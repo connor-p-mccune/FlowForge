@@ -57,7 +57,7 @@ describe('RunSettingsPanel', () => {
 
     fireEvent.change(limit, { target: { value: '5' } })
     fireEvent.change(screen.getByLabelText(/when at the limit/i), { target: { value: 'queue' } })
-    fireEvent.click(screen.getByRole('button', { name: /save limits/i }))
+    fireEvent.click(screen.getByRole('button', { name: /save settings/i }))
 
     await waitFor(() =>
       expect(apiFetch).toHaveBeenCalledWith('/api/workflows/wf1', {
@@ -77,7 +77,7 @@ describe('RunSettingsPanel', () => {
     setup()
     const limit = await screen.findByLabelText(/max concurrent runs/i)
     fireEvent.change(limit, { target: { value: '' } })
-    fireEvent.click(screen.getByRole('button', { name: /save limits/i }))
+    fireEvent.click(screen.getByRole('button', { name: /save settings/i }))
 
     await waitFor(() =>
       expect(apiFetch).toHaveBeenCalledWith('/api/workflows/wf1', {
@@ -91,9 +91,61 @@ describe('RunSettingsPanel', () => {
     setup()
     const limit = await screen.findByLabelText(/max concurrent runs/i)
     fireEvent.change(limit, { target: { value: '250' } })
-    fireEvent.click(screen.getByRole('button', { name: /save limits/i }))
+    fireEvent.click(screen.getByRole('button', { name: /save settings/i }))
 
     expect(await screen.findByText(/whole number from 1 to 100/i)).toBeInTheDocument()
+    expect(apiFetch).not.toHaveBeenCalledWith('/api/workflows/wf1', expect.objectContaining({ method: 'PUT' }))
+  })
+
+  it('loads existing SLA targets in friendly units', async () => {
+    apiFetch.mockImplementation((path, opts) => {
+      if (path === '/api/workflows/wf1' && !opts) {
+        return Promise.resolve({
+          workflow: { ...WORKFLOW, sla_max_duration_ms: 5000, sla_min_success_rate: 0.9 },
+        })
+      }
+      return Promise.reject(new Error(`unexpected: ${path}`))
+    })
+    setup()
+    // 5000ms → 5s, 0.9 → 90%.
+    expect(await screen.findByLabelText(/max run duration/i)).toHaveValue(5)
+    expect(screen.getByLabelText(/min success rate/i)).toHaveValue(90)
+  })
+
+  it('saves SLA targets converted to ms and a fraction', async () => {
+    setup()
+    fireEvent.change(await screen.findByLabelText(/max run duration/i), { target: { value: '3' } })
+    fireEvent.change(screen.getByLabelText(/min success rate/i), { target: { value: '95' } })
+    fireEvent.click(screen.getByRole('button', { name: /save settings/i }))
+
+    await waitFor(() =>
+      expect(apiFetch).toHaveBeenCalledWith('/api/workflows/wf1', {
+        method: 'PUT',
+        body: expect.objectContaining({
+          sla_max_duration_ms: 3000,
+          sla_min_success_rate: 0.95,
+        }),
+      })
+    )
+  })
+
+  it('sends null SLA targets when the fields are empty', async () => {
+    setup()
+    await screen.findByLabelText(/max run duration/i)
+    fireEvent.click(screen.getByRole('button', { name: /save settings/i }))
+    await waitFor(() =>
+      expect(apiFetch).toHaveBeenCalledWith('/api/workflows/wf1', {
+        method: 'PUT',
+        body: expect.objectContaining({ sla_max_duration_ms: null, sla_min_success_rate: null }),
+      })
+    )
+  })
+
+  it('rejects a success rate over 100 without calling the API', async () => {
+    setup()
+    fireEvent.change(await screen.findByLabelText(/min success rate/i), { target: { value: '150' } })
+    fireEvent.click(screen.getByRole('button', { name: /save settings/i }))
+    expect(await screen.findByText(/percentage from 0 to 100/i)).toBeInTheDocument()
     expect(apiFetch).not.toHaveBeenCalledWith('/api/workflows/wf1', expect.objectContaining({ method: 'PUT' }))
   })
 
@@ -105,7 +157,7 @@ describe('RunSettingsPanel', () => {
     const onClose = vi.fn()
     setup({ onClose })
     await screen.findByLabelText(/max concurrent runs/i)
-    fireEvent.click(screen.getByRole('button', { name: /save limits/i }))
+    fireEvent.click(screen.getByRole('button', { name: /save settings/i }))
 
     expect(await screen.findByText(/Concurrency limit reached/)).toBeInTheDocument()
     expect(onClose).not.toHaveBeenCalled()

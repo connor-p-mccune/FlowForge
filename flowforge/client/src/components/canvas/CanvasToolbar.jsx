@@ -9,6 +9,8 @@ export default function CanvasToolbar({
   onGenerate,
   onToggleWebhooks,
   onToggleRunSettings,
+  onToggleInsights,
+  insightsOpen,
   onToggleCommentMode,
   commentMode,
   onAutoLayout,
@@ -71,10 +73,18 @@ export default function CanvasToolbar({
       </button>
       <button
         className="toolbar-btn toolbar-btn--limits"
-        title="Run limits — cap how many runs of this workflow execute at once"
+        title="Run settings — concurrency limits and SLA targets"
         onClick={onToggleRunSettings}
       >
-        ⏱ Limits
+        ⏱ Settings
+      </button>
+      <button
+        className={`toolbar-btn toolbar-btn--insights${insightsOpen ? ' toolbar-btn--active' : ''}`}
+        title="Run insights — duration percentiles, success rate, and anomalous runs"
+        onClick={onToggleInsights}
+        aria-pressed={insightsOpen}
+      >
+        📊 Insights
       </button>
       <button
         className={`toolbar-btn toolbar-btn--comment${commentMode ? ' toolbar-btn--active' : ''}`}

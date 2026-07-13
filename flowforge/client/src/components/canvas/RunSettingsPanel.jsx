@@ -12,6 +12,8 @@ export default function RunSettingsPanel({ workflowId, open, onClose }) {
   const [workflow, setWorkflow] = useState(null)
   const [limitInput, setLimitInput] = useState('') // '' = unlimited
   const [policy, setPolicy] = useState('queue')
+  const [slaDurationInput, setSlaDurationInput] = useState('') // seconds, '' = no target
+  const [slaSuccessInput, setSlaSuccessInput] = useState('') // percent, '' = no target
   const [error, setError] = useState(null)
   const [saving, setSaving] = useState(false)
   const toast = useToast()
@@ -27,6 +29,11 @@ export default function RunSettingsPanel({ workflowId, open, onClose }) {
         setWorkflow(wf)
         setLimitInput(wf.max_concurrent_runs ? String(wf.max_concurrent_runs) : '')
         setPolicy(wf.concurrency_policy || 'queue')
+        // Stored in ms / as a 0..1 fraction; shown in the friendlier seconds / %.
+        setSlaDurationInput(wf.sla_max_duration_ms ? String(wf.sla_max_duration_ms / 1000) : '')
+        setSlaSuccessInput(
+          wf.sla_min_success_rate != null ? String(Math.round(wf.sla_min_success_rate * 100)) : ''
+        )
       })
       .catch((err) => {
         if (!cancelled) setError(err.message)
@@ -45,6 +52,21 @@ export default function RunSettingsPanel({ workflowId, open, onClose }) {
       setError('Limit must be a whole number from 1 to 100, or empty for unlimited')
       return
     }
+
+    // SLA targets: seconds → ms, percent → fraction. Empty clears the target.
+    const durTrim = slaDurationInput.trim()
+    const durSeconds = durTrim === '' ? null : Number(durTrim)
+    if (durSeconds !== null && (!Number.isFinite(durSeconds) || durSeconds <= 0)) {
+      setError('Max run duration must be a positive number of seconds, or empty for no target')
+      return
+    }
+    const successTrim = slaSuccessInput.trim()
+    const successPct = successTrim === '' ? null : Number(successTrim)
+    if (successPct !== null && (!Number.isFinite(successPct) || successPct < 0 || successPct > 100)) {
+      setError('Min success rate must be a percentage from 0 to 100, or empty for no target')
+      return
+    }
+
     setSaving(true)
     setError(null)
     try {
@@ -55,9 +77,11 @@ export default function RunSettingsPanel({ workflowId, open, onClose }) {
           description: workflow.description ?? undefined,
           max_concurrent_runs: limit,
           concurrency_policy: policy,
+          sla_max_duration_ms: durSeconds === null ? null : Math.round(durSeconds * 1000),
+          sla_min_success_rate: successPct === null ? null : successPct / 100,
         },
       })
-      toast.success('Run limits saved')
+      toast.success('Run settings saved')
       onClose()
     } catch (err) {
       setError(err.message)
@@ -109,8 +133,39 @@ export default function RunSettingsPanel({ workflowId, open, onClose }) {
                   ? 'Submissions at the cap fail immediately (409) — callers find out now instead of watching a run sit queued. Scheduled ticks are skipped, which is exactly “don’t overlap” for cron workflows.'
                   : 'Runs at the cap wait and start automatically once a slot frees. Order across waiting runs is not guaranteed.'}
               </p>
+
+              <div className="run-settings__section">SLA targets</div>
+              <p className="webhook-panel__hint">
+                Optional health objectives. When a finished run breaches one — too
+                slow, statistically abnormal, or a success rate that dips below the
+                floor — the owner is notified and the breach streams to the activity
+                feed and any outbound webhooks.
+              </p>
+              <label className="run-settings__field">
+                <span className="run-settings__label">Max run duration (seconds)</span>
+                <input
+                  type="number"
+                  min="0"
+                  step="0.1"
+                  placeholder="No target"
+                  value={slaDurationInput}
+                  onChange={(e) => setSlaDurationInput(e.target.value)}
+                />
+              </label>
+              <label className="run-settings__field">
+                <span className="run-settings__label">Min success rate (%)</span>
+                <input
+                  type="number"
+                  min="0"
+                  max="100"
+                  placeholder="No target"
+                  value={slaSuccessInput}
+                  onChange={(e) => setSlaSuccessInput(e.target.value)}
+                />
+              </label>
+
               <button className="webhook-panel__create" onClick={handleSave} disabled={saving}>
-                {saving ? 'Saving…' : 'Save limits'}
+                {saving ? 'Saving…' : 'Save settings'}
               </button>
               <StatusBadgeSection workflowId={workflowId} initialToken={workflow.badge_token} />
             </>
