@@ -216,6 +216,36 @@ empty or cyclic graph.
 
 Requires the `read` scope.
 
+### Preview the schedule
+
+```bash
+curl -s "https://your-flowforge-host/api/v1/workflows/6f0c…/schedule?count=3" \
+  -H "Authorization: Bearer $FLOWFORGE_TOKEN"
+```
+
+Response `200` — the next fire times of the workflow's schedule trigger, computed
+from its cron expression (UTC, ISO-8601). `scheduled: false` when the workflow has
+no schedule trigger; `active` reflects whether the schedule is live (the workflow
+is deployed); `reachable: false` for a valid-but-impossible expression (e.g. Feb
+30) that never fires. `?count` caps the number of upcoming runs (default 5, max 25).
+
+```json
+{
+  "workflowId": "6f0c…",
+  "scheduled": true,
+  "active": true,
+  "cron": "0 9 * * 1-5",
+  "reachable": true,
+  "nextRuns": [
+    "2026-01-15T09:00:00.000Z",
+    "2026-01-16T09:00:00.000Z",
+    "2026-01-19T09:00:00.000Z"
+  ]
+}
+```
+
+Requires the `read` scope.
+
 ### Poll an execution
 
 ```bash

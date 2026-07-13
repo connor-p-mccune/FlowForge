@@ -126,6 +126,14 @@ order while streaming live progress back to every collaborator on the canvas.
   time (p50/p95). It reports a typical and worst-case makespan and a **coverage**
   ratio, so an estimate over a barely-run graph is marked as the guess it is.
   In the insights panel, `flowforge forecast <id>`, and the public API.
+- **Schedule preview** — a schedule trigger fires on a cron expression, but a
+  cron string is opaque: "does `0 9 * * 1-5` skip weekends? when does it next
+  run?". A dependency-free **cron engine** answers both — it parses the
+  expression (5/6-field, ranges, steps, lists, named months/days, `@macros`) and
+  **computes the actual upcoming fire times**, correctly handling the Vixie
+  day-of-month/day-of-week OR-rule and sparse dates like Feb 29. The schedule
+  node shows the next runs live as you type; `flowforge schedule <id>` and the
+  public API expose the same.
 - **Real-time collaboration** — multiple people edit the same workflow at once
   with shared cursors, presence, and last-write-wins sync.
 - **Webhook triggers** — generate a public URL that fires a workflow on POST;

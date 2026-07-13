@@ -466,6 +466,39 @@ The endpoint is rate-limited like the public webhook trigger (it's an
 unauthenticated, oft-fetched asset) and served with a short `max-age` so an
 embedded badge refreshes within a minute while a CDN still absorbs bursts.
 
+## Schedule preview
+
+`services/cronExpression.js` computes the next fire times of a cron expression.
+The scheduler (`services/scheduler.js`) leans on node-cron to *validate* and
+*fire* schedules, but node-cron can't answer "when does this run next?" — the
+one thing a schedule preview needs. So this is a small, dependency-free cron
+interpreter, hand-rolled in the same spirit as the metrics registry and the
+logger: the app needs one narrow capability, not a datetime library.
+
+Two details make it correct rather than a toy:
+
+- **The day-of-month/day-of-week OR-rule.** In Vixie cron, when *both* the
+  day-of-month and day-of-week fields are restricted (neither is `*`), a date
+  fires if it matches *either* — `0 0 13 * FRI` means "the 13th, and also every
+  Friday", not "Friday the 13th". When only one is restricted it ANDs with the
+  rest of the fields normally. Getting this backwards is the classic cron bug;
+  the matcher encodes the rule explicitly and a test pins it.
+
+- **Field-stepping, not minute-ticking.** Rather than testing every minute until
+  one matches (millions of iterations for a sparse schedule), the search jumps:
+  a disallowed month skips to the first of the next allowed month, a disallowed
+  day skips a whole day, and so on. It settles in a few hundred steps even for
+  `0 0 29 2 *` (the next 29th of February, three-plus years out) and returns
+  null for an impossible expression (Feb 30) instead of looping — bounded by a
+  step budget that is a horizon of centuries.
+
+All computation is in UTC so the result is deterministic and independent of the
+server's timezone; the exposed endpoints (`/api/workflows/:id/schedule`, a
+generic `/api/schedule/preview`, and the public `/api/v1/...` mirror) return
+ISO-8601 `Z` instants, and an unreachable schedule is reported as
+`reachable: false` rather than an error. The same parser backs `isValid`, so a
+schedule that previews is a schedule that will run.
+
 ## Security architecture
 
 [SECURITY.md](../SECURITY.md) is the authoritative threat model. The load-

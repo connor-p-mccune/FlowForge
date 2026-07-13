@@ -46,6 +46,7 @@ export FLOWFORGE_TOKEN=ffp_…
 | `flowforge runs <id> [--limit N]` | A workflow's recent runs |
 | `flowforge insights <id> [--limit N]` | Duration percentiles, success rate, throughput, and anomalous runs ([docs](../docs/INSIGHTS.md)) |
 | `flowforge forecast <id>` | Predicted next-run duration and bottleneck ([docs](../docs/INSIGHTS.md#forecasting-the-next-run)) |
+| `flowforge schedule <id> [--count N]` | Upcoming scheduled run times, computed from the workflow's cron (UTC) |
 | `flowforge check <id> [--min-success-rate PCT] [--max-p95 SECONDS] [--strict]` | Gate CI on workflow health — exits non-zero on an SLA breach or a degrading trend |
 | `flowforge run <exec-id> [--watch]` | One run with its steps |
 | `flowforge cancel <exec-id>` | Stop a queued or running run (cooperative) |
