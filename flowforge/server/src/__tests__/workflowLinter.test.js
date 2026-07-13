@@ -225,6 +225,52 @@ describe('lintGraph', () => {
       expect(lintGraph(broken).find((i) => i.code === 'invalid-expression')).toMatchObject({ nodeId: 'f1' })
     })
 
+    it('accepts a well-formed switch and rejects broken cases', () => {
+      const ok = withTrigger(
+        node('sw', 'switch', {
+          cases: [
+            { label: 'high', expression: 'amount > 1000' },
+            { label: 'mid', expression: 'amount > 100' },
+          ],
+        })
+      )
+      expect(codes(lintGraph(ok))).not.toEqual(
+        expect.arrayContaining(['invalid-expression', 'missing-config', 'invalid-config'])
+      )
+
+      // A syntax error in a case surfaces as invalid-expression on the node.
+      const broken = withTrigger(
+        node('sw', 'switch', { cases: [{ label: 'x', expression: 'amount >' }] })
+      )
+      expect(lintGraph(broken).find((i) => i.code === 'invalid-expression')).toMatchObject({ nodeId: 'sw' })
+    })
+
+    it('flags a switch with no cases, blank labels, duplicates, and the reserved default', () => {
+      const empty = withTrigger(node('sw', 'switch', { cases: [] }))
+      expect(lintGraph(empty).find((i) => i.nodeId === 'sw')).toMatchObject({ code: 'missing-config' })
+
+      const noLabel = withTrigger(node('sw', 'switch', { cases: [{ label: '', expression: 'true' }] }))
+      expect(lintGraph(noLabel).find((i) => i.code === 'missing-config' && /no label/.test(i.message)))
+        .toBeTruthy()
+
+      const dupes = withTrigger(
+        node('sw', 'switch', {
+          cases: [
+            { label: 'a', expression: 'x > 1' },
+            { label: 'a', expression: 'x > 2' },
+          ],
+        })
+      )
+      expect(lintGraph(dupes).find((i) => /duplicate case label/.test(i.message)))
+        .toMatchObject({ nodeId: 'sw', severity: 'error' })
+
+      const reserved = withTrigger(
+        node('sw', 'switch', { cases: [{ label: 'default', expression: 'x > 1' }] })
+      )
+      expect(lintGraph(reserved).find((i) => /reserved/.test(i.message)))
+        .toMatchObject({ nodeId: 'sw', severity: 'error' })
+    })
+
     it('validates a map expression', () => {
       const ok = withTrigger(node('m1', 'map', { mapping: '{ id: item.id }', source: '{{t1.list}}' }))
       expect(codes(lintGraph(ok))).not.toEqual(expect.arrayContaining(['invalid-expression', 'missing-config']))

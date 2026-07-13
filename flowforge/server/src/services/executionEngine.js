@@ -21,6 +21,7 @@ const runners = {
   'map': require('./nodeRunners/map'),
   'aggregate': require('./nodeRunners/aggregate'),
   'condition': require('./nodeRunners/condition'),
+  'switch': require('./nodeRunners/switch'),
   'ai-prompt': require('./nodeRunners/llmPrompt'),
   'ai-classify': require('./nodeRunners/classify'),
   'ai-extract': require('./nodeRunners/extract'),
@@ -362,8 +363,14 @@ async function runExecution(
       if (nodeStatus[e.source] !== 'success') return false
       const sourceNode = nodeById[e.source]
       // Branching nodes only activate the matching handle: condition routes on
-      // its true/false result, approval on approved (result true) vs rejected.
-      const branching = sourceNode?.type === 'condition' || sourceNode?.type === 'approval'
+      // its true/false result, approval on approved (result true) vs rejected,
+      // and switch on its matched case label (or 'default'). All three settle a
+      // `result` string that the edge's sourceHandle must equal — one check, not
+      // a separate branching system per node type.
+      const branching =
+        sourceNode?.type === 'condition' ||
+        sourceNode?.type === 'approval' ||
+        sourceNode?.type === 'switch'
       if (branching && e.sourceHandle != null) {
         return String(context[e.source]?.result) === e.sourceHandle
       }

@@ -151,6 +151,37 @@ function lintNodeConfig(node, { workflowTargets }) {
         )
       }
       break
+    case 'switch': {
+      // The switch routes to the first matching case's branch (or 'default').
+      // Each case's label is its edge handle, so labels must be present, unique,
+      // and not collide with the reserved default branch; each expression is
+      // held to the same FXL syntax/function checks as a condition.
+      const cases = Array.isArray(config.cases) ? config.cases : []
+      if (cases.length === 0) {
+        issues.push(issue('error', 'missing-config', `${name}: the switch has no cases`, node.id))
+        break
+      }
+      const seenLabels = new Set()
+      cases.forEach((c, i) => {
+        const rawLabel = typeof c?.label === 'string' ? c.label.trim() : ''
+        const where = rawLabel ? `case "${rawLabel}"` : `case ${i + 1}`
+        if (!rawLabel) {
+          issues.push(issue('error', 'missing-config', `${name}: ${where} has no label`, node.id))
+        } else if (rawLabel === 'default') {
+          issues.push(
+            issue('error', 'invalid-config', `${name}: "default" is reserved for the fall-through branch — rename ${where}`, node.id)
+          )
+        } else if (seenLabels.has(rawLabel)) {
+          issues.push(
+            issue('error', 'invalid-config', `${name}: duplicate case label "${rawLabel}" — labels must be unique`, node.id)
+          )
+        } else {
+          seenLabels.add(rawLabel)
+        }
+        requireExpression(c?.expression, `${where}'s expression`)
+      })
+      break
+    }
     case 'filter':
       requireExpression(config.predicate, 'the filter predicate')
       if (isBlank(config.source)) {

@@ -194,6 +194,66 @@ describe('runExecution', () => {
     expect(stepFor(execId, 'no').status).toBe('skipped')
   })
 
+  it('routes a switch down the first matching case and skips the rest', async () => {
+    // amount 250 → not "high" (>1000), matches "mid" (>100). Only the mid
+    // branch runs; the high, low, and default branches are skipped.
+    const graph = {
+      nodes: [
+        node('t1', 'trigger-manual'),
+        node('sw', 'switch', {
+          cases: [
+            { label: 'high', expression: 'amount > 1000' },
+            { label: 'mid', expression: 'amount > 100' },
+            { label: 'low', expression: 'amount >= 0' },
+          ],
+        }),
+        node('bh', 'output-log', { message: 'high' }),
+        node('bm', 'output-log', { message: 'mid' }),
+        node('bl', 'output-log', { message: 'low' }),
+        node('bd', 'output-log', { message: 'default' }),
+      ],
+      edges: [
+        edge('t1', 'sw'),
+        edge('sw', 'bh', 'high'),
+        edge('sw', 'bm', 'mid'),
+        edge('sw', 'bl', 'low'),
+        edge('sw', 'bd', 'default'),
+      ],
+    }
+    const { execId } = seedWorkflow(graph)
+    await runExecution(execId, { payload: { amount: 250 }, publish: () => {} })
+
+    expect(getExecution(execId).status).toBe('completed')
+    expect(JSON.parse(stepFor(execId, 'sw').output_json)).toMatchObject({ result: 'mid', matched: true })
+    expect(stepFor(execId, 'bm').status).toBe('succeeded')
+    expect(stepFor(execId, 'bh').status).toBe('skipped')
+    expect(stepFor(execId, 'bl').status).toBe('skipped')
+    expect(stepFor(execId, 'bd').status).toBe('skipped')
+  })
+
+  it('routes a switch to the default branch when no case matches', async () => {
+    const graph = {
+      nodes: [
+        node('t1', 'trigger-manual'),
+        node('sw', 'switch', { cases: [{ label: 'positive', expression: 'amount > 0' }] }),
+        node('bp', 'output-log', { message: 'positive' }),
+        node('bd', 'output-log', { message: 'default' }),
+      ],
+      edges: [
+        edge('t1', 'sw'),
+        edge('sw', 'bp', 'positive'),
+        edge('sw', 'bd', 'default'),
+      ],
+    }
+    const { execId } = seedWorkflow(graph)
+    await runExecution(execId, { payload: { amount: -3 }, publish: () => {} })
+
+    expect(getExecution(execId).status).toBe('completed')
+    expect(JSON.parse(stepFor(execId, 'sw').output_json)).toMatchObject({ result: 'default', matched: false })
+    expect(stepFor(execId, 'bd').status).toBe('succeeded')
+    expect(stepFor(execId, 'bp').status).toBe('skipped')
+  })
+
   it('fails the execution when the graph has a cycle', async () => {
     const graph = {
       nodes: [node('a', 'transform'), node('b', 'transform')],
