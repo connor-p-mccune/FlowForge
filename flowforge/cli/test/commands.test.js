@@ -8,6 +8,7 @@ const { startStub, makeCtx } = require('./helpers')
 const workflows = require('../src/commands/workflows')
 const trigger = require('../src/commands/trigger')
 const runs = require('../src/commands/runs')
+const insights = require('../src/commands/insights')
 const runCmd = require('../src/commands/run')
 const cancel = require('../src/commands/cancel')
 const resume = require('../src/commands/resume')
@@ -174,6 +175,63 @@ test('runs renders the summary table with a limit', async () => {
   assert.equal(code, 0)
   assert.match(ctx.output(), /e1/)
   assert.match(ctx.output(), /webhook/)
+})
+
+test('insights renders percentiles, success rate, and anomalies', async () => {
+  const stub = await startStub((method, url) => {
+    assert.equal(url, '/api/v1/workflows/wf-1/insights?limit=100')
+    return {
+      json: {
+        workflowId: 'wf-1',
+        window: { limit: 100, runs: 42, since: '2026-07-01', until: '2026-07-09' },
+        counts: { total: 42, completed: 38, failed: 3, cancelled: 1, running: 0 },
+        successRate: 38 / 41,
+        throughput: { runs: 42, spanDays: 8, perDay: 5.25 },
+        duration: { count: 38, min: 900, max: 20000, mean: 1100, stdev: 200, p50: 1000, p90: 1300, p95: 1500, p99: 1900 },
+        anomalyCount: 1,
+        slowestSteps: [
+          { nodeId: 'http-1', nodeType: 'action-http', runs: 38, avgDurationMs: 800, maxDurationMs: 1900 },
+        ],
+        recentRuns: [
+          { id: 'slow-1', status: 'completed', durationMs: 20000, anomalyScore: 41.2, severity: 'severe', isAnomaly: true },
+          { id: 'ok-1', status: 'completed', durationMs: 1000, anomalyScore: 0.1, severity: 'normal', isAnomaly: false },
+        ],
+      },
+    }
+  })
+  const ctx = makeCtx(stub.api)
+  const code = await insights({ positionals: ['wf-1'], flags: { limit: '100' } }, ctx)
+  await stub.close()
+
+  assert.equal(code, 0)
+  assert.match(ctx.output(), /Success rate/)
+  assert.match(ctx.output(), /92\.7%/) // 38/41
+  assert.match(ctx.output(), /P95/)
+  assert.match(ctx.output(), /1\.5s/) // p95 duration
+  assert.match(ctx.output(), /action-http/)
+  assert.match(ctx.output(), /slow-1/) // the anomalous run is listed
+  assert.doesNotMatch(ctx.output(), /ok-1/) // the healthy run is not
+})
+
+test('insights without a workflow id prints usage and exits 1', async () => {
+  const stub = await startStub(() => ({ json: {} }))
+  const ctx = makeCtx(stub.api)
+  const code = await insights({ positionals: [], flags: {} }, ctx)
+  await stub.close()
+  assert.equal(code, 1)
+  assert.equal(stub.requests.length, 0)
+  assert.match(ctx.output(), /Usage: flowforge insights/)
+})
+
+test('insights reports an empty workflow gracefully', async () => {
+  const stub = await startStub(() => ({
+    json: { workflowId: 'wf-1', window: { limit: 50, runs: 0, since: null, until: null }, counts: {}, recentRuns: [] },
+  }))
+  const ctx = makeCtx(stub.api)
+  const code = await insights({ positionals: ['wf-1'], flags: {} }, ctx)
+  await stub.close()
+  assert.equal(code, 0)
+  assert.match(ctx.output(), /No runs yet/)
 })
 
 test('run shows steps and exits 1 for a failed run', async () => {

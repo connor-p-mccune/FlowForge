@@ -167,6 +167,43 @@ const spec = {
         },
       },
     },
+    '/workflows/{workflowId}/insights': {
+      get: {
+        tags: ['workflows'],
+        summary: 'Run insights for a workflow',
+        description:
+          'A statistical rollup of the workflow’s recent runs: duration ' +
+          'percentiles over completed runs, success rate over settled runs, ' +
+          'throughput, the slowest steps, and per-run anomaly flags (a robust ' +
+          'modified z-score marks abnormally slow runs). Dry-runs are excluded. ' +
+          'Requires the `read` scope.',
+        operationId: 'getWorkflowInsights',
+        parameters: [
+          { $ref: '#/components/parameters/WorkflowId' },
+          {
+            name: 'limit',
+            in: 'query',
+            required: false,
+            schema: { type: 'integer', minimum: 1, maximum: 500, default: 50 },
+            description: 'How many recent runs form the window (1–500).',
+          },
+        ],
+        responses: {
+          200: {
+            description: 'The insight bundle.',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/Insights' },
+              },
+            },
+          },
+          401: { $ref: '#/components/responses/Unauthorized' },
+          403: { $ref: '#/components/responses/Forbidden' },
+          404: { $ref: '#/components/responses/NotFound' },
+          429: { $ref: '#/components/responses/RateLimited' },
+        },
+      },
+    },
     '/executions/{executionId}': {
       get: {
         tags: ['executions'],
@@ -472,6 +509,94 @@ const spec = {
       ExecutionStatus: {
         type: 'string',
         enum: ['pending', 'running', 'completed', 'failed', 'cancelled'],
+      },
+      Insights: {
+        type: 'object',
+        properties: {
+          workflowId: { type: 'string' },
+          window: {
+            type: 'object',
+            description: 'The run window these numbers cover.',
+            properties: {
+              limit: { type: 'integer' },
+              runs: { type: 'integer' },
+              since: { type: 'string', format: 'date-time', nullable: true },
+              until: { type: 'string', format: 'date-time', nullable: true },
+            },
+          },
+          counts: {
+            type: 'object',
+            properties: {
+              total: { type: 'integer' },
+              completed: { type: 'integer' },
+              failed: { type: 'integer' },
+              cancelled: { type: 'integer' },
+              running: { type: 'integer' },
+            },
+          },
+          successRate: {
+            type: 'number',
+            nullable: true,
+            description: 'completed / (completed + failed); null with no settled runs.',
+          },
+          throughput: {
+            type: 'object',
+            properties: {
+              runs: { type: 'integer' },
+              spanDays: { type: 'number', nullable: true },
+              perDay: { type: 'number', nullable: true },
+            },
+          },
+          duration: {
+            type: 'object',
+            description: 'Duration statistics (ms) over completed runs.',
+            properties: {
+              count: { type: 'integer' },
+              min: { type: 'integer', nullable: true },
+              max: { type: 'integer', nullable: true },
+              mean: { type: 'integer', nullable: true },
+              stdev: { type: 'integer', nullable: true },
+              p50: { type: 'integer', nullable: true },
+              p90: { type: 'integer', nullable: true },
+              p95: { type: 'integer', nullable: true },
+              p99: { type: 'integer', nullable: true },
+            },
+          },
+          anomalyCount: { type: 'integer' },
+          slowestSteps: {
+            type: 'array',
+            items: {
+              type: 'object',
+              properties: {
+                nodeId: { type: 'string' },
+                nodeType: { type: 'string', nullable: true },
+                runs: { type: 'integer' },
+                avgDurationMs: { type: 'integer', nullable: true },
+                maxDurationMs: { type: 'integer', nullable: true },
+              },
+            },
+          },
+          recentRuns: {
+            type: 'array',
+            items: {
+              type: 'object',
+              properties: {
+                id: { type: 'string' },
+                status: { $ref: '#/components/schemas/ExecutionStatus' },
+                triggerType: { type: 'string', nullable: true },
+                startedAt: { type: 'string', format: 'date-time', nullable: true },
+                finishedAt: { type: 'string', format: 'date-time', nullable: true },
+                durationMs: { type: 'integer', nullable: true },
+                anomalyScore: { type: 'number', nullable: true },
+                severity: {
+                  type: 'string',
+                  enum: ['normal', 'slow', 'severe', 'unknown'],
+                },
+                isAnomaly: { type: 'boolean' },
+              },
+            },
+          },
+        },
       },
       Approval: {
         type: 'object',

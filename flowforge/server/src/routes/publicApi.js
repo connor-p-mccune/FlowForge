@@ -19,6 +19,7 @@ const { getExecutionQueue } = require('../config/queue')
 const { requestCancel } = require('../services/executionControl')
 const { respondToApproval } = require('../services/approvals')
 const { admitRun } = require('../services/concurrencyGate')
+const { computeInsights, parseLimit } = require('./insights')
 
 const router = express.Router()
 
@@ -182,6 +183,23 @@ router.get('/workflows/:id/executions', tokenAuth('read'), (req, res) => {
         createdAt: r.created_at,
       })),
     })
+  } catch (err) {
+    console.error(err)
+    res.status(500).json({ error: 'Internal server error' })
+  }
+})
+
+// GET /api/v1/workflows/:id/insights — the same reliability rollup the app's
+// insights panel shows (duration percentiles, success rate, throughput, slowest
+// steps, anomaly flags), so a dashboard or a chat-ops bot can surface it too.
+// Read-only; requires the `read` scope. ?limit caps the run window (default 50,
+// max 500).
+router.get('/workflows/:id/insights', tokenAuth('read'), (req, res) => {
+  try {
+    const workflow = getWorkflowForMember(req.params.id, req.user.id)
+    if (!workflow) return res.status(404).json({ error: 'Workflow not found' })
+    const limit = parseLimit(req.query.limit)
+    res.json({ workflowId: workflow.id, ...computeInsights(workflow.id, limit) })
   } catch (err) {
     console.error(err)
     res.status(500).json({ error: 'Internal server error' })
