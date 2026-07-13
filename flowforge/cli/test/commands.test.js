@@ -188,6 +188,7 @@ test('insights renders percentiles, success rate, and anomalies', async () => {
         successRate: 38 / 41,
         throughput: { runs: 42, spanDays: 8, perDay: 5.25 },
         duration: { count: 38, min: 900, max: 20000, mean: 1100, stdev: 200, p50: 1000, p90: 1300, p95: 1500, p99: 1900 },
+        trend: { direction: 'degrading', significant: true, tau: 0.4, z: 3.1, samples: 38, method: 'mann-kendall' },
         anomalyCount: 1,
         slowestSteps: [
           { nodeId: 'http-1', nodeType: 'action-http', runs: 38, avgDurationMs: 800, maxDurationMs: 1900 },
@@ -209,6 +210,7 @@ test('insights renders percentiles, success rate, and anomalies', async () => {
   assert.match(ctx.output(), /P95/)
   assert.match(ctx.output(), /1\.5s/) // p95 duration
   assert.match(ctx.output(), /action-http/)
+  assert.match(ctx.output(), /slower over time/) // the degrading trend line
   assert.match(ctx.output(), /slow-1/) // the anomalous run is listed
   assert.doesNotMatch(ctx.output(), /ok-1/) // the healthy run is not
 })

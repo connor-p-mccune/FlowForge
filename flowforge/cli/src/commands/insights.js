@@ -2,7 +2,16 @@
 // rollup from GET /api/v1/workflows/:id/insights: success rate, duration
 // percentiles, throughput, the slowest steps, and any anomalous runs.
 
-const { table, bold, gray, red } = require('../format')
+const { table, bold, gray, red, green, yellow } = require('../format')
+
+// Duration trend → a coloured one-liner. Only a confirmed degradation is
+// alarming; a confirmed improvement is good; everything else reads as steady.
+function trendLine(trend) {
+  if (!trend) return null
+  if (trend.direction === 'degrading' && trend.significant) return red('↗ slower over time')
+  if (trend.direction === 'improving' && trend.significant) return green('↘ faster over time')
+  return yellow('→ steady')
+}
 
 // Milliseconds → a compact human string. '—' for null so an empty stat reads as
 // "no data" rather than "0ms".
@@ -39,6 +48,8 @@ module.exports = async function insights(args, ctx) {
   )
   ctx.log(`  Throughput     ${throughput.perDay == null ? '—' : `${throughput.perDay}/day`}`)
   ctx.log(`  Anomalies      ${anomalyCount ? red(String(anomalyCount)) : '0'}`)
+  const trend = trendLine(data.trend)
+  if (trend) ctx.log(`  Trend          ${trend}`)
 
   ctx.log('')
   ctx.log(bold('Duration (completed runs)'))
