@@ -204,6 +204,35 @@ const spec = {
         },
       },
     },
+    '/workflows/{workflowId}/forecast': {
+      get: {
+        tags: ['workflows'],
+        summary: 'Forecast a workflow’s next-run duration',
+        description:
+          'A predictive estimate of how long the workflow’s next run will take, ' +
+          'computed as the critical path (longest dependency chain) over each ' +
+          'node’s historical step timing — typical (p50) and worst-case (p95) — ' +
+          'plus the likely bottleneck node. `coverage` reports how much of the ' +
+          'graph has history, so a thinly-exercised workflow’s estimate is ' +
+          'marked as the guess it is. Requires the `read` scope.',
+        operationId: 'getWorkflowForecast',
+        parameters: [{ $ref: '#/components/parameters/WorkflowId' }],
+        responses: {
+          200: {
+            description: 'The forecast (or `available: false` for an empty or cyclic graph).',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/Forecast' },
+              },
+            },
+          },
+          401: { $ref: '#/components/responses/Unauthorized' },
+          403: { $ref: '#/components/responses/Forbidden' },
+          404: { $ref: '#/components/responses/NotFound' },
+          429: { $ref: '#/components/responses/RateLimited' },
+        },
+      },
+    },
     '/executions/{executionId}': {
       get: {
         tags: ['executions'],
@@ -662,6 +691,43 @@ const spec = {
           error: { type: 'string', nullable: true },
           started_at: { type: 'string', format: 'date-time', nullable: true },
           finished_at: { type: 'string', format: 'date-time', nullable: true },
+        },
+      },
+      Forecast: {
+        type: 'object',
+        properties: {
+          workflowId: { type: 'string' },
+          available: {
+            type: 'boolean',
+            description: 'False for an empty or cyclic graph (see reason).',
+          },
+          reason: { type: 'string', enum: ['empty', 'cycle'], nullable: true },
+          criticalPath: {
+            type: 'array',
+            items: { type: 'string' },
+            description: 'Node ids on the estimated critical path, source → sink.',
+          },
+          estimatedMs: { type: 'integer', nullable: true, description: 'Typical (p50) makespan estimate.' },
+          estimatedP95Ms: { type: 'integer', nullable: true, description: 'Worst-case (p95) makespan estimate.' },
+          bottleneck: {
+            type: 'object',
+            nullable: true,
+            properties: {
+              nodeId: { type: 'string' },
+              nodeType: { type: 'string', nullable: true },
+              p50: { type: 'integer', nullable: true },
+              p95: { type: 'integer', nullable: true },
+            },
+          },
+          coverage: {
+            type: 'object',
+            description: 'How much of the graph has timing history — the confidence signal.',
+            properties: {
+              nodesWithHistory: { type: 'integer' },
+              workNodes: { type: 'integer' },
+              ratio: { type: 'number' },
+            },
+          },
         },
       },
       Error: {

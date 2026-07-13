@@ -8,7 +8,11 @@
 const express = require('express')
 const db = require('../config/database')
 const auth = require('../middleware/auth')
-const { summarizeDurations, classifyRuns, mannKendall } = require('../services/runStats')
+const { summarizeDurations, classifyRuns, mannKendall, percentile } = require('../services/runStats')
+const { computeForecast } = require('../services/runForecast')
+
+// How many recent completed runs' steps feed the forecast's per-node timing.
+const FORECAST_RUN_WINDOW = 200
 
 // Minimum completed runs before a duration trend is reported. The Mann-Kendall
 // normal approximation is unreliable on a handful of points, and "getting
@@ -222,6 +226,68 @@ function computeInsights(workflowId, limit) {
   }
 }
 
+// Estimate a workflow's next-run duration from its recorded step timing. Pulls
+// each node's successful step durations over the recent run window, turns them
+// into p50/p95 per node, and runs the forward critical-path forecast against the
+// workflow's *current* graph. Exported for reuse by the public API.
+function forecastFor(workflowId) {
+  const workflow = db.prepare('SELECT graph_json FROM workflows WHERE id = ?').get(workflowId)
+  if (!workflow) return { available: false, reason: 'empty' }
+  let graph
+  try {
+    graph = JSON.parse(workflow.graph_json)
+  } catch {
+    return { available: false, reason: 'empty' }
+  }
+
+  // Successful step durations per node, restricted to the most recent completed
+  // runs so a long-dead layout doesn't dominate the estimate.
+  const rows = db.prepare(`
+    SELECT es.node_id AS node_id, es.node_type AS node_type, ${durationMs('es.')} AS ms
+    FROM execution_steps es
+    JOIN executions e ON e.id = es.execution_id
+    WHERE es.status = 'succeeded'
+      AND es.started_at IS NOT NULL AND es.finished_at IS NOT NULL
+      AND es.node_type IS NOT NULL
+      AND e.id IN (
+        SELECT id FROM executions
+        WHERE workflow_id = ? AND status = 'completed'
+          AND (trigger_type IS NULL OR trigger_type != 'dry-run')
+        ORDER BY created_at DESC LIMIT ${FORECAST_RUN_WINDOW}
+      )
+  `).all(workflowId)
+
+  const byNode = new Map()
+  for (const r of rows) {
+    if (typeof r.ms !== 'number') continue
+    if (!byNode.has(r.node_id)) byNode.set(r.node_id, { durations: [], nodeType: r.node_type })
+    byNode.get(r.node_id).durations.push(r.ms)
+  }
+  const statsByNode = {}
+  for (const [nodeId, { durations, nodeType }] of byNode) {
+    statsByNode[nodeId] = {
+      p50: percentile(durations, 50),
+      p95: percentile(durations, 95),
+      samples: durations.length,
+      nodeType,
+    }
+  }
+  return computeForecast(graph, statsByNode)
+}
+
+// GET /api/workflows/:id/forecast — a predictive duration estimate for the
+// workflow's next run, with the likely bottleneck.
+router.get('/workflows/:id/forecast', auth, (req, res) => {
+  try {
+    const workflow = getVisibleWorkflow(req.params.id, req.user.id)
+    if (!workflow) return res.status(404).json({ error: 'Workflow not found' })
+    res.json({ workflowId: workflow.id, ...forecastFor(workflow.id) })
+  } catch (err) {
+    console.error(err)
+    res.status(500).json({ error: 'Internal server error' })
+  }
+})
+
 // GET /api/workflows/:id/insights?limit=N
 router.get('/workflows/:id/insights', auth, (req, res) => {
   try {
@@ -237,4 +303,5 @@ router.get('/workflows/:id/insights', auth, (req, res) => {
 
 module.exports = router
 module.exports.computeInsights = computeInsights
+module.exports.forecastFor = forecastFor
 module.exports.parseLimit = parseLimit

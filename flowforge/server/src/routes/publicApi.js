@@ -19,7 +19,7 @@ const { getExecutionQueue } = require('../config/queue')
 const { requestCancel } = require('../services/executionControl')
 const { respondToApproval } = require('../services/approvals')
 const { admitRun } = require('../services/concurrencyGate')
-const { computeInsights, parseLimit } = require('./insights')
+const { computeInsights, forecastFor, parseLimit } = require('./insights')
 
 const router = express.Router()
 
@@ -200,6 +200,20 @@ router.get('/workflows/:id/insights', tokenAuth('read'), (req, res) => {
     if (!workflow) return res.status(404).json({ error: 'Workflow not found' })
     const limit = parseLimit(req.query.limit)
     res.json({ workflowId: workflow.id, ...computeInsights(workflow.id, limit) })
+  } catch (err) {
+    console.error(err)
+    res.status(500).json({ error: 'Internal server error' })
+  }
+})
+
+// GET /api/v1/workflows/:id/forecast — a predictive estimate of the workflow's
+// next-run duration (typical + p95) and its likely bottleneck, computed as the
+// critical path over each node's historical step timing. Read-only; `read` scope.
+router.get('/workflows/:id/forecast', tokenAuth('read'), (req, res) => {
+  try {
+    const workflow = getWorkflowForMember(req.params.id, req.user.id)
+    if (!workflow) return res.status(404).json({ error: 'Workflow not found' })
+    res.json({ workflowId: workflow.id, ...forecastFor(workflow.id) })
   } catch (err) {
     console.error(err)
     res.status(500).json({ error: 'Internal server error' })
