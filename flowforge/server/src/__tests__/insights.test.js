@@ -175,4 +175,26 @@ describe('GET /api/workflows/:id/insights', () => {
     expect(body.throughput.runs).toBe(15)
     expect(body.throughput.perDay).toBeGreaterThan(0)
   })
+
+  it('reports no SLA block until targets are set', async () => {
+    const { body } = await request(app)
+      .get(`/api/workflows/${wf.id}/insights`)
+      .set('Authorization', `Bearer ${token}`)
+    expect(body.sla).toBeNull()
+  })
+
+  it('reports SLA compliance once targets are set', async () => {
+    db.prepare(
+      'UPDATE workflows SET sla_max_duration_ms = ?, sla_min_success_rate = ? WHERE id = ?'
+    ).run(1500, 0.95, wf.id)
+    const { body } = await request(app)
+      .get(`/api/workflows/${wf.id}/insights`)
+      .set('Authorization', `Bearer ${token}`)
+    expect(body.sla.maxDurationMs).toBe(1500)
+    expect(body.sla.minSuccessRate).toBe(0.95)
+    // p95 is pulled up by the 20s outlier → over the 1500ms budget.
+    expect(body.sla.durationCompliant).toBe(false)
+    // 11/13 ≈ 0.846 is below the 0.95 floor.
+    expect(body.sla.successRateCompliant).toBe(false)
+  })
 })

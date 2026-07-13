@@ -539,6 +539,17 @@ const spec = {
             nullable: true,
             description: 'completed / (completed + failed); null with no settled runs.',
           },
+          sla: {
+            type: 'object',
+            nullable: true,
+            description: 'Compliance against the workflow’s SLA targets; null when none are set.',
+            properties: {
+              maxDurationMs: { type: 'integer', nullable: true },
+              minSuccessRate: { type: 'number', nullable: true },
+              durationCompliant: { type: 'boolean', nullable: true },
+              successRateCompliant: { type: 'boolean', nullable: true },
+            },
+          },
           throughput: {
             type: 'object',
             properties: {

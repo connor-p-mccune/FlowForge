@@ -144,6 +144,29 @@ function computeInsights(workflowId, limit) {
     maxDurationMs: round(r.max_ms),
   }))
 
+  // SLA compliance against the workflow's declared targets (null block when
+  // neither is set). p95 is the yardstick for the duration budget — a single
+  // slow run shouldn't fail a budget the bulk of runs meet — and the window's
+  // success rate is compared to the floor.
+  const wf = db.prepare(
+    'SELECT sla_max_duration_ms, sla_min_success_rate FROM workflows WHERE id = ?'
+  ).get(workflowId) || {}
+  const sla =
+    wf.sla_max_duration_ms == null && wf.sla_min_success_rate == null
+      ? null
+      : {
+          maxDurationMs: wf.sla_max_duration_ms ?? null,
+          minSuccessRate: wf.sla_min_success_rate ?? null,
+          durationCompliant:
+            wf.sla_max_duration_ms == null || durationSummary.p95 == null
+              ? null
+              : durationSummary.p95 <= wf.sla_max_duration_ms,
+          successRateCompliant:
+            wf.sla_min_success_rate == null || successRate == null
+              ? null
+              : successRate >= wf.sla_min_success_rate,
+        }
+
   return {
     window: {
       limit,
@@ -153,6 +176,7 @@ function computeInsights(workflowId, limit) {
     },
     counts,
     successRate,
+    sla,
     throughput,
     duration: {
       count: durationSummary.count,
