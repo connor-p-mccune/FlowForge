@@ -9,6 +9,7 @@ const workflows = require('../src/commands/workflows')
 const trigger = require('../src/commands/trigger')
 const runs = require('../src/commands/runs')
 const insights = require('../src/commands/insights')
+const forecast = require('../src/commands/forecast')
 const runCmd = require('../src/commands/run')
 const cancel = require('../src/commands/cancel')
 const resume = require('../src/commands/resume')
@@ -234,6 +235,51 @@ test('insights reports an empty workflow gracefully', async () => {
   await stub.close()
   assert.equal(code, 0)
   assert.match(ctx.output(), /No runs yet/)
+})
+
+test('forecast prints the estimate, bottleneck, and coverage', async () => {
+  const stub = await startStub((method, url) => {
+    assert.equal(url, '/api/v1/workflows/wf-1/forecast')
+    return {
+      json: {
+        workflowId: 'wf-1',
+        available: true,
+        criticalPath: ['t', 'slow', 'join'],
+        estimatedMs: 540,
+        estimatedP95Ms: 880,
+        bottleneck: { nodeId: 'slow', nodeType: 'action-http', p50: 500, p95: 800 },
+        coverage: { nodesWithHistory: 2, workNodes: 3, ratio: 2 / 3 },
+      },
+    }
+  })
+  const ctx = makeCtx(stub.api)
+  const code = await forecast({ positionals: ['wf-1'], flags: {} }, ctx)
+  await stub.close()
+
+  assert.equal(code, 0)
+  assert.match(ctx.output(), /Estimated/)
+  assert.match(ctx.output(), /540ms typical/)
+  assert.match(ctx.output(), /Bottleneck/)
+  assert.match(ctx.output(), /slow/)
+  assert.match(ctx.output(), /2\/3 nodes have history/) // 67%
+})
+
+test('forecast reports an unavailable graph', async () => {
+  const stub = await startStub(() => ({ json: { workflowId: 'wf-1', available: false, reason: 'cycle' } }))
+  const ctx = makeCtx(stub.api)
+  const code = await forecast({ positionals: ['wf-1'], flags: {} }, ctx)
+  await stub.close()
+  assert.equal(code, 0)
+  assert.match(ctx.output(), /cycle/)
+})
+
+test('forecast without a workflow id prints usage and exits 1', async () => {
+  const stub = await startStub(() => ({ json: {} }))
+  const ctx = makeCtx(stub.api)
+  const code = await forecast({ positionals: [], flags: {} }, ctx)
+  await stub.close()
+  assert.equal(code, 1)
+  assert.equal(stub.requests.length, 0)
 })
 
 test('run shows steps and exits 1 for a failed run', async () => {

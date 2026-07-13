@@ -15,6 +15,7 @@ const COMMANDS = {
   trigger: require('../src/commands/trigger'),
   runs: require('../src/commands/runs'),
   insights: require('../src/commands/insights'),
+  forecast: require('../src/commands/forecast'),
   run: require('../src/commands/run'),
   cancel: require('../src/commands/cancel'),
   resume: require('../src/commands/resume'),
@@ -31,6 +32,7 @@ Usage:
   flowforge trigger <workflow-id> [--data <json>] [--key <idempotency-key>] [--watch]
   flowforge runs <workflow-id> [--limit N]         Recent runs for a workflow
   flowforge insights <workflow-id> [--limit N]     Duration percentiles, success rate, anomalies
+  flowforge forecast <workflow-id>                 Predicted next-run duration and bottleneck
   flowforge run <execution-id> [--watch]           One run with its steps
   flowforge cancel <execution-id>                  Stop a queued or running run
   flowforge resume <execution-id> [--watch]        Re-run only the failed part of a run
