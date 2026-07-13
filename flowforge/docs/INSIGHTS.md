@@ -217,7 +217,10 @@ API can't drift:
   anomaly count, a hand-drawn duration sparkline with anomalous runs marked, the
   percentile grid, an SLA scorecard, and the slowest steps by node label.
 - **CLI** — `flowforge insights <workflow-id> [--limit N]` prints the same
-  rollup, so a chat-ops bot or a dashboard cron can surface it.
+  rollup, so a chat-ops bot or a dashboard cron can surface it. `flowforge check
+  <id>` turns it into a **CI gate**: it exits non-zero when the workflow is
+  breaching an SLA target or trending slower, so a deploy pipeline can refuse to
+  ship on top of a degrading automation.
 - **Public API** — `GET /api/v1/workflows/:id/insights` and
   `GET /api/v1/workflows/:id/forecast` (`read` scope), documented in the
   [OpenAPI spec](./API.md#machine-readable-spec).

@@ -46,6 +46,7 @@ export FLOWFORGE_TOKEN=ffp_…
 | `flowforge runs <id> [--limit N]` | A workflow's recent runs |
 | `flowforge insights <id> [--limit N]` | Duration percentiles, success rate, throughput, and anomalous runs ([docs](../docs/INSIGHTS.md)) |
 | `flowforge forecast <id>` | Predicted next-run duration and bottleneck ([docs](../docs/INSIGHTS.md#forecasting-the-next-run)) |
+| `flowforge check <id> [--min-success-rate PCT] [--max-p95 SECONDS] [--strict]` | Gate CI on workflow health — exits non-zero on an SLA breach or a degrading trend |
 | `flowforge run <exec-id> [--watch]` | One run with its steps |
 | `flowforge cancel <exec-id>` | Stop a queued or running run (cooperative) |
 | `flowforge resume <exec-id> [--watch]` | Continue a failed/cancelled run — succeeded steps are reused, only the failed part re-runs |
@@ -67,6 +68,22 @@ each step transition once. `NO_COLOR=1` (or piping stdout) disables colors.
 
 Using the CI run id as the idempotency key means a re-run of the job can
 never double-trigger the workflow.
+
+## Gate a deploy on workflow health
+
+`check` turns the [insights](../docs/INSIGHTS.md) into a pass/fail gate: it exits
+non-zero when the workflow is breaching an SLA target or trending slower, so a
+pipeline can refuse to ship on top of a degrading automation.
+
+```yaml
+- run: npx --prefix cli flowforge check $WORKFLOW_ID --max-p95 5 --min-success-rate 95
+  env:
+    FLOWFORGE_URL: ${{ vars.FLOWFORGE_URL }}
+    FLOWFORGE_TOKEN: ${{ secrets.FLOWFORGE_TOKEN }}
+```
+
+With no thresholds passed it falls back to the workflow's own SLA targets;
+`--strict` also fails on any anomalous run in the window.
 
 ## Development
 
