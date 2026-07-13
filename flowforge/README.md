@@ -109,7 +109,9 @@ order while streaming live progress back to every collaborator on the canvas.
   panel: duration percentiles (p50–p99), success rate, throughput, the slowest
   steps, and a sparkline of recent runs with **anomalous runs flagged** by a
   robust **modified z-score** (median + MAD, so a heavy tail of slow runs can't
-  mask itself). Declare optional **SLA targets** — a max run duration and a min
+  mask itself), plus a **degradation trend** — a Mann-Kendall test that catches a
+  workflow getting slower over time, a creep no single run trips. Declare
+  optional **SLA targets** — a max run duration and a min
   success rate — and a finished run that breaches one (too slow, statistically
   abnormal, or a success rate that dips below the floor) notifies the owner and
   streams an `execution.sla_breached` event to the activity feed and any

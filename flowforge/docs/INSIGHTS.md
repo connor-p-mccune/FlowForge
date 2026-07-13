@@ -34,6 +34,8 @@ unit-testable and every surface shares one implementation. The insights route
 - **Slowest steps**, grouped by node id and averaged over successful executions
   (skipped steps are ~0 ms; failed ones carry backoff), so "what should I
   optimise" has a standing answer beyond a single run's critical path.
+- **Duration trend** — is the workflow getting *slower over time*? A
+  Mann-Kendall trend test over the completed durations (below).
 - **Per-run anomaly flags** — each recent run tagged normal / slow / severe by
   the modified z-score below.
 
@@ -47,6 +49,27 @@ Percentiles use **linear interpolation between order statistics** (the "R-7"
 method — NumPy's default and Excel's `PERCENTILE.INC`), not a nearest-rank pick.
 For the small samples a single workflow produces, interpolating avoids a p95 that
 lurches between two raw observations as one run ages out of the window.
+
+### Trend
+
+The anomaly score answers "is *this run* abnormal?"; the trend answers "is the
+*workflow* drifting?" — a slow creep no single run trips. It uses the
+**Mann-Kendall test**, a non-parametric test for a monotonic trend:
+
+```
+S = Σ_{i<j} sign(xⱼ − xᵢ)
+```
+
+counts concordant minus discordant pairs across the time-ordered durations.
+Non-parametric is the right call twice over: it assumes neither that the trend is
+*linear* (a workflow degrades in steps, not straight lines) nor that the noise is
+Gaussian (durations aren't), and it inherits the same rank-based robustness the
+anomaly score has. Under the no-trend null, S is approximately normal with a
+variance that includes a **tie correction** (durations repeat), a continuity
+correction gives the z-statistic, and Kendall's τ = S / (n(n−1)/2) is the effect
+size. A trend is reported only when |z| clears the 95% cut-off and there are at
+least eight completed runs — an increasing duration series reads as *degrading*,
+decreasing as *improving*, everything else as *flat*.
 
 ---
 
