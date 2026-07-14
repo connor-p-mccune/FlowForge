@@ -64,6 +64,39 @@ for-each nodes get a single attempt because they run whole nested executions
 that already retry their own nodes — retrying the wrapper would duplicate
 side effects.
 
+### Per-node error handling
+
+That default — any failure fails the run — is right for a data pipeline and
+wrong for a notification step, so each node can override it with an
+`onError` policy applied **after** its retries are exhausted:
+
+- **`fail`** (default): exactly the semantics above.
+- **`continue`**: the node settles `{ failed: true, error: { message, nodeId,
+  nodeType } }` as its output and the run proceeds down its normal edges —
+  the failure becomes data a downstream condition can route on.
+- **`branch`**: the node grows a dedicated `error` source handle, and a
+  caught failure activates *only* the edge wired to it, while a success
+  keeps it dark. This reuses the sourceHandle mechanism every branching node
+  already routes through — no second routing system — but inverted: the
+  handle is selected by *how the node settled* rather than by a result value.
+
+Three details are load-bearing. The step records a distinct **`caught`**
+status with both the error message and the error output: the node genuinely
+failed, and a timeline that relabelled it "succeeded" would lie to whoever
+debugs it later (caught steps also count as executed for critical-path
+analysis — a handled failure consumed wall time). The policy is read from
+the node's **raw config, not the templated one**, so upstream data can never
+decide routing. And branching node types (condition, switch, validate,
+approval) plus triggers are excluded — they already settle a routing result,
+and a second mechanism on the same node would make an edge's meaning
+ambiguous; the engine ignores a policy on them and the linter says so.
+
+A policy/wiring mismatch is statically visible, so the linter closes the
+loop: an `error` edge whose source policy isn't `branch` is an error (that
+branch can never run — and the engine guarantees a stale error edge never
+activates on success), while a `branch` policy with nothing wired to the
+error handle warns that a caught failure silently ends the flow.
+
 ### Cooperative cancellation
 
 `POST /api/executions/:id/cancel` flips a `cancel_requested` flag on the run

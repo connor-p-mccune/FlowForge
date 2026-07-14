@@ -69,6 +69,14 @@ order while streaming live progress back to every collaborator on the canvas.
   — an approval gate that was already granted is not asked twice — and only
   the failed remainder runs again. Available from run history, the public API,
   and `flowforge resume --watch` in CI.
+- **Per-node error handling** — decide per node what its failure means. The
+  default still fails the run, but a node can **continue** (its
+  `{ failed, error }` object flows downstream as ordinary data) or take a
+  dedicated red **error branch** — the same handle mechanism condition
+  branches use — so a flaky API gets a retry-then-fallback path instead of a
+  3am page. Retries still run first; the step records a distinct **caught**
+  status so the timeline never hides that the failure happened, and the
+  linter flags a wired error branch whose policy can never route to it.
 - **Encrypted secrets** — store API keys once per workspace (AES-256-GCM at
   rest), reference them as `{{secrets.NAME}}`, and they're masked in run logs.
   Values are write-only: rotate or delete, never read back.
