@@ -2,7 +2,8 @@
 // ready-set scheduler — a node becomes runnable once every upstream node has
 // settled, and independent branches run concurrently (bounded by
 // EXEC_MAX_PARALLEL). Resolves {{node-id.field}} templates from the execution
-// context, retries failures with exponential backoff, records every step in
+// context, retries failures with exponential backoff (and can catch an
+// exhausted failure per node via its on-error policy), records every step in
 // execution_steps, and publishes exec-update events (Redis pub/sub by default).
 
 const { v4: uuidv4 } = require('uuid')
@@ -38,6 +39,25 @@ const runners = {
 // would duplicate side effects and child execution rows. Approval waits on a
 // human decision — a retry would file a duplicate approval request.
 const SINGLE_ATTEMPT_TYPES = new Set(['sub-workflow', 'for-each', 'approval'])
+
+// Node types whose failure can never be caught by an on-error policy. The
+// branching nodes already settle a routing result — layering a second routing
+// mechanism (the error handle) on top of the first would make an edge's
+// meaning ambiguous — and a trigger that can't even emit its payload has
+// nothing meaningful to route.
+const UNCATCHABLE_TYPES = new Set(['condition', 'switch', 'validate', 'approval'])
+
+// A node's on-error policy: 'fail' (default — the failure fails the run),
+// 'continue' (settle the error object as the node's output and proceed down
+// the normal edges), or 'branch' (activate only the edge wired to the node's
+// dedicated 'error' handle). Read from the raw config, not the templated one —
+// the policy is a static routing decision, so upstream data must not be able
+// to decide it.
+function errorPolicy(node) {
+  if (node.type.startsWith('trigger-') || UNCATCHABLE_TYPES.has(node.type)) return 'fail'
+  const policy = node.data?.config?.onError
+  return policy === 'continue' || policy === 'branch' ? policy : 'fail'
+}
 
 const MAX_ATTEMPTS = parseInt(process.env.EXEC_MAX_ATTEMPTS || '3')
 const BASE_BACKOFF_MS = parseInt(process.env.EXEC_RETRY_BASE_MS || '500')
@@ -348,6 +368,9 @@ async function runExecution(
 
   const context = {} // nodeId -> output object
   const nodeStatus = {} // nodeId -> 'success' | 'failed' | 'skipped' (settled nodes only)
+  // Nodes whose failure was caught under the 'branch' on-error policy. They
+  // settle as routable successes, but activate only their 'error' handle.
+  const caughtBranch = new Set()
   const now = () => new Date().toISOString()
 
   const incomingByNode = {}
@@ -362,6 +385,13 @@ async function runExecution(
   function activeIncomingFor(nodeId) {
     return incomingByNode[nodeId].filter((e) => {
       if (nodeStatus[e.source] !== 'success') return false
+      // Per-node error handling: a caught failure routes exactly one way.
+      // Under the 'branch' policy only the edge leaving the dedicated 'error'
+      // handle activates; on a real success (or under 'continue', which has no
+      // error handle) that handle stays dark. Checked before the branching
+      // rule below so a stale error edge can never activate via a result match.
+      if (e.sourceHandle === 'error') return caughtBranch.has(e.source)
+      if (caughtBranch.has(e.source)) return false
       const sourceNode = nodeById[e.source]
       // Branching nodes only activate the matching handle: condition routes on
       // its true/false result, approval on approved (result true) vs rejected,
@@ -471,13 +501,35 @@ async function runExecution(
         )
         publishStep(nodeId, 'succeeded', { output })
       } catch (err) {
-        nodeStatus[nodeId] = 'failed'
-        updateStep.run(
-          'failed', redact(JSON.stringify(input)), null, redact(err.message),
-          now(), now(), stepIdByNode[nodeId]
-        )
-        publishStep(nodeId, 'failed', { error: err.message })
-        if (!failure) failure = { node, err }
+        const policy = errorPolicy(node)
+        if (policy !== 'fail') {
+          // Caught: the failure becomes data instead of failing the run. The
+          // step records 'caught' — the node really did fail after its
+          // retries, and hiding that would corrupt the timeline — but it
+          // settles as routable: 'continue' proceeds down the normal edges
+          // with the error object as its output, 'branch' activates only the
+          // dedicated error handle (see activeIncomingFor).
+          const output = {
+            failed: true,
+            error: { message: err.message, nodeId, nodeType: node.type },
+          }
+          context[nodeId] = output
+          nodeStatus[nodeId] = 'success'
+          if (policy === 'branch') caughtBranch.add(nodeId)
+          updateStep.run(
+            'caught', redact(JSON.stringify(input)), redact(JSON.stringify(output)),
+            redact(err.message), now(), now(), stepIdByNode[nodeId]
+          )
+          publishStep(nodeId, 'caught', { output, error: err.message })
+        } else {
+          nodeStatus[nodeId] = 'failed'
+          updateStep.run(
+            'failed', redact(JSON.stringify(input)), null, redact(err.message),
+            now(), now(), stepIdByNode[nodeId]
+          )
+          publishStep(nodeId, 'failed', { error: err.message })
+          if (!failure) failure = { node, err }
+        }
       } finally {
         inFlight.delete(nodeId)
       }
