@@ -182,6 +182,21 @@ function lintNodeConfig(node, { workflowTargets }) {
       })
       break
     }
+    case 'validate': {
+      // The Validate node needs a JSON Schema. A blank schema fails the run; a
+      // non-blank one that isn't valid JSON fails it too — both catchable now.
+      const raw = config.schema
+      if (isBlank(raw) && !(raw && typeof raw === 'object')) {
+        issues.push(issue('error', 'missing-config', `${name}: a JSON Schema is required`, node.id))
+      } else if (typeof raw === 'string') {
+        try {
+          JSON.parse(raw)
+        } catch {
+          issues.push(issue('error', 'invalid-config', `${name}: the schema is not valid JSON`, node.id))
+        }
+      }
+      break
+    }
     case 'filter':
       requireExpression(config.predicate, 'the filter predicate')
       if (isBlank(config.source)) {

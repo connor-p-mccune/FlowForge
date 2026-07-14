@@ -254,6 +254,38 @@ describe('runExecution', () => {
     expect(stepFor(execId, 'bp').status).toBe('skipped')
   })
 
+  it('routes a validate node down the valid / invalid branch', async () => {
+    const schema = { type: 'object', required: ['email'], properties: { email: { type: 'string' } } }
+    const graph = {
+      nodes: [
+        node('t1', 'trigger-manual'),
+        node('v', 'validate', { schema: JSON.stringify(schema) }),
+        node('okp', 'output-log', { message: 'valid' }),
+        node('bad', 'output-log', { message: 'invalid' }),
+      ],
+      edges: [
+        edge('t1', 'v'),
+        edge('v', 'okp', 'valid'),
+        edge('v', 'bad', 'invalid'),
+      ],
+    }
+
+    // A payload that matches → the valid branch runs, invalid is skipped.
+    const good = seedWorkflow(graph)
+    await runExecution(good.execId, { payload: { email: 'a@b.com' }, publish: () => {} })
+    expect(getExecution(good.execId).status).toBe('completed')
+    expect(JSON.parse(stepFor(good.execId, 'v').output_json)).toMatchObject({ result: 'valid', valid: true })
+    expect(stepFor(good.execId, 'okp').status).toBe('succeeded')
+    expect(stepFor(good.execId, 'bad').status).toBe('skipped')
+
+    // A payload that doesn't → the invalid branch runs, carrying the errors.
+    const badRun = seedWorkflow(graph)
+    await runExecution(badRun.execId, { payload: { name: 'no email' }, publish: () => {} })
+    expect(JSON.parse(stepFor(badRun.execId, 'v').output_json)).toMatchObject({ result: 'invalid', valid: false })
+    expect(stepFor(badRun.execId, 'bad').status).toBe('succeeded')
+    expect(stepFor(badRun.execId, 'okp').status).toBe('skipped')
+  })
+
   it('fails the execution when the graph has a cycle', async () => {
     const graph = {
       nodes: [node('a', 'transform'), node('b', 'transform')],

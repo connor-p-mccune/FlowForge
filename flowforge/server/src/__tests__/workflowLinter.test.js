@@ -271,6 +271,19 @@ describe('lintGraph', () => {
         .toMatchObject({ nodeId: 'sw', severity: 'error' })
     })
 
+    it('requires a valid JSON Schema on a validate node', () => {
+      const ok = withTrigger(node('v', 'validate', { schema: '{"type":"object"}' }))
+      expect(codes(lintGraph(ok))).not.toEqual(
+        expect.arrayContaining(['missing-config', 'invalid-config'])
+      )
+
+      const missing = withTrigger(node('v', 'validate', { schema: '' }))
+      expect(lintGraph(missing).find((i) => i.nodeId === 'v')).toMatchObject({ code: 'missing-config' })
+
+      const broken = withTrigger(node('v', 'validate', { schema: '{not json' }))
+      expect(lintGraph(broken).find((i) => i.nodeId === 'v')).toMatchObject({ code: 'invalid-config' })
+    })
+
     it('validates a map expression', () => {
       const ok = withTrigger(node('m1', 'map', { mapping: '{ id: item.id }', source: '{{t1.list}}' }))
       expect(codes(lintGraph(ok))).not.toEqual(expect.arrayContaining(['invalid-expression', 'missing-config']))
