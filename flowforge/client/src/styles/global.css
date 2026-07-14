@@ -1855,6 +1855,113 @@ html, body, #root {
 }
 
 /* Run insights panel (InsightsPanel) — shares the webhook panel shell. */
+/* Test scenarios panel. */
+.tests-panel__toolbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+.tests-summary {
+  font-size: 13px;
+  font-weight: 600;
+}
+.tests-summary--pass { color: #15803d; }
+.tests-summary--fail { color: #b91c1c; }
+
+.tests-btn {
+  font-size: 13px;
+  border: 1px solid #d1d5db;
+  background: #fff;
+  border-radius: 6px;
+  padding: 4px 10px;
+  cursor: pointer;
+  color: #374151;
+}
+.tests-btn:hover:not(:disabled) { background: #f9fafb; }
+.tests-btn:disabled { opacity: 0.55; cursor: default; }
+.tests-btn--primary { background: #4f46e5; border-color: #4f46e5; color: #fff; }
+.tests-btn--primary:hover:not(:disabled) { background: #4338ca; }
+.tests-btn--danger:hover:not(:disabled) { color: #b91c1c; border-color: #fecaca; background: #fef2f2; }
+.tests-btn--add {
+  width: 100%;
+  border-style: dashed;
+  margin-top: 8px;
+}
+
+.tests-scenario {
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  padding: 8px 10px;
+  margin-bottom: 8px;
+}
+.tests-scenario__head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.tests-scenario__name { font-weight: 600; }
+.tests-scenario__spacer { flex: 1; }
+.tests-scenario__runstatus {
+  margin: 6px 0 0;
+  font-size: 12px;
+  color: #b45309;
+}
+.tests-badge {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 1px 6px;
+  border-radius: 4px;
+}
+.tests-badge--pass { color: #15803d; background: #f0fdf4; }
+.tests-badge--fail { color: #b91c1c; background: #fef2f2; }
+
+.tests-assertions {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.tests-assertion {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  font-size: 12px;
+  color: #16a34a;
+}
+.tests-assertion--fail { color: #dc2626; }
+.tests-assertion__mark { font-weight: 700; }
+.tests-assertion__expr {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  color: #374151;
+}
+.tests-assertion__desc { color: #9ca3af; }
+.tests-assertion__error { color: #dc2626; font-style: italic; }
+
+.tests-editor {
+  border: 1px solid #c7d2fe;
+  background: #f5f7ff;
+  border-radius: 8px;
+  padding: 10px;
+  margin-bottom: 8px;
+}
+.tests-assertion-edit {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+.tests-assertion-edit__expr { flex: 2; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.tests-assertion-edit__desc { flex: 1; }
+.tests-editor__actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+}
+
 .insights__stats {
   display: grid;
   grid-template-columns: repeat(3, 1fr);

@@ -11,6 +11,8 @@ export default function CanvasToolbar({
   onToggleRunSettings,
   onToggleInsights,
   insightsOpen,
+  onToggleTests,
+  testsOpen,
   onToggleCommentMode,
   commentMode,
   onAutoLayout,
@@ -85,6 +87,14 @@ export default function CanvasToolbar({
         aria-pressed={insightsOpen}
       >
         📊 Insights
+      </button>
+      <button
+        className={`toolbar-btn toolbar-btn--tests${testsOpen ? ' toolbar-btn--active' : ''}`}
+        title="Test scenarios — assert on the workflow's output and gate CI on them"
+        onClick={onToggleTests}
+        aria-pressed={testsOpen}
+      >
+        🧪 Tests
       </button>
       <button
         className={`toolbar-btn toolbar-btn--comment${commentMode ? ' toolbar-btn--active' : ''}`}

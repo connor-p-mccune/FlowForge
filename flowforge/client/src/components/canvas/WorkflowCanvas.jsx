@@ -25,6 +25,7 @@ import GenerateModal from './GenerateModal'
 import WebhookPanel from './WebhookPanel'
 import RunSettingsPanel from './RunSettingsPanel'
 import InsightsPanel from './InsightsPanel'
+import TestsPanel from './TestsPanel'
 import HistoryPanel from './HistoryPanel'
 import IssuesPanel from './IssuesPanel'
 import ExecutionPanel from '../execution/ExecutionPanel'
@@ -84,6 +85,7 @@ function CanvasInner({ workflowId }) {
   // Per-workflow run limits (concurrency cap + at-limit policy)
   const [runSettingsOpen, setRunSettingsOpen] = useState(false)
   const [insightsOpen, setInsightsOpen] = useState(false)
+  const [testsOpen, setTestsOpen] = useState(false)
 
   // AI workflow generation (natural-language description → full graph)
   const [generateOpen, setGenerateOpen] = useState(false)
@@ -937,6 +939,8 @@ function CanvasInner({ workflowId }) {
         onToggleRunSettings={() => setRunSettingsOpen((v) => !v)}
         onToggleInsights={() => setInsightsOpen((v) => !v)}
         insightsOpen={insightsOpen}
+        onToggleTests={() => setTestsOpen((v) => !v)}
+        testsOpen={testsOpen}
         onToggleCommentMode={toggleCommentMode}
         commentMode={commentMode}
         onAutoLayout={handleAutoLayout}
@@ -1057,6 +1061,11 @@ function CanvasInner({ workflowId }) {
         open={insightsOpen}
         onClose={() => setInsightsOpen(false)}
         nodes={nodes}
+      />
+      <TestsPanel
+        workflowId={workflowId}
+        open={testsOpen}
+        onClose={() => setTestsOpen(false)}
       />
       {issuesOpen && (
         <IssuesPanel
