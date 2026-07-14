@@ -329,3 +329,25 @@ CREATE INDEX IF NOT EXISTS idx_execution_approvals_workspace
   ON execution_approvals (workspace_id, status, requested_at DESC);
 CREATE INDEX IF NOT EXISTS idx_execution_approvals_execution
   ON execution_approvals (execution_id);
+
+-- Workflow test scenarios: regression tests for a workflow. A scenario is a
+-- named trigger payload plus a set of FXL assertions over the resulting run's
+-- outputs (services/workflowTester.js runs the scenario through the engine in
+-- dry-run mode and evaluates each assertion). trigger_data is the JSON payload
+-- the trigger nodes emit (nullable = {}); assertions is a JSON array of
+-- { expression, description? }. created_by is kept for the audit trail (LEFT
+-- JOINed for display so a deleted user doesn't drop the scenario).
+CREATE TABLE IF NOT EXISTS workflow_tests (
+  id           TEXT PRIMARY KEY,
+  workflow_id  TEXT NOT NULL REFERENCES workflows(id) ON DELETE CASCADE,
+  name         TEXT NOT NULL,
+  trigger_data TEXT,
+  assertions   TEXT NOT NULL DEFAULT '[]',
+  created_by   TEXT REFERENCES users(id),
+  created_at   TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at   TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- The test panel lists a workflow's scenarios oldest-first (stable order).
+CREATE INDEX IF NOT EXISTS idx_workflow_tests_workflow
+  ON workflow_tests (workflow_id, created_at);

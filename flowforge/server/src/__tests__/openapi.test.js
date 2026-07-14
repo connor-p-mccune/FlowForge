@@ -34,6 +34,7 @@ describe('GET /api/v1/openapi.json', () => {
       '/workflows/{workflowId}/forecast',
       '/workflows/{workflowId}/insights',
       '/workflows/{workflowId}/schedule',
+      '/workflows/{workflowId}/tests/run',
       '/workflows/{workflowId}/trigger',
     ])
     // Bearer auth is the declared scheme, applied globally.

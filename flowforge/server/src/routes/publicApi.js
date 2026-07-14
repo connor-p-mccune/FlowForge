@@ -21,6 +21,7 @@ const { respondToApproval } = require('../services/approvals')
 const { admitRun } = require('../services/concurrencyGate')
 const { computeInsights, forecastFor, parseLimit } = require('./insights')
 const { scheduleExpressionOf, previewFor, parseCount } = require('./schedule')
+const { runSuite } = require('../services/workflowTester')
 
 const router = express.Router()
 
@@ -240,6 +241,23 @@ router.get('/workflows/:id/schedule', tokenAuth('read'), (req, res) => {
       active: workflow.status === 'deployed',
       ...previewFor(expression, parseCount(req.query.count)),
     })
+  } catch (err) {
+    console.error(err)
+    res.status(500).json({ error: 'Internal server error' })
+  }
+})
+
+// POST /api/v1/workflows/:id/tests/run — run the workflow's test scenarios and
+// return a pass/fail rollup. This is the CI gate: `ok: false` (or a non-2xx)
+// fails the pipeline. Requires the `trigger` scope because it executes the
+// workflow (in dry-run: side-effecting nodes don't fire, approvals auto-approve),
+// like starting a run does.
+router.post('/workflows/:id/tests/run', tokenAuth('trigger'), async (req, res) => {
+  try {
+    const workflow = getWorkflowForMember(req.params.id, req.user.id)
+    if (!workflow) return res.status(404).json({ error: 'Workflow not found' })
+    const summary = await runSuite(workflow, { triggeredBy: req.user.id })
+    res.json(summary)
   } catch (err) {
     console.error(err)
     res.status(500).json({ error: 'Internal server error' })

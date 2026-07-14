@@ -270,6 +270,35 @@ const spec = {
         },
       },
     },
+    '/workflows/{workflowId}/tests/run': {
+      post: {
+        tags: ['workflows'],
+        summary: 'Run the workflow’s test scenarios (CI gate)',
+        description:
+          'Run every test scenario defined for the workflow — each a trigger ' +
+          'payload plus FXL assertions over the resulting run’s output — through ' +
+          'the engine in dry-run mode (side-effecting nodes don’t fire, approvals ' +
+          'auto-approve), and return a pass/fail rollup. `ok: false` means at ' +
+          'least one scenario failed: fail the CI job on it. Requires the ' +
+          '`trigger` scope (it executes the workflow).',
+        operationId: 'runWorkflowTests',
+        parameters: [{ $ref: '#/components/parameters/WorkflowId' }],
+        responses: {
+          200: {
+            description: 'The suite result (`ok` is the gate).',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/TestSuiteResult' },
+              },
+            },
+          },
+          401: { $ref: '#/components/responses/Unauthorized' },
+          403: { $ref: '#/components/responses/Forbidden' },
+          404: { $ref: '#/components/responses/NotFound' },
+          429: { $ref: '#/components/responses/RateLimited' },
+        },
+      },
+    },
     '/executions/{executionId}': {
       get: {
         tags: ['executions'],
@@ -788,6 +817,49 @@ const spec = {
             type: 'array',
             items: { type: 'string', format: 'date-time' },
             description: 'Upcoming fire times, UTC ISO-8601, oldest first.',
+          },
+        },
+      },
+      TestSuiteResult: {
+        type: 'object',
+        properties: {
+          workflowId: { type: 'string' },
+          ok: {
+            type: 'boolean',
+            description: 'True only when every scenario passed — the CI gate.',
+          },
+          total: { type: 'integer' },
+          passed: { type: 'integer' },
+          failed: { type: 'integer' },
+          scenarios: {
+            type: 'array',
+            items: {
+              type: 'object',
+              properties: {
+                id: { type: 'string' },
+                name: { type: 'string' },
+                executionId: { type: 'string' },
+                runStatus: {
+                  type: 'string',
+                  description: 'The dry-run’s terminal status, or "timed-out".',
+                },
+                passed: { type: 'boolean' },
+                timedOut: { type: 'boolean' },
+                error: { type: 'string', nullable: true },
+                assertions: {
+                  type: 'array',
+                  items: {
+                    type: 'object',
+                    properties: {
+                      expression: { type: 'string' },
+                      description: { type: 'string', nullable: true },
+                      passed: { type: 'boolean' },
+                      error: { type: 'string', nullable: true },
+                    },
+                  },
+                },
+              },
+            },
           },
         },
       },
