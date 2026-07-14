@@ -443,6 +443,47 @@ otherwise hang it. A node that throws is reported as a *failed verdict* with
 a 200 — a failing test is a successful bench run — so the client renders the
 error inline rather than treating it as a request error.
 
+### Workflow test scenarios
+
+Where the node test bench checks one node, `services/workflowTester.js` checks a
+whole workflow. A scenario is a named trigger payload plus a list of FXL
+assertions; running it executes the workflow through the **real engine in
+dry-run mode** and evaluates each assertion against the run. It's the same
+testing discipline the codebase applies to itself (`docs/ARCHITECTURE.md` §
+Testing strategy), turned on the workflows users build — so a graph edit that
+breaks a contract is caught before deploy, not at 3am.
+
+The design is almost entirely reuse:
+
+- **The engine, unchanged.** `runScenario` drives `runExecution` — the same
+  ready-set scheduler, `{{…}}` templating, secret decryption, and redaction a
+  production run uses — so a passing scenario is the behaviour the workflow will
+  actually produce. Dry-run mode is what makes it safe to run in CI on every
+  push: side-effecting nodes (email/Slack/HTTP) return what they *would* send
+  instead of firing, and approval gates auto-approve.
+
+- **Dry-run identity, so nothing is polluted.** Scenario runs are recorded with
+  `trigger_type = 'dry-run'`, which means every surface that already excludes
+  test-mode runs — insights percentiles, the status badge, the SLA monitor —
+  excludes these for free. A CI suite hammering the gate can't skew a p95 or
+  flip a badge to failing. No new exclusion rule was needed anywhere.
+
+- **FXL, not a second rules engine.** Assertions are the same expression
+  language the condition, filter, and switch nodes evaluate, so the linter's
+  static check validates them at authoring time (a broken assertion is a 400,
+  not a mid-run surprise) and the inline playground already understands the
+  syntax. They read from a scope of `{ output, steps, status }`: `output` is the
+  run's return value, `steps` maps each node id to its (persisted, redacted)
+  output — `steps["http-1"].status == 200` — and `status` lets a scenario assert
+  a *failure* path (`status == "failed"`), not just a happy one.
+
+- **The same suite, three surfaces.** The canvas Tests panel authors and runs
+  scenarios; `flowforge test <id>` and the public
+  `POST /api/v1/workflows/:id/tests/run` run the whole suite and key CI on its
+  `ok` flag. Each scenario run is bounded by a timeout, so a workflow with a real
+  delay node (which sleeps even in dry-run) reports *timed-out* rather than
+  hanging the gate.
+
 ---
 
 ## Status badges

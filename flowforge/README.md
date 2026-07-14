@@ -83,6 +83,15 @@ order while streaming live progress back to every collaborator on the canvas.
   (side-effecting nodes report what they'd send), or fire for real. Reuses the
   engine's own runner + secret-redaction pipeline, so a bench run behaves
   exactly like the node would inside a run.
+- **Workflow test scenarios** — turn a workflow into a regression-testable unit.
+  A scenario is a named trigger payload plus a list of **FXL assertions** over
+  the run's output (`output.total > 0`, `steps["http-1"].status == 200`,
+  `status == "completed"`); running it drives the workflow in dry-run mode
+  (nothing fires, approvals auto-approve) and reports exactly which assertion
+  failed. Author and run them in the canvas's **🧪 Tests** panel, and gate CI on
+  the whole suite with `flowforge test <id>` (exits non-zero on any failure) or
+  the public `POST /api/v1/workflows/:id/tests/run` endpoint — the same testing
+  discipline the codebase applies to itself, pointed at the workflows you build.
 - **Workflow linter** — one click checks the canvas before you run it: cycles,
   dead branches, missing config, references to nodes that aren't upstream,
   unknown `{{secrets.*}}` names, undeployed sub-workflow targets. Click an

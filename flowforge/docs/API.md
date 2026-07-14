@@ -246,6 +246,40 @@ is deployed); `reachable: false` for a valid-but-impossible expression (e.g. Feb
 
 Requires the `read` scope.
 
+### Run the test scenarios (CI gate)
+
+```bash
+curl -s -X POST "https://your-flowforge-host/api/v1/workflows/6f0c…/tests/run" \
+  -H "Authorization: Bearer $FLOWFORGE_TOKEN"
+```
+
+Response `200` — runs every test scenario defined for the workflow (each a
+trigger payload plus FXL assertions over the resulting run's output) through the
+engine in dry-run mode, and returns a pass/fail rollup. **`ok` is the gate**:
+fail the CI job when it is `false`. Each scenario reports its per-assertion
+results so a failure says exactly what broke.
+
+```json
+{
+  "workflowId": "6f0c…",
+  "ok": false,
+  "total": 2,
+  "passed": 1,
+  "failed": 1,
+  "scenarios": [
+    { "name": "happy path", "passed": true, "runStatus": "completed", "assertions": [
+      { "expression": "output.status == \"ok\"", "passed": true }
+    ] },
+    { "name": "large order", "passed": false, "runStatus": "completed", "assertions": [
+      { "expression": "output.total > 1000", "description": "should be big", "passed": false, "error": null }
+    ] }
+  ]
+}
+```
+
+Requires the `trigger` scope (it executes the workflow). `flowforge test <id>`
+wraps this and exits non-zero on `ok: false`.
+
 ### Poll an execution
 
 ```bash

@@ -48,6 +48,7 @@ export FLOWFORGE_TOKEN=ffp_…
 | `flowforge forecast <id>` | Predicted next-run duration and bottleneck ([docs](../docs/INSIGHTS.md#forecasting-the-next-run)) |
 | `flowforge schedule <id> [--count N]` | Upcoming scheduled run times, computed from the workflow's cron (UTC) |
 | `flowforge check <id> [--min-success-rate PCT] [--max-p95 SECONDS] [--strict]` | Gate CI on workflow health — exits non-zero on an SLA breach or a degrading trend |
+| `flowforge test <id>` | Run the workflow's test scenarios (FXL assertions over a dry-run) — exits non-zero on any failure |
 | `flowforge run <exec-id> [--watch]` | One run with its steps |
 | `flowforge cancel <exec-id>` | Stop a queued or running run (cooperative) |
 | `flowforge resume <exec-id> [--watch]` | Continue a failed/cancelled run — succeeded steps are reused, only the failed part re-runs |
@@ -85,6 +86,23 @@ pipeline can refuse to ship on top of a degrading automation.
 
 With no thresholds passed it falls back to the workflow's own SLA targets;
 `--strict` also fails on any anomalous run in the window.
+
+## Gate a deploy on workflow test scenarios
+
+Where `check` gates on *past* health, `test` gates on *correctness now*: it runs
+the workflow's [test scenarios](../docs/ARCHITECTURE.md#workflow-test-scenarios)
+— each a trigger payload plus FXL assertions over the resulting dry-run — and
+exits non-zero if any assertion fails, printing which one.
+
+```yaml
+- run: npx --prefix cli flowforge test $WORKFLOW_ID
+  env:
+    FLOWFORGE_URL: ${{ vars.FLOWFORGE_URL }}
+    FLOWFORGE_TOKEN: ${{ secrets.FLOWFORGE_TOKEN }}
+```
+
+An empty suite is a skip (exit 0) — an untested workflow isn't broken, just
+unverified.
 
 ## Development
 
