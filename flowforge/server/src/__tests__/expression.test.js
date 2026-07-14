@@ -228,6 +228,31 @@ describe('FXL standard library', () => {
     expect(evalExpr('slice([1, 2, 3, 4], 1, 3)')).toEqual([2, 3])
   })
 
+  it('date helpers extract UTC components', () => {
+    const scope = { d: '2026-01-14T09:23:45Z' }
+    expect(evalExpr('year(d)', scope)).toBe(2026)
+    expect(evalExpr('month(d)', scope)).toBe(1) // 1-based
+    expect(evalExpr('day(d)', scope)).toBe(14)
+    expect(evalExpr('hour(d)', scope)).toBe(9)
+    expect(evalExpr('minute(d)', scope)).toBe(23)
+    expect(evalExpr('weekday(d)', scope)).toBe(3) // Wednesday
+    expect(evalExpr('parseDate(1768382625000)')).toBe('2026-01-14T09:23:45.000Z')
+  })
+
+  it('date arithmetic and comparison', () => {
+    expect(evalExpr('dateAdd("2026-01-14T00:00:00Z", 2, "days")')).toBe('2026-01-16T00:00:00.000Z')
+    expect(evalExpr('dateAdd("2026-01-14T00:00:00Z", -30, "minutes")')).toBe('2026-01-13T23:30:00.000Z')
+    expect(evalExpr('dateDiff("2026-01-14T00:00:00Z", "2026-01-21T00:00:00Z", "days")')).toBe(7)
+    expect(evalExpr('dateDiff("2026-01-14T00:00:00Z", "2026-01-14T06:00:00Z", "hours")')).toBe(6)
+    expect(evalExpr('isBefore("2026-01-01T00:00:00Z", "2026-06-01T00:00:00Z")')).toBe(true)
+    expect(evalExpr('isAfter("2026-06-01T00:00:00Z", "2026-01-01T00:00:00Z")')).toBe(true)
+  })
+
+  it('date helpers reject bad input and units', () => {
+    expect(() => evalExpr('year("not a date")')).toThrow(/not a valid date/)
+    expect(() => evalExpr('dateAdd("2026-01-14T00:00:00Z", 1, "fortnights")')).toThrow(/unit must be one of/)
+  })
+
   it('object helpers', () => {
     expect(evalExpr('keys(obj)', { obj: { a: 1, b: 2 } })).toEqual(['a', 'b'])
     expect(evalExpr('values(obj)', { obj: { a: 1, b: 2 } })).toEqual([1, 2])

@@ -150,9 +150,25 @@ you run.)
 `keys(obj)` · `values(obj)` · `has(obj, key)` ·
 `get(obj, "a.b.c"[, fallback])` (safe dotted-path lookup).
 
-### Time
+### Time & dates
 `now()` (ISO-8601 string) · `nowMs()` (epoch milliseconds) — the run's clock,
 for rules like `nowMs() - created > 86400000`.
+
+Date helpers work over an ISO-8601 string **or** epoch milliseconds, all reading
+UTC (like the schedule engine), so a rule behaves the same regardless of the
+server's timezone:
+
+- `parseDate(v)` → normalized ISO string · `year(v)` · `month(v)` (1–12) ·
+  `day(v)` · `hour(v)` · `minute(v)` · `weekday(v)` (0–6, Sunday = 0)
+- `dateAdd(when, amount, unit)` → ISO string; `dateDiff(a, b, unit)` → `b − a` in
+  `unit` (may be fractional). `unit` ∈ `seconds` | `minutes` | `hours` | `days`.
+- `isBefore(a, b)` · `isAfter(a, b)`
+
+```
+dateDiff(order.createdAt, now(), "days") > 7      // older than a week
+weekday(now()) == 0 || weekday(now()) == 6        // fired on a weekend
+isBefore(now(), subscription.expiresAt)           // still active
+```
 
 ---
 

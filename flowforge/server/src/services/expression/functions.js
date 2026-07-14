@@ -154,6 +154,58 @@ const registry = {
   // — time — a run's "now", so a rule can compare against the clock —
   now: [0, 0, () => new Date().toISOString()],
   nowMs: [0, 0, () => Date.now()],
+
+  // — dates — pure, deterministic helpers over ISO-8601 / epoch-ms timestamps,
+  // so a rule can reason about ages and windows ("older than 7 days", "due this
+  // hour") without pulling a date library into the sandbox. All component
+  // accessors read UTC, matching the cron engine, so a rule behaves the same
+  // regardless of the server's timezone.
+  parseDate: [1, 1, (v) => toDate(v, 'parseDate').toISOString()],
+  year: [1, 1, (v) => toDate(v, 'year').getUTCFullYear()],
+  // month is 1-12 (not JS's 0-11), matching how a human writes a date.
+  month: [1, 1, (v) => toDate(v, 'month').getUTCMonth() + 1],
+  day: [1, 1, (v) => toDate(v, 'day').getUTCDate()],
+  hour: [1, 1, (v) => toDate(v, 'hour').getUTCHours()],
+  minute: [1, 1, (v) => toDate(v, 'minute').getUTCMinutes()],
+  // weekday is 0-6 with Sunday = 0, matching Date#getUTCDay and cron's dow.
+  weekday: [1, 1, (v) => toDate(v, 'weekday').getUTCDay()],
+  // dateAdd(when, amount, unit) → ISO string. unit ∈ seconds|minutes|hours|days.
+  dateAdd: [3, 3, (v, amount, unit) => {
+    const base = toDate(v, 'dateAdd').getTime()
+    return new Date(base + num(amount, 'dateAdd') * unitMs(unit, 'dateAdd')).toISOString()
+  }],
+  // dateDiff(a, b, unit) → (b − a) expressed in unit (may be fractional).
+  dateDiff: [3, 3, (a, b, unit) => {
+    const ms = toDate(b, 'dateDiff').getTime() - toDate(a, 'dateDiff').getTime()
+    return ms / unitMs(unit, 'dateDiff')
+  }],
+  isBefore: [2, 2, (a, b) => toDate(a, 'isBefore').getTime() < toDate(b, 'isBefore').getTime()],
+  isAfter: [2, 2, (a, b) => toDate(a, 'isAfter').getTime() > toDate(b, 'isAfter').getTime()],
+}
+
+// Coerce an FXL value to a Date. Accepts an ISO-8601 string or epoch
+// milliseconds (number). Throws a readable error on anything unparseable, so a
+// bad timestamp fails the same friendly way a misused function does.
+function toDate(value, fnName) {
+  if (typeof value === 'number') {
+    const d = new Date(value)
+    if (Number.isNaN(d.getTime())) fail(`${fnName}: invalid timestamp`)
+    return d
+  }
+  if (typeof value === 'string' && value.trim() !== '') {
+    const ms = Date.parse(value)
+    if (Number.isNaN(ms)) fail(`${fnName}: "${value}" is not a valid date`)
+    return new Date(ms)
+  }
+  fail(`${fnName}: expected an ISO date string or epoch milliseconds`)
+}
+
+// Milliseconds per supported unit for dateAdd/dateDiff.
+const UNIT_MS = { seconds: 1000, minutes: 60000, hours: 3600000, days: 86400000 }
+function unitMs(unit, fnName) {
+  const ms = UNIT_MS[String(unit)]
+  if (!ms) fail(`${fnName}: unit must be one of ${Object.keys(UNIT_MS).join(', ')}`)
+  return ms
 }
 
 // Shared truthiness used by the evaluator's logical operators and bool().
