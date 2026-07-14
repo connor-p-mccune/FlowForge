@@ -6,6 +6,8 @@ process.env.NODE_ENV = 'test'
 
 const { app } = require('../index')
 const { buildAdjacency, topoSort } = require('../services/dagParser')
+const { buildTemplates } = require('../db/templates')
+const { lintGraph } = require('../services/workflowLinter')
 
 const EXPECTED_CATEGORIES = [
   'AI Automation',
@@ -14,6 +16,7 @@ const EXPECTED_CATEGORIES = [
   'Data Processing',
   'Resilience',
   'Human in the Loop',
+  'Validation & Routing',
 ]
 
 describe('workflow templates', () => {
@@ -40,9 +43,9 @@ describe('workflow templates', () => {
       expect(res.status).toBe(200)
       expect(res.body.templates).toBeDefined()
 
-      // Auto-seeded on startup: the seven built-in templates across six categories.
+      // Auto-seeded on startup: the eight built-in templates across seven categories.
       const all = flatten(res.body.templates)
-      expect(all).toHaveLength(7)
+      expect(all).toHaveLength(8)
       for (const cat of EXPECTED_CATEGORIES) {
         expect(res.body.templates[cat]?.length).toBeGreaterThan(0)
       }
@@ -59,6 +62,18 @@ describe('workflow templates', () => {
         expect(Array.isArray(t.graph.edges)).toBe(true)
         expect(t.graph.nodes.length).toBeGreaterThan(0)
       }
+    })
+
+    it('ships a validate + switch showcase template that lints without errors', () => {
+      const showcase = buildTemplates().find((t) => t.category === 'Validation & Routing')
+      expect(showcase).toBeDefined()
+      // It exercises the new branching nodes.
+      const types = showcase.graph.nodes.map((n) => n.type)
+      expect(types).toContain('validate')
+      expect(types).toContain('switch')
+      // The schema, switch cases, and upstream references are all well-formed.
+      const errors = lintGraph(showcase.graph).filter((i) => i.severity === 'error')
+      expect(errors).toEqual([])
     })
 
     it('ships templates whose graphs are runnable DAGs (no cycles, all wired)', async () => {

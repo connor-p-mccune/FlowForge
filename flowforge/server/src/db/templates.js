@@ -216,6 +216,56 @@ function buildTemplates() {
         edges: [e('trigger', 'prompt'), e('prompt', 'log')],
       },
     },
+
+    // 8 ---------------------------------------------------------------------
+    {
+      name: 'Webhook → Validate → Switch by Tier → Route',
+      category: 'Validation & Routing',
+      description:
+        'Validate an incoming order against a JSON Schema (malformed payloads divert to an alert), then route valid orders by customer tier — enterprise, pro, or a default — to the right handler.',
+      graph: {
+        nodes: [
+          n('trigger', 'trigger-webhook', 'Incoming Order', X(0), Y),
+          n('validate', 'validate', 'Validate Order', X(1), Y, {
+            schema:
+              '{\n  "type": "object",\n  "required": ["orderId", "total", "tier"],\n  "properties": {\n    "orderId": { "type": "string" },\n    "total": { "type": "number", "minimum": 0 },\n    "tier": { "type": "string", "enum": ["enterprise", "pro", "basic"] }\n  }\n}',
+            source: '',
+          }),
+          // Invalid branch: tell the channel the payload was rejected and why.
+          n('malformed', 'action-slack', 'Malformed Payload', X(2), Y + 200, {
+            webhookUrl: 'https://hooks.slack.com/services/T000/B000/XXXXXXXX',
+            text: 'Rejected an order with an invalid payload: {{validate.errors}}',
+          }),
+          // Valid branch: route by tier (reads validate.data, the checked payload).
+          n('route', 'switch', 'Route by Tier', X(2), Y, {
+            cases: [
+              { label: 'enterprise', expression: 'data.tier == "enterprise"' },
+              { label: 'pro', expression: 'data.tier == "pro"' },
+            ],
+          }),
+          n('enterprise', 'action-email', 'Enterprise Handler', X(3), Y - 160, {
+            to: 'enterprise-desk@example.com',
+            subject: 'Enterprise order {{validate.data.orderId}}',
+            body: 'A new enterprise order arrived: {{validate.data.orderId}} (total {{validate.data.total}}).',
+          }),
+          n('pro', 'action-slack', 'Pro Handler', X(3), Y, {
+            webhookUrl: 'https://hooks.slack.com/services/T000/B000/XXXXXXXX',
+            text: 'Pro order {{validate.data.orderId}} — total {{validate.data.total}}.',
+          }),
+          n('basic', 'output-log', 'Basic Handler (default)', X(3), Y + 160, {
+            message: 'Basic order {{validate.data.orderId}} logged.',
+          }),
+        ],
+        edges: [
+          e('trigger', 'validate'),
+          e('validate', 'route', 'valid'),
+          e('validate', 'malformed', 'invalid'),
+          e('route', 'enterprise', 'enterprise'),
+          e('route', 'pro', 'pro'),
+          e('route', 'basic', 'default'),
+        ],
+      },
+    },
   ]
 }
 
