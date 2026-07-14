@@ -11,6 +11,7 @@ const runs = require('../src/commands/runs')
 const insights = require('../src/commands/insights')
 const forecast = require('../src/commands/forecast')
 const schedule = require('../src/commands/schedule')
+const testCmd = require('../src/commands/test')
 const check = require('../src/commands/check')
 const runCmd = require('../src/commands/run')
 const cancel = require('../src/commands/cancel')
@@ -333,6 +334,77 @@ test('schedule without a workflow id prints usage and exits 1', async () => {
   const stub = await startStub(() => ({ json: {} }))
   const ctx = makeCtx(stub.api)
   const code = await schedule({ positionals: [], flags: {} }, ctx)
+  await stub.close()
+  assert.equal(code, 1)
+  assert.equal(stub.requests.length, 0)
+})
+
+test('test posts the suite run and exits 0 when every scenario passes', async () => {
+  const stub = await startStub((method, url) => {
+    assert.equal(method, 'POST')
+    assert.equal(url, '/api/v1/workflows/wf-1/tests/run')
+    return {
+      json: {
+        ok: true,
+        total: 2,
+        passed: 2,
+        failed: 0,
+        scenarios: [
+          { name: 'happy', passed: true, runStatus: 'completed', assertions: [] },
+          { name: 'edge', passed: true, runStatus: 'completed', assertions: [] },
+        ],
+      },
+    }
+  })
+  const ctx = makeCtx(stub.api)
+  const code = await testCmd({ positionals: ['wf-1'], flags: {} }, ctx)
+  await stub.close()
+  assert.equal(code, 0)
+  assert.match(ctx.output(), /all 2 scenarios passed/)
+})
+
+test('test exits 1 and shows the failing assertion when a scenario fails', async () => {
+  const stub = await startStub(() => ({
+    json: {
+      ok: false,
+      total: 2,
+      passed: 1,
+      failed: 1,
+      scenarios: [
+        { name: 'happy', passed: true, runStatus: 'completed', assertions: [] },
+        {
+          name: 'wrong',
+          passed: false,
+          runStatus: 'completed',
+          assertions: [
+            { expression: 'output.total == 1', passed: true },
+            { expression: 'output.total == 999', description: 'bad', passed: false, error: null },
+          ],
+        },
+      ],
+    },
+  }))
+  const ctx = makeCtx(stub.api)
+  const code = await testCmd({ positionals: ['wf-1'], flags: {} }, ctx)
+  await stub.close()
+  assert.equal(code, 1)
+  assert.match(ctx.output(), /1 of 2 scenarios failed/)
+  assert.match(ctx.output(), /output\.total == 999/)
+})
+
+test('test skips (exit 0) when the workflow has no scenarios', async () => {
+  const stub = await startStub(() => ({ json: { ok: false, total: 0, passed: 0, failed: 0, scenarios: [] } }))
+  const ctx = makeCtx(stub.api)
+  const code = await testCmd({ positionals: ['wf-1'], flags: {} }, ctx)
+  await stub.close()
+  assert.equal(code, 0)
+  assert.match(ctx.output(), /No test scenarios/)
+})
+
+test('test without a workflow id prints usage and exits 1', async () => {
+  const stub = await startStub(() => ({ json: {} }))
+  const ctx = makeCtx(stub.api)
+  const code = await testCmd({ positionals: [], flags: {} }, ctx)
   await stub.close()
   assert.equal(code, 1)
   assert.equal(stub.requests.length, 0)
