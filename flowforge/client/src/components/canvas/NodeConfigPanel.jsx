@@ -536,6 +536,41 @@ export default function NodeConfigPanel({
           </>
         )
       }
+      case 'validate':
+        return (
+          <>
+            <p className="config-panel__hint">
+              Check the incoming data against a JSON Schema. The run continues down
+              the <strong>valid</strong> or <strong>invalid</strong> branch — the
+              invalid branch receives the list of errors.
+            </p>
+            <label className="config-panel__field">
+              <span>Source (optional — supports {'{{node-id.field}}'})</span>
+              <input
+                value={config.source || ''}
+                placeholder={'defaults to the node input · {{webhook-1.body}}'}
+                onChange={(e) => setConfig('source', e.target.value)}
+              />
+            </label>
+            <label className="config-panel__field">
+              <span>JSON Schema</span>
+              <textarea
+                className="config-panel__code"
+                rows={8}
+                value={config.schema || ''}
+                aria-label="JSON Schema"
+                placeholder={'{ "type": "object", "required": ["id"] }'}
+                onChange={(e) => setConfig('schema', e.target.value)}
+              />
+            </label>
+            <p className="config-panel__hint">
+              Supports draft-07 basics: <code>type</code>, <code>required</code>,{' '}
+              <code>properties</code>, <code>enum</code>, <code>minimum</code>/
+              <code>maximum</code>, <code>minLength</code>, <code>pattern</code>,{' '}
+              <code>items</code>, and <code>format</code> (email / uri / date-time).
+            </p>
+          </>
+        )
       case 'filter':
         return (
           <>

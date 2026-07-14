@@ -529,6 +529,15 @@ html, body, #root {
   background: #f3f4f6;
 }
 
+/* Validate node: same branching shape/colour as condition (valid/invalid). */
+.node--validate {
+  border-color: #f59e0b;
+  background: #fffbeb;
+}
+.node--validate.node--selected {
+  border-color: #d97706;
+}
+
 /* Test mode (dry run): "Would send" badge + read-only payload popover */
 .node__dry-run-badge {
   margin-top: 8px;

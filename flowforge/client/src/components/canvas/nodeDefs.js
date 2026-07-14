@@ -53,6 +53,16 @@ export const NODE_DEFS = {
     subtype: 'switch',
     config: { cases: [{ label: 'case-1', expression: '' }] },
   },
+  // Validate: check the input against a JSON Schema; route valid / invalid.
+  'validate': {
+    label: 'Validate',
+    subtype: 'validate',
+    config: {
+      schema:
+        '{\n  "type": "object",\n  "required": ["id"],\n  "properties": {\n    "id": { "type": "integer" }\n  }\n}',
+      source: '',
+    },
+  },
   // Filter: keep the items of a list that satisfy an FXL predicate. source is a
   // template resolving to an array; predicate is a boolean expression evaluated
   // per item (item fields in scope directly, plus item / index / items).
@@ -141,6 +151,7 @@ export const TOOLBAR_BUTTONS = [
   { type: 'aggregate', label: 'Aggregate', className: 'toolbar-btn--action' },
   { type: 'condition', label: 'Condition', className: 'toolbar-btn--condition' },
   { type: 'switch', label: 'Switch', className: 'toolbar-btn--condition' },
+  { type: 'validate', label: 'Validate', className: 'toolbar-btn--condition' },
   { type: 'approval', label: 'Approval', className: 'toolbar-btn--approval' },
   { type: 'ai-prompt', label: 'AI', className: 'toolbar-btn--ai' },
   { type: 'ai-classify', label: 'Classify', className: 'toolbar-btn--ai' },

@@ -6,6 +6,7 @@ import TriggerNode from '../components/canvas/nodes/TriggerNode'
 import ActionNode from '../components/canvas/nodes/ActionNode'
 import ConditionNode from '../components/canvas/nodes/ConditionNode'
 import SwitchNode from '../components/canvas/nodes/SwitchNode'
+import ValidateNode from '../components/canvas/nodes/ValidateNode'
 import ApprovalNode from '../components/canvas/nodes/ApprovalNode'
 import AINode from '../components/canvas/nodes/AINode'
 import OutputNode from '../components/canvas/nodes/OutputNode'
@@ -166,6 +167,23 @@ describe('SwitchNode', () => {
     const { container } = renderNode(<SwitchNode data={{ config: { cases: [] } }} selected={false} />)
     expect(sources(container)).toHaveLength(1)
     expect(container.querySelector('[data-handleid="default"]')).toBeInTheDocument()
+  })
+})
+
+describe('ValidateNode', () => {
+  it('renders valid/invalid branch labels', () => {
+    renderNode(<ValidateNode data={{ label: 'Check body' }} selected={false} />)
+    expect(screen.getByText('Check body')).toBeInTheDocument()
+    expect(screen.getByText('valid')).toBeInTheDocument()
+    expect(screen.getByText('invalid')).toBeInTheDocument()
+  })
+
+  it('has one target and two source handles with valid/invalid ids for engine routing', () => {
+    const { container } = renderNode(<ValidateNode data={{}} selected={false} />)
+    expect(targets(container)).toHaveLength(1)
+    expect(sources(container)).toHaveLength(2)
+    expect(container.querySelector('[data-handleid="valid"]')).toBeInTheDocument()
+    expect(container.querySelector('[data-handleid="invalid"]')).toBeInTheDocument()
   })
 })
 

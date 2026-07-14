@@ -137,6 +137,14 @@ describe('NodeConfigPanel rendering', () => {
     setup(mk('trigger-schedule', { config: { cron: 'definitely-not-cron' } }))
     expect(screen.getByText(/Not a valid cron expression/i)).toBeInTheDocument()
   })
+
+  it('renders a schema editor for the validate node and edits it via onChange', () => {
+    const { onChange } = setup(mk('validate', { config: { schema: '{"type":"object"}' } }))
+    const editor = screen.getByLabelText('JSON Schema')
+    expect(editor).toHaveValue('{"type":"object"}')
+    fireEvent.change(editor, { target: { value: '{"type":"array"}' } })
+    expect(onChange).toHaveBeenCalledWith('n1', { config: { schema: '{"type":"array"}' } })
+  })
 })
 
 describe('NodeConfigPanel interactions', () => {
