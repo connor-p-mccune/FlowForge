@@ -43,11 +43,12 @@ sequentially. Instead it runs a ready-set scheduler:
 
 An edge is *active* when its source succeeded — and, for branching nodes,
 when the edge's handle matches the branch the node took. That one rule covers
-condition (`true`/`false`), approval (approved/rejected), and the **switch**
-node (the matched case's label, or `default`): each settles a `result` string
-and the engine activates the outgoing edge whose `sourceHandle` equals it, so a
-multi-way switch needed no new scheduling concept — only its type added to the
-set the activation check treats as branching. A join node's input is the merged
+condition (`true`/`false`), approval (approved/rejected), the **switch** node
+(the matched case's label, or `default`), and the **validate** node
+(`valid`/`invalid`): each settles a `result` string and the engine activates the
+outgoing edge whose `sourceHandle` equals it, so multi-way routing and a
+schema gate needed no new scheduling concept — only their types added to the set
+the activation check treats as branching. A join node's input is the merged
 output of all of its active upstream edges, so a diamond's two branches
 genuinely run in parallel and merge at the join.
 

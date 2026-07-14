@@ -29,9 +29,10 @@ order while streaming live progress back to every collaborator on the canvas.
   and **undo/redo** (`Ctrl/⌘-Z`) that broadcasts each step to collaborators so
   everyone converges on the same state.
 - **Rich node library** — manual, webhook & schedule triggers; HTTP request,
-  delay, email, Slack, and transform actions; branching conditions and a
-  **switch** node that routes a run down the first of many labelled cases to
-  match (an `if` vs a `switch`); **filter**, **map**, and **aggregate** nodes
+  delay, email, Slack, and transform actions; branching conditions, a **switch**
+  node that routes a run down the first of many labelled cases to match (an `if`
+  vs a `switch`), and a **validate** node that checks a payload against a JSON
+  Schema and forks valid/invalid; **filter**, **map**, and **aggregate** nodes
   that trim a list to matching items, reshape each one, or roll it up to totals;
   AI prompt / classify / extract nodes; log outputs; **sub-workflows** (call a
   workflow as a step) and **for-each** (fan a workflow out over a list).
