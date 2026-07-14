@@ -365,6 +365,72 @@ describe('lintGraph', () => {
     expect(issues[0].severity).toBe('error')
     expect(issues[issues.length - 1].severity).toBe('warning')
   })
+
+  describe('on-error policy wiring', () => {
+    const httpNode = (id, onError) =>
+      node(id, 'action-http', {
+        method: 'GET',
+        url: 'https://api.example.com',
+        headers: '{}',
+        ...(onError ? { onError } : {}),
+      })
+
+    it('accepts a correctly wired error branch', () => {
+      const graph = {
+        nodes: [
+          node('t1', 'trigger-manual'),
+          httpNode('h1', 'branch'),
+          node('ok', 'output-log', { message: 'ok' }),
+          node('err', 'output-log', { message: 'err' }),
+        ],
+        edges: [edge('t1', 'h1'), edge('h1', 'ok'), edge('h1', 'err', 'error')],
+      }
+      expect(lintGraph(graph)).toEqual([])
+    })
+
+    it('flags an error edge whose source policy is not branch', () => {
+      const graph = {
+        nodes: [
+          node('t1', 'trigger-manual'),
+          httpNode('h1', 'continue'),
+          node('err', 'output-log', { message: 'err' }),
+        ],
+        edges: [edge('t1', 'h1'), edge('h1', 'err', 'error')],
+      }
+      const issues = lintGraph(graph)
+      const dead = issues.find((i) => i.code === 'dead-error-branch')
+      expect(dead).toBeTruthy()
+      expect(dead.severity).toBe('error')
+      expect(dead.nodeId).toBe('h1')
+    })
+
+    it('warns when the branch policy has no error edge connected', () => {
+      const graph = {
+        nodes: [node('t1', 'trigger-manual'), httpNode('h1', 'branch')],
+        edges: [edge('t1', 'h1')],
+      }
+      const issues = lintGraph(graph)
+      const unwired = issues.find(
+        (i) => i.code === 'unwired-branch' && i.nodeId === 'h1'
+      )
+      expect(unwired).toBeTruthy()
+      expect(unwired.severity).toBe('warning')
+    })
+
+    it('warns on an unknown policy value and on uncatchable types', () => {
+      const graph = {
+        nodes: [
+          node('t1', 'trigger-manual'),
+          httpNode('h1', 'retry-forever'),
+          node('c1', 'condition', { left: 'x', operator: 'equals', right: 'y', onError: 'continue' }),
+        ],
+        edges: [edge('t1', 'h1'), edge('h1', 'c1')],
+      }
+      const issues = lintGraph(graph).filter((i) => i.code === 'invalid-config')
+      expect(issues.some((i) => i.nodeId === 'h1' && /on-error must be/.test(i.message))).toBe(true)
+      expect(issues.some((i) => i.nodeId === 'c1' && /no effect/.test(i.message))).toBe(true)
+    })
+  })
 })
 
 describe('POST /api/workflows/:id/lint', () => {

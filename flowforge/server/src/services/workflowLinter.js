@@ -446,6 +446,58 @@ function lintGraph({ nodes = [], edges = [] } = {}, { secretNames, workflowTarge
     }
   }
 
+  // Per-node error handling. The engine honors onError only on catchable
+  // types (not triggers, not branching nodes) and activates an 'error' edge
+  // only under the 'branch' policy — so a policy/wiring mismatch is a branch
+  // that silently never runs, exactly what a lint pass exists to catch.
+  const UNCATCHABLE = new Set(['condition', 'switch', 'validate', 'approval'])
+  for (const node of nodes) {
+    const rawPolicy = node.data?.config?.onError
+    const catchable = !node.type.startsWith('trigger-') && !UNCATCHABLE.has(node.type)
+    const validPolicy = rawPolicy == null || ['fail', 'continue', 'branch'].includes(rawPolicy)
+    if (!validPolicy) {
+      issues.push(
+        issue(
+          'warning',
+          'invalid-config',
+          `${label(node)}: on-error must be "fail", "continue", or "branch" — defaulting to fail`,
+          node.id
+        )
+      )
+    } else if (rawPolicy && rawPolicy !== 'fail' && !catchable) {
+      issues.push(
+        issue(
+          'warning',
+          'invalid-config',
+          `${label(node)}: on-error has no effect on ${node.type} nodes — their failure always fails the run`,
+          node.id
+        )
+      )
+    }
+
+    const policy = catchable && (rawPolicy === 'continue' || rawPolicy === 'branch') ? rawPolicy : 'fail'
+    const hasErrorEdge = validEdges.some((e) => e.source === node.id && e.sourceHandle === 'error')
+    if (hasErrorEdge && policy !== 'branch') {
+      issues.push(
+        issue(
+          'error',
+          'dead-error-branch',
+          `${label(node)}: an error branch is wired, but on-error is "${policy}" — the branch can never run`,
+          node.id
+        )
+      )
+    } else if (policy === 'branch' && !hasErrorEdge) {
+      issues.push(
+        issue(
+          'warning',
+          'unwired-branch',
+          `${label(node)}: on-error takes the error branch, but it isn't connected — a caught failure ends the flow there`,
+          node.id
+        )
+      )
+    }
+  }
+
   // Per-node config + template references.
   const incomingByNode = {}
   for (const e of validEdges) (incomingByNode[e.target] ||= []).push(e)
