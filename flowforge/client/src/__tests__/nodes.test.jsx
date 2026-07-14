@@ -113,6 +113,30 @@ describe('ActionNode', () => {
     fireEvent.click(badge)
     expect(container.querySelector('.dry-run-popover')).toBeNull()
   })
+
+  it('grows a dedicated error handle when onError is branch', () => {
+    const { container } = renderNode(
+      <ActionNode data={{ label: 'Call API', config: { onError: 'branch' } }} selected={false} />
+    )
+    expect(sources(container)).toHaveLength(2)
+    expect(container.querySelector('[data-handleid="error"]')).toBeInTheDocument()
+    // The main handle keeps no id, so existing edges survive toggling the policy.
+    const main = [...sources(container)].find((h) => !h.dataset.handleid)
+    expect(main).toBeTruthy()
+    expect(screen.getByText('ok')).toBeInTheDocument()
+    expect(screen.getByText('error')).toBeInTheDocument()
+  })
+
+  it('keeps a single source handle under fail and continue policies', () => {
+    for (const onError of [undefined, 'fail', 'continue']) {
+      const { container, unmount } = renderNode(
+        <ActionNode data={{ config: onError ? { onError } : {} }} selected={false} />
+      )
+      expect(sources(container)).toHaveLength(1)
+      expect(container.querySelector('[data-handleid="error"]')).toBeNull()
+      unmount()
+    }
+  })
 })
 
 describe('ConditionNode', () => {

@@ -188,6 +188,32 @@ describe('NodeConfigPanel interactions', () => {
     expect(onChange).toHaveBeenCalledWith('n1', { config: { cron: '0 9 * * 1' } })
   })
 
+  describe('on-error policy field', () => {
+    it('renders for catchable types and merges the choice into config', () => {
+      const { onChange } = setup(mk('action-http', { config: { url: 'https://x.test' } }))
+      const select = screen.getByText('If this node fails').parentElement.querySelector('select')
+      fireEvent.change(select, { target: { value: 'branch' } })
+      expect(onChange).toHaveBeenCalledWith('n1', {
+        config: { url: 'https://x.test', onError: 'branch' },
+      })
+    })
+
+    it('explains the error branch when the branch policy is selected', () => {
+      setup(mk('ai-prompt', { config: { onError: 'branch' } }))
+      expect(screen.getByText(/only the red/)).toBeInTheDocument()
+    })
+
+    it('does not render for triggers or branching node types', () => {
+      for (const type of ['trigger-manual', 'condition', 'switch', 'validate', 'approval']) {
+        const { unmount } = render(
+          <NodeConfigPanel node={mk(type)} onChange={vi.fn()} onClose={vi.fn()} onDelete={vi.fn()} />
+        )
+        expect(screen.queryByText('If this node fails')).not.toBeInTheDocument()
+        unmount()
+      }
+    })
+  })
+
   describe('switch case editor', () => {
     const switchNode = (cases) => mk('switch', { config: { cases } })
 

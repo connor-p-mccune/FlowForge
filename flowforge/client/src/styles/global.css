@@ -499,6 +499,10 @@ html, body, #root {
 .node__condition-label--true { color: #22c55e; }
 .node__condition-label--false { color: #ef4444; }
 
+/* The dedicated on-error outlet (SourceHandles) — red so the recovery path
+   reads at a glance, matching the error edge's stroke. */
+.react-flow__handle.node__handle--error { background: #dc2626; }
+
 /* Switch node: one outlet label per case, plus the default. */
 .node--switch {
   border-color: #f59e0b;
@@ -2455,6 +2459,8 @@ html, body, #root {
 /* Resumed runs: the step was not re-executed — its output was adopted from
    the run being resumed. */
 .status-badge--reused { background: #cffafe; color: #0e7490; }
+/* Caught: the node failed but its on-error policy handled it — the run went on. */
+.status-badge--caught { background: #ffedd5; color: #c2410c; }
 
 /* Step list */
 .step-list {

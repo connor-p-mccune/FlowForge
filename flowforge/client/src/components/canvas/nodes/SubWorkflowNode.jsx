@@ -1,4 +1,5 @@
 import { Handle, Position } from 'reactflow'
+import SourceHandles from './SourceHandles'
 
 // Sub-workflow node: calls another workflow as a step. The nested-boxes icon
 // signals "a workflow inside this workflow". The second line shows the selected
@@ -24,7 +25,7 @@ export default function SubWorkflowNode({ data, selected }) {
         <span className="node__label">{data.label || 'Sub-workflow'}</span>
       </div>
       <div className="node__type">{target || 'no workflow selected'}</div>
-      <Handle type="source" position={Position.Bottom} />
+      <SourceHandles config={data.config} />
     </div>
   )
 }

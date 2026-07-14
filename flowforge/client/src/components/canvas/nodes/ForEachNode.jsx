@@ -1,4 +1,5 @@
 import { Handle, Position } from 'reactflow'
+import SourceHandles from './SourceHandles'
 
 // For-each node: fans a workflow out over a list — the target runs once per
 // item with { item, index, total } as its trigger payload. The circular-arrows
@@ -32,7 +33,7 @@ export default function ForEachNode({ data, selected }) {
       <div className="node__type">
         {target ? `${target} · per item` : 'no workflow selected'}
       </div>
-      <Handle type="source" position={Position.Bottom} />
+      <SourceHandles config={data.config} />
     </div>
   )
 }

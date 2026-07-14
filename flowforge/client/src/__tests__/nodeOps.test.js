@@ -54,4 +54,11 @@ describe('decorateConditionEdges', () => {
     const input = [plain]
     expect(decorateConditionEdges(input)).toBe(input)
   })
+
+  it('labels and colors an on-error branch edge', () => {
+    const err = { id: 'e4', source: 'c', target: 'z', sourceHandle: 'error' }
+    const [decorated] = decorateConditionEdges([err])
+    expect(decorated.label).toBe('error')
+    expect(decorated.style.stroke).toBe('#d97706')
+  })
 })

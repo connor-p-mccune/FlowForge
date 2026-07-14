@@ -221,6 +221,48 @@ function SubWorkflowConfig({ workspaceId, currentWorkflowId, config, onPick }) {
   )
 }
 
+// Node types whose failure the engine can catch via the on-error policy —
+// everything that does real work. Triggers and branching nodes (condition /
+// switch / validate / approval) are excluded: they already settle a routing
+// result, so the engine ignores a policy on them (and the linter warns).
+const CATCHABLE_TYPES = new Set([
+  'action-http', 'action-delay', 'action-email', 'action-slack',
+  'transform', 'filter', 'map', 'aggregate',
+  'ai-prompt', 'ai-classify', 'ai-extract',
+  'sub-workflow', 'for-each',
+])
+
+// "If this node fails" — the per-node error-handling policy. Fail (default)
+// keeps the historical behavior; continue passes { failed, error } downstream
+// on the normal edges; branch grows a dedicated red 'error' handle on the
+// node and routes a caught failure down it.
+function OnErrorField({ config, setConfig }) {
+  const value = config.onError || 'fail'
+  return (
+    <>
+      <label className="config-panel__field">
+        <span>If this node fails</span>
+        <select value={value} onChange={(e) => setConfig('onError', e.target.value)}>
+          <option value="fail">Fail the run (default)</option>
+          <option value="continue">Continue — pass the error downstream</option>
+          <option value="branch">Take the error branch</option>
+        </select>
+      </label>
+      {value !== 'fail' && (
+        <p className="config-panel__hint">
+          Retries still happen first — the policy applies once they’re exhausted.
+          The caught failure becomes this node’s output:{' '}
+          <code>{'{ failed: true, error: { message } }'}</code>
+          {value === 'branch' && (
+            <> — and only the red <strong>error</strong> outlet activates; wire it
+            to the recovery path.</>
+          )}
+        </p>
+      )}
+    </>
+  )
+}
+
 // Shared help for FXL-powered fields (condition expression, filter predicate).
 // FXL reads live values from the node's data rather than substituting {{...}}
 // templates — a distinction worth calling out where the two styles meet.
@@ -865,6 +907,7 @@ export default function NodeConfigPanel({
           />
         </label>
         {renderFields()}
+        {CATCHABLE_TYPES.has(node.type) && <OnErrorField config={config} setConfig={setConfig} />}
         <VariableExplorer node={node} nodes={nodes} edges={edges} />
         <NodeTester workflowId={currentWorkflowId} node={node} />
         <div className="config-panel__node-id">

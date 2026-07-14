@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { Handle, Position } from 'reactflow'
+import SourceHandles from './SourceHandles'
 
 export default function ActionNode({ data, selected }) {
   // Set by WorkflowCanvas (render-only) after a dry run: the payload this action
@@ -47,7 +48,7 @@ export default function ActionNode({ data, selected }) {
         </div>
       )}
 
-      <Handle type="source" position={Position.Bottom} />
+      <SourceHandles config={data.config} />
     </div>
   )
 }

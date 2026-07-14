@@ -15,12 +15,14 @@ export function makeDuplicate(node) {
 const BRANCH_STYLE = {
   true: { stroke: '#16a34a', label: 'true' },
   false: { stroke: '#dc2626', label: 'false' },
+  error: { stroke: '#d97706', label: 'error' },
 }
 
 // Render-time decoration for edges leaving a condition node's true/false
-// handles: a colored branch label so the routing reads at a glance. Display
-// only — callers keep persisting/broadcasting the undecorated edges. Returns
-// the same array reference when nothing needs decorating.
+// handles — and any node's on-error 'error' handle: a colored branch label so
+// the routing reads at a glance. Display only — callers keep persisting/
+// broadcasting the undecorated edges. Returns the same array reference when
+// nothing needs decorating.
 export function decorateConditionEdges(edges) {
   if (!edges.some((e) => BRANCH_STYLE[e.sourceHandle])) return edges
   return edges.map((e) => {

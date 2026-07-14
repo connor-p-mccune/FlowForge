@@ -158,7 +158,7 @@ function CanvasInner({ workflowId }) {
         const idx = prev.findIndex((s) => s.nodeId === payload.nodeId)
         if (idx === -1) return [...prev, step]
         // same guard for steps: terminal statuses win over late "running"
-        const terminal = ['succeeded', 'failed', 'skipped']
+        const terminal = ['succeeded', 'failed', 'skipped', 'caught', 'reused']
         if (terminal.includes(prev[idx].status) && payload.status === 'running') return prev
         const next = [...prev]
         next[idx] = step
