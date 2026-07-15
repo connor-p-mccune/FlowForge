@@ -1654,6 +1654,10 @@ html, body, #root {
 .exec-timeline__bar--skipped { background: #fbbf24; }
 .exec-timeline__bar--running { background: #3b82f6; }
 .exec-timeline__bar--pending { background: #d1d5db; }
+/* Caught: failed but handled by the node's on-error policy — the run went on. */
+.exec-timeline__bar--caught { background: #f97316; }
+/* Reused (resumed runs): adopted from the source run, zero-ish duration. */
+.exec-timeline__bar--reused { background: #06b6d4; }
 
 /* Critical path: the steps that set the run's duration. The bar keeps its
    status colour but gains an indigo ring, and its row's label is emphasised, so
