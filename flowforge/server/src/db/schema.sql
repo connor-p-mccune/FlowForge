@@ -351,3 +351,34 @@ CREATE TABLE IF NOT EXISTS workflow_tests (
 -- The test panel lists a workflow's scenarios oldest-first (stable order).
 CREATE INDEX IF NOT EXISTS idx_workflow_tests_workflow
   ON workflow_tests (workflow_id, created_at);
+
+-- Machine-in-the-loop callbacks: a wait-callback node pauses its run until an
+-- external system POSTs to its one-time callback URL, or the wait times out.
+-- Rows are 'armed' by the engine at run start — before any node executes — so
+-- an upstream node can hand {{callbacks.<node-id>}} to an external system and
+-- its reply can never race the runner into a lost callback: a POST landing
+-- while the row is still 'armed' is stored, and the runner settles instantly
+-- when it reaches the node. The runner flips armed→waiting when it starts
+-- polling and settles 'timed-out'/'cancelled' itself; POST /api/callbacks/
+-- :token settles 'received' with the request body as payload_json, guarded by
+-- status IN ('armed','waiting') so a duplicate delivery can't overwrite the
+-- first. The engine closes out leftover armed/waiting rows when the run
+-- settles, so a token dies with its run. token is the whole credential (48
+-- random hex chars) — UNIQUE doubles as the endpoint's lookup index.
+CREATE TABLE IF NOT EXISTS execution_callbacks (
+  id           TEXT PRIMARY KEY,
+  execution_id TEXT NOT NULL REFERENCES executions(id) ON DELETE CASCADE,
+  node_id      TEXT NOT NULL,
+  workflow_id  TEXT NOT NULL,
+  workspace_id TEXT NOT NULL,
+  token        TEXT NOT NULL UNIQUE,
+  status       TEXT NOT NULL DEFAULT 'armed',
+  payload_json TEXT,
+  created_at   TEXT NOT NULL,
+  expires_at   TEXT,
+  received_at  TEXT
+);
+
+-- The runner reads its own row by (execution, node).
+CREATE INDEX IF NOT EXISTS idx_execution_callbacks_execution
+  ON execution_callbacks (execution_id, node_id);

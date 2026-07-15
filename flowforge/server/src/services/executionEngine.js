@@ -6,6 +6,7 @@
 // exhausted failure per node via its on-error policy), records every step in
 // execution_steps, and publishes exec-update events (Redis pub/sub by default).
 
+const crypto = require('crypto')
 const { v4: uuidv4 } = require('uuid')
 const db = require('../config/database')
 const { buildAdjacency, topoSort } = require('./dagParser')
@@ -32,20 +33,22 @@ const runners = {
   'sub-workflow': require('./nodeRunners/subWorkflow'),
   'for-each': require('./nodeRunners/forEach'),
   'approval': require('./nodeRunners/approval'),
+  'wait-callback': require('./nodeRunners/waitCallback'),
 }
 
 // Node types that get exactly one attempt. Sub-workflow and for-each run whole
 // nested executions that already retry their own nodes — retrying the wrapper
 // would duplicate side effects and child execution rows. Approval waits on a
-// human decision — a retry would file a duplicate approval request.
-const SINGLE_ATTEMPT_TYPES = new Set(['sub-workflow', 'for-each', 'approval'])
+// human decision — a retry would file a duplicate approval request — and
+// wait-callback would sit through its full timeout twice on a dead integration.
+const SINGLE_ATTEMPT_TYPES = new Set(['sub-workflow', 'for-each', 'approval', 'wait-callback'])
 
 // Node types whose failure can never be caught by an on-error policy. The
 // branching nodes already settle a routing result — layering a second routing
 // mechanism (the error handle) on top of the first would make an edge's
 // meaning ambiguous — and a trigger that can't even emit its payload has
 // nothing meaningful to route.
-const UNCATCHABLE_TYPES = new Set(['condition', 'switch', 'validate', 'approval'])
+const UNCATCHABLE_TYPES = new Set(['condition', 'switch', 'validate', 'approval', 'wait-callback'])
 
 // A node's on-error policy: 'fail' (default — the failure fails the run),
 // 'continue' (settle the error object as the node's output and proceed down
@@ -285,6 +288,52 @@ async function runExecution(
     }
   }
 
+  // Machine-in-the-loop callbacks: every wait-callback node gets its row and
+  // one-time token *before anything executes*, so an upstream node can send
+  // the URL out ({{callbacks.<node-id>}} resolves in any config) and an
+  // external reply can never race the runner into a lost delivery — a POST
+  // landing before the node starts waiting parks on the 'armed' row and the
+  // runner settles instantly when it gets there. Dry runs arm nothing (the
+  // runner simulates); their references resolve to an inert placeholder so a
+  // "would send" preview still shows the URL's shape.
+  const callbackUrls = {}
+  const waitCallbackNodes = nodes.filter((n) => n.type === 'wait-callback')
+  if (waitCallbackNodes.length > 0) {
+    if (dryRun) {
+      for (const n of waitCallbackNodes) callbackUrls[n.id] = '/api/callbacks/dry-run'
+    } else {
+      const armCallback = db.prepare(
+        `INSERT INTO execution_callbacks
+           (id, execution_id, node_id, workflow_id, workspace_id, token, status, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, 'armed', ?)`
+      )
+      for (const n of waitCallbackNodes) {
+        const token = crypto.randomBytes(24).toString('hex')
+        armCallback.run(
+          uuidv4(), executionId, n.id, workflowId, workflow.workspace_id, token,
+          new Date().toISOString()
+        )
+        callbackUrls[n.id] = `/api/callbacks/${token}`
+      }
+    }
+  }
+
+  // A run that settles with a callback still armed (its node never ran —
+  // upstream failure, cancellation, dead branch) or waiting retires it, so a
+  // token dies with its run and a late delivery gets an honest 410 instead of
+  // writing into a finished execution. Best-effort: bookkeeping must never
+  // mask the run's real outcome.
+  function settleLeftoverCallbacks() {
+    if (dryRun || waitCallbackNodes.length === 0) return
+    try {
+      db.prepare(
+        "UPDATE execution_callbacks SET status = 'cancelled' WHERE execution_id = ? AND status IN ('armed', 'waiting')"
+      ).run(executionId)
+    } catch (err) {
+      console.error('Failed to settle leftover callbacks:', err.message)
+    }
+  }
+
   const updateExecution = db.prepare(
     'UPDATE executions SET status = ?, started_at = COALESCE(started_at, ?), finished_at = ? WHERE id = ?'
   )
@@ -297,6 +346,7 @@ async function runExecution(
 
   function failExecution(message) {
     const safeMessage = redact(message)
+    settleLeftoverCallbacks()
     updateExecution.run('failed', new Date().toISOString(), new Date().toISOString(), executionId)
     publishExecution('failed', safeMessage)
     logRunActivity('execution.failed', safeMessage)
@@ -395,14 +445,16 @@ async function runExecution(
       const sourceNode = nodeById[e.source]
       // Branching nodes only activate the matching handle: condition routes on
       // its true/false result, approval on approved (result true) vs rejected,
-      // switch on its matched case label (or 'default'), and validate on
-      // 'valid' vs 'invalid'. All settle a `result` string that the edge's
-      // sourceHandle must equal — one check, not a branching system per type.
+      // switch on its matched case label (or 'default'), validate on 'valid'
+      // vs 'invalid', and wait-callback on 'received' vs 'timed-out'. All
+      // settle a `result` string that the edge's sourceHandle must equal —
+      // one check, not a branching system per type.
       const branching =
         sourceNode?.type === 'condition' ||
         sourceNode?.type === 'approval' ||
         sourceNode?.type === 'switch' ||
-        sourceNode?.type === 'validate'
+        sourceNode?.type === 'validate' ||
+        sourceNode?.type === 'wait-callback'
       if (branching && e.sourceHandle != null) {
         return String(context[e.source]?.result) === e.sourceHandle
       }
@@ -479,9 +531,14 @@ async function runExecution(
     const task = (async () => {
       try {
         // Config templates resolve against upstream outputs plus the decrypted
-        // secrets map ({{secrets.NAME}}). Secrets ride only through this scope —
+        // secrets map ({{secrets.NAME}}) and the run's callback URLs
+        // ({{callbacks.<node-id>}}). Secrets ride only through this scope —
         // never through context — so they can't leak into a later node's input.
-        const config = resolveTemplates(node.data?.config || {}, { ...context, secrets })
+        const config = resolveTemplates(node.data?.config || {}, {
+          ...context,
+          secrets,
+          callbacks: callbackUrls,
+        })
         // Engine context for runners that need to reach back into the engine (only
         // sub-workflow does today): the call stack for cycle detection, the parent
         // execution + node so a spawned child run can be linked back, and the publish
@@ -605,6 +662,7 @@ async function runExecution(
 
   if (cancelled) {
     for (const nodeId of unscheduled) skipNode(nodeId)
+    settleLeftoverCallbacks()
     updateExecution.run('cancelled', now(), now(), executionId)
     publishExecution('cancelled')
     logRunActivity('execution.cancelled')
@@ -612,6 +670,7 @@ async function runExecution(
     return {}
   }
 
+  settleLeftoverCallbacks()
   updateExecution.run('completed', new Date().toISOString(), new Date().toISOString(), executionId)
   publishExecution('completed')
   logRunActivity('execution.completed')

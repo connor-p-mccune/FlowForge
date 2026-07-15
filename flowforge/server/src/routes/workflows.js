@@ -382,6 +382,8 @@ const BENCH_UNSUPPORTED = {
   approval: 'Approval nodes wait on a human decision — run the workflow to test the gate',
   'sub-workflow': 'Sub-workflow nodes run a whole other workflow — use a test run instead',
   'for-each': 'For-each nodes fan a workflow out over a list — use a test run instead',
+  'wait-callback':
+    'Wait-for-callback nodes pause a real run until an external system calls back — use a test run instead',
 }
 
 // A bench run must not hang the HTTP request it rides on (e.g. a delay node
