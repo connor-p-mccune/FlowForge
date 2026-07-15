@@ -85,6 +85,12 @@ order while streaming live progress back to every collaborator on the canvas.
   3am page. Retries still run first; the step records a distinct **caught**
   status so the timeline never hides that the failure happened, and the
   linter flags a wired error branch whose policy can never route to it.
+- **Error-handler workflows** — escalation is also just a workflow: designate
+  another workflow to run whenever a real run of this one **fails**, receiving
+  the failure (workflow, run id, failed node, error message) as its trigger
+  data — so "on failure, file a ticket / page someone / roll back" is built on
+  the same canvas with the same nodes. A one-line loop guard (handler runs
+  never fire handlers) caps any chain at depth one.
 - **Encrypted secrets** — store API keys once per workspace (AES-256-GCM at
   rest), reference them as `{{secrets.NAME}}`, and they're masked in run logs.
   Values are write-only: rotate or delete, never read back.

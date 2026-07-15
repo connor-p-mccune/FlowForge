@@ -97,6 +97,38 @@ branch can never run — and the engine guarantees a stale error edge never
 activates on success), while a `branch` policy with nothing wired to the
 error handle warns that a caught failure silently ends the flow.
 
+### Error-handler workflows
+
+Per-node policies are the *recovery* path inside a run; for runs that still
+die, `services/errorHandler.js` provides the *escalation* path — a workflow
+can designate another workflow (`error_workflow_id`) to run whenever one of
+its real, top-level runs fails, with the failure context as the trigger
+payload. Escalation is thereby just another workflow: page someone, file a
+ticket, roll something back — same canvas, same nodes, same run history.
+
+The design leans on decisions already made elsewhere:
+
+- **The hook sits in the execution worker**, beside the SLA monitor — the
+  same "top-level, settled, real run" contract that falls out of *where* the
+  call lives rather than needing flags. Both worker paths (a run the engine
+  failed, and a run the worker itself crashed on) fire it, and it is
+  best-effort throughout: a broken handler can never touch the failed run's
+  own record.
+- **The loop guard is one line.** Handler runs are recorded with
+  `trigger_type: 'error-handler'`, and failures of such runs never fire a
+  handler — any chain caps at depth one, even a workflow (via a stale
+  reference) configured to handle itself. The settings route additionally
+  refuses self and cross-workspace references because they're almost
+  certainly mistakes.
+- **Eligibility mirrors sub-workflow targets** (same workspace, deployed),
+  checked again at fire time because settings age. The handler's own
+  concurrency policy is respected — a reject-at-cap handler skips a firing
+  exactly like a schedule tick at the cap.
+- **The error payload is the failed step's persisted row** (`{ nodeId,
+  nodeType, message }`) — the engine stores no run-level error column, and
+  the step row is already secret-redacted, so the handler workflow can't
+  learn anything the run detail wouldn't show.
+
 ### Cooperative cancellation
 
 `POST /api/executions/:id/cancel` flips a `cancel_requested` flag on the run
