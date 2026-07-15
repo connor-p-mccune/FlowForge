@@ -38,6 +38,8 @@ describe('GET /api/v1/openapi.json', () => {
       '/workflows/{workflowId}/schedule',
       '/workflows/{workflowId}/tests/run',
       '/workflows/{workflowId}/trigger',
+      '/workspaces',
+      '/workspaces/{workspaceId}/workflows/import',
     ])
     // Bearer auth is the declared scheme, applied globally.
     expect(spec.components.securitySchemes.bearerAuth.scheme).toBe('bearer')

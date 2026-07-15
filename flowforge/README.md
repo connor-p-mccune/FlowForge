@@ -126,10 +126,12 @@ order while streaming live progress back to every collaborator on the canvas.
   canvas** — nodes added/removed, changed config fields, and rewired
   connections.
 - **Workflows as code** — export any workflow as a **portable JSON document**
-  (no internal ids or ownership) and import it into any workspace. The same
-  document comes out of `flowforge export <id>` on the CLI, so workflow
-  definitions can live in git and get diffs, history, and code review like
-  everything else that matters.
+  (no internal ids or ownership) and import it into any workspace — both in
+  the app and from the terminal, where `flowforge export <id> > sync.json`
+  and `flowforge import <ws-id> sync.json` close the GitOps loop: definitions
+  live in git, get diffs and code review, and CI **promotes them between
+  environments** under a dedicated `manage` token scope (imports land as
+  drafts — deploying stays a deliberate act).
 - **Status badges** — mint a per-workflow badge token and embed a live SVG of
   its latest run status (passing / failing / running) in a README or dashboard,
   just like a CI badge — hand-rendered, cached, and revocable by rotating the

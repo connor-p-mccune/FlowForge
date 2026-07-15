@@ -23,6 +23,7 @@ Tokens carry **scopes** chosen at creation:
 | `trigger` | Starting workflow runs                          |
 | `read`    | Listing workflows and reading execution results |
 | `approve` | Settling approval gates (approve/reject a paused run) |
+| `manage`  | Importing workflow definitions (creating draft workflows) |
 
 A token acts as its owning user: it can only see workflows in workspaces the
 owner belongs to. Tokens can be revoked at any time from Settings, and can be
@@ -99,6 +100,37 @@ the CLI prints exactly this to stdout.
 ```
 
 Requires the `read` scope.
+
+### Import a workflow
+
+The other half of export: create a **draft** workflow in a workspace from a
+portable document — so CI can promote a definition that lives in git into
+another environment.
+
+```bash
+# List target workspaces (read scope)
+curl -s https://your-flowforge-host/api/v1/workspaces \
+  -H "Authorization: Bearer $FLOWFORGE_TOKEN"
+
+# Import (manage scope)
+curl -s -X POST https://your-flowforge-host/api/v1/workspaces/a1b2…/workflows/import \
+  -H "Authorization: Bearer $FLOWFORGE_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d @workflows/nightly-sync.json
+```
+
+Response `201` with the created workflow (`status: "draft"` — deploying stays
+a deliberate act in the app). Returns `400` for a document without `name` and
+`graph_data.nodes/edges`, `413` past the 500KB graph cap, `404` for a
+workspace the token's owner isn't in.
+
+Requires the dedicated **`manage` scope** — a token that promotes definitions
+can't also fire runs, and vice versa. On the CLI:
+
+```bash
+flowforge export 6f0c… > workflows/sync.json      # on staging
+flowforge import $PROD_WS workflows/sync.json     # on prod
+```
 
 ### Trigger a workflow
 

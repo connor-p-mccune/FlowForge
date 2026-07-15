@@ -65,6 +65,72 @@ router.get('/workflows', tokenAuth('read'), (req, res) => {
   }
 })
 
+// GET /api/v1/workspaces — the workspaces the token's owner belongs to, so an
+// import script can name its target without a session. `read` scope.
+router.get('/workspaces', tokenAuth('read'), (req, res) => {
+  try {
+    const workspaces = db.prepare(
+      `SELECT w.id, w.name
+         FROM workspaces w
+         JOIN workspace_members wm ON wm.workspace_id = w.id
+        WHERE wm.user_id = ?
+        ORDER BY w.created_at`
+    ).all(req.user.id)
+    res.json({ workspaces })
+  } catch (err) {
+    console.error(err)
+    res.status(500).json({ error: 'Internal server error' })
+  }
+})
+
+// Mirrors the session import's cap: one graph stays a sane size regardless of
+// the global body limit.
+const MAX_IMPORT_GRAPH_BYTES = 500 * 1024
+
+// POST /api/v1/workspaces/:id/workflows/import — create a draft workflow from
+// a portable export document ({ name, graph_data }): the write half of the
+// workflows-as-code loop, so CI can promote a definition that lives in git
+// into another environment. Requires the dedicated `manage` scope — a token
+// that promotes definitions can't also fire runs, and vice versa. The new
+// workflow lands as a draft: deploying (schedules, sub-workflow targets) stays
+// a deliberate act in the app.
+router.post('/workspaces/:id/workflows/import', tokenAuth('manage'), (req, res) => {
+  try {
+    const member = db.prepare(
+      'SELECT 1 FROM workspace_members WHERE workspace_id = ? AND user_id = ?'
+    ).get(req.params.id, req.user.id)
+    if (!member) return res.status(404).json({ error: 'Workspace not found' })
+
+    const { name, graph_data: graphData } = req.body || {}
+    if (typeof name !== 'string' || name.trim() === '' || name.length > 200) {
+      return res.status(400).json({ error: 'name is required (max 200 chars)' })
+    }
+    if (!graphData || !Array.isArray(graphData.nodes) || !Array.isArray(graphData.edges)) {
+      return res.status(400).json({ error: 'graph_data must include nodes and edges arrays' })
+    }
+    // Persist only the { nodes, edges } the canvas understands — an import
+    // can't smuggle extra top-level keys — then size-check the result.
+    const graphJson = JSON.stringify({ nodes: graphData.nodes, edges: graphData.edges })
+    if (Buffer.byteLength(graphJson, 'utf8') > MAX_IMPORT_GRAPH_BYTES) {
+      return res.status(413).json({ error: 'Workflow graph is too large (max 500KB)' })
+    }
+
+    const id = uuidv4()
+    const now = new Date().toISOString()
+    db.prepare(
+      "INSERT INTO workflows (id, workspace_id, name, description, graph_json, status, created_by, created_at, updated_at) VALUES (?, ?, ?, ?, ?, 'draft', ?, ?, ?)"
+    ).run(id, req.params.id, name.trim(), null, graphJson, req.user.id, now, now)
+
+    const workflow = db.prepare(
+      'SELECT id, name, description, status, workspace_id, updated_at FROM workflows WHERE id = ?'
+    ).get(id)
+    res.status(201).json({ workflow })
+  } catch (err) {
+    console.error(err)
+    res.status(500).json({ error: 'Internal server error' })
+  }
+})
+
 // POST /api/v1/workflows/:id/trigger — start a run. The JSON body (if any)
 // becomes the trigger payload, flowing into the graph exactly like a webhook
 // body ({{trigger-node-id.field}}). Responds 202 with the execution id to poll.

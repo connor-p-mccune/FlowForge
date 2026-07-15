@@ -12,7 +12,9 @@ const { red } = require('../src/format')
 const COMMANDS = {
   login: require('../src/commands/login'),
   workflows: require('../src/commands/workflows'),
+  workspaces: require('../src/commands/workspaces'),
   export: require('../src/commands/export'),
+  import: require('../src/commands/import'),
   trigger: require('../src/commands/trigger'),
   runs: require('../src/commands/runs'),
   insights: require('../src/commands/insights'),
@@ -34,7 +36,9 @@ const USAGE = `flowforge — FlowForge from the terminal
 Usage:
   flowforge login --url <server> --token <ffp_…>   Store credentials (~/.flowforge.json)
   flowforge workflows                              List workflows visible to the token
+  flowforge workspaces                             List workspaces (import targets)
   flowforge export <workflow-id>                   Print the portable workflow JSON (pipe to a file)
+  flowforge import <workspace-id> <file> [--name]  Create a draft workflow from an exported file
   flowforge trigger <workflow-id> [--data <json>] [--key <idempotency-key>] [--watch]
   flowforge runs <workflow-id> [--limit N]         Recent runs for a workflow
   flowforge insights <workflow-id> [--limit N]     Duration percentiles, success rate, anomalies

@@ -18,11 +18,118 @@ const spec = {
   servers: [{ url: '/api/v1' }],
   security: [{ bearerAuth: [] }],
   tags: [
+    { name: 'workspaces', description: 'Workspaces and workflow import' },
     { name: 'workflows', description: 'Discover and trigger workflows' },
     { name: 'executions', description: 'Inspect and control runs' },
     { name: 'approvals', description: 'Human-in-the-loop approval gates' },
   ],
   paths: {
+    '/workspaces': {
+      get: {
+        tags: ['workspaces'],
+        summary: 'List workspaces',
+        description:
+          'The workspaces the token owner belongs to — the target ids for ' +
+          'importing a workflow. Requires the `read` scope.',
+        operationId: 'listWorkspaces',
+        responses: {
+          200: {
+            description: 'The owner’s workspaces.',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    workspaces: {
+                      type: 'array',
+                      items: {
+                        type: 'object',
+                        properties: {
+                          id: { type: 'string' },
+                          name: { type: 'string' },
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+          401: { $ref: '#/components/responses/Unauthorized' },
+          403: { $ref: '#/components/responses/Forbidden' },
+          429: { $ref: '#/components/responses/RateLimited' },
+        },
+      },
+    },
+    '/workspaces/{workspaceId}/workflows/import': {
+      post: {
+        tags: ['workspaces'],
+        summary: 'Import a workflow from a portable document',
+        description:
+          'Creates a new draft workflow in the workspace from an exported ' +
+          'document ({ name, graph_data }) — the write half of the ' +
+          'workflows-as-code loop, so CI can promote a definition that lives ' +
+          'in git into another environment. The workflow lands as a draft: ' +
+          'deploying stays a deliberate act in the app. Requires the ' +
+          'dedicated `manage` scope.',
+        operationId: 'importWorkflow',
+        parameters: [
+          {
+            name: 'workspaceId',
+            in: 'path',
+            required: true,
+            schema: { type: 'string' },
+          },
+        ],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                required: ['name', 'graph_data'],
+                properties: {
+                  name: { type: 'string', maxLength: 200 },
+                  graph_data: {
+                    type: 'object',
+                    required: ['nodes', 'edges'],
+                    properties: {
+                      nodes: { type: 'array', items: { type: 'object' } },
+                      edges: { type: 'array', items: { type: 'object' } },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          201: {
+            description: 'The created draft workflow.',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: { workflow: { $ref: '#/components/schemas/Workflow' } },
+                },
+              },
+            },
+          },
+          400: {
+            description: 'Missing name or malformed graph_data.',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } },
+          },
+          401: { $ref: '#/components/responses/Unauthorized' },
+          403: { $ref: '#/components/responses/Forbidden' },
+          404: { $ref: '#/components/responses/NotFound' },
+          413: {
+            description: 'The graph exceeds the 500KB import cap.',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } },
+          },
+          429: { $ref: '#/components/responses/RateLimited' },
+        },
+      },
+    },
     '/workflows': {
       get: {
         tags: ['workflows'],

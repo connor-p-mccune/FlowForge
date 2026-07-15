@@ -12,8 +12,11 @@ const TOKEN_PREFIX = 'ffp_'
 const PREFIX_DISPLAY_CHARS = 8
 
 // The full scope set. `trigger` starts workflow runs; `read` reads workflows
-// and execution results; `approve` settles pending approval gates.
-const SCOPES = ['trigger', 'read', 'approve']
+// and execution results; `approve` settles pending approval gates; `manage`
+// creates workflows (importing a portable document) — the write half of the
+// workflows-as-code loop, deliberately separate so a CI token that promotes
+// definitions can't also fire runs, and vice versa.
+const SCOPES = ['trigger', 'read', 'approve', 'manage']
 
 function generateToken() {
   const token = TOKEN_PREFIX + crypto.randomBytes(20).toString('hex')

@@ -61,8 +61,11 @@ describe('personal access tokens + public API v1', () => {
   it('mints a token, returning the full value exactly once', async () => {
     const { token, apiToken } = await mint({ name: 'deploy hook' })
     expect(token).toMatch(/^ffp_[0-9a-f]{40}$/)
-    // No explicit scopes → the full set, including approve.
-    expect(apiToken).toMatchObject({ name: 'deploy hook', scopes: ['trigger', 'read', 'approve'] })
+    // No explicit scopes → the full set, including approve and manage.
+    expect(apiToken).toMatchObject({
+      name: 'deploy hook',
+      scopes: ['trigger', 'read', 'approve', 'manage'],
+    })
     expect(apiToken.tokenPrefix).toBe(token.slice(0, 12))
 
     // The list never exposes the value or the hash.

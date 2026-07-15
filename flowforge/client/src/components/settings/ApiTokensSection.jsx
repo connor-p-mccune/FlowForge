@@ -11,6 +11,7 @@ const SCOPE_OPTIONS = [
   { value: 'trigger', label: 'Trigger runs', hint: 'start workflows' },
   { value: 'read', label: 'Read', hint: 'list workflows, poll executions' },
   { value: 'approve', label: 'Approve', hint: 'settle approval gates' },
+  { value: 'manage', label: 'Manage', hint: 'import workflow definitions' },
 ]
 
 const EXPIRY_OPTIONS = [

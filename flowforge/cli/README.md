@@ -43,6 +43,8 @@ export FLOWFORGE_TOKEN=ffp_…
 |---|---|
 | `flowforge workflows` | List workflows visible to the token (the ID column is what `trigger` takes) |
 | `flowforge export <id>` | Print the workflow's portable JSON to stdout — `flowforge export <id> > workflows/sync.json` checks it into git |
+| `flowforge workspaces` | List workspaces visible to the token (the ID column is what `import` takes) |
+| `flowforge import <ws-id> <file> [--name "…"]` | Create a draft workflow from an exported file — promote definitions between environments (needs the `manage` scope) |
 | `flowforge trigger <id> [--data <json>] [--key <k>] [--watch]` | Start a run; `--key` sets an [`Idempotency-Key`](../docs/API.md#trigger-a-workflow) so retries are safe |
 | `flowforge runs <id> [--limit N]` | A workflow's recent runs |
 | `flowforge insights <id> [--limit N]` | Duration percentiles, success rate, throughput, and anomalous runs ([docs](../docs/INSIGHTS.md)) |

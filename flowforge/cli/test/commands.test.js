@@ -18,6 +18,8 @@ const cancel = require('../src/commands/cancel')
 const resume = require('../src/commands/resume')
 const compare = require('../src/commands/compare')
 const exportCmd = require('../src/commands/export')
+const importCmd = require('../src/commands/import')
+const workspacesCmd = require('../src/commands/workspaces')
 const login = require('../src/commands/login')
 const { ApiError } = require('../src/api')
 
@@ -700,5 +702,79 @@ test('export without an id prints usage and exits 1', async () => {
   await stub.close()
 
   assert.equal(code, 1)
+  assert.equal(stub.requests.length, 0)
+})
+
+test('workspaces lists id and name', async () => {
+  const stub = await startStub((method, url) => {
+    assert.equal(method, 'GET')
+    assert.equal(url, '/api/v1/workspaces')
+    return { json: { workspaces: [{ id: 'ws-1', name: 'Acme Ops' }] } }
+  })
+  const ctx = makeCtx(stub.api)
+  const code = await workspacesCmd({ positionals: [], flags: {} }, ctx)
+  await stub.close()
+
+  assert.equal(code, 0)
+  assert.match(ctx.output(), /Acme Ops/)
+  assert.match(ctx.output(), /ws-1/)
+})
+
+test('import posts the file contents and reports the draft', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'flowforge-import-'))
+  const file = path.join(dir, 'sync.json')
+  const doc = {
+    exportVersion: '1.0',
+    name: 'Nightly sync',
+    graph_data: { nodes: [{ id: 't1', type: 'trigger-manual' }], edges: [] },
+  }
+  fs.writeFileSync(file, JSON.stringify(doc))
+
+  const stub = await startStub((method, url) => {
+    assert.equal(method, 'POST')
+    assert.equal(url, '/api/v1/workspaces/ws-1/workflows/import')
+    return {
+      status: 201,
+      json: { workflow: { id: 'wf-new', name: 'Nightly sync (prod)', status: 'draft' } },
+    }
+  })
+  const ctx = makeCtx(stub.api)
+  try {
+    const code = await importCmd(
+      { positionals: ['ws-1', file], flags: { name: 'Nightly sync (prod)' } },
+      ctx
+    )
+    await stub.close()
+
+    assert.equal(code, 0)
+    // The --name override rode along; the graph came from the file.
+    assert.deepEqual(stub.requests[0].body, {
+      name: 'Nightly sync (prod)',
+      graph_data: doc.graph_data,
+    })
+    assert.match(ctx.output(), /Imported .*Nightly sync \(prod\)/)
+    assert.match(ctx.output(), /wf-new/)
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('import rejects a missing or malformed file without calling the API', async () => {
+  const stub = await startStub(() => ({ json: {} }))
+  const ctx = makeCtx(stub.api)
+
+  const missing = await importCmd({ positionals: ['ws-1', 'no-such-file.json'], flags: {} }, ctx)
+  assert.equal(missing, 1)
+
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'flowforge-import-'))
+  const file = path.join(dir, 'not-a-workflow.json')
+  fs.writeFileSync(file, JSON.stringify({ hello: 'world' }))
+  try {
+    const malformed = await importCmd({ positionals: ['ws-1', file], flags: {} }, ctx)
+    assert.equal(malformed, 1)
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true })
+  }
+  await stub.close()
   assert.equal(stub.requests.length, 0)
 })
