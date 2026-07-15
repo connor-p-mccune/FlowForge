@@ -227,6 +227,33 @@ API can't drift:
 - **Forecast** — the panel's *Forecast · next run* section, `flowforge forecast
   <id>`, and the public forecast endpoint all read one `computeForecast`.
 
+## Comparing two runs
+
+The statistics above answer "how is this workflow doing?"; run comparison
+answers the sharper question a 3am page actually asks: **what changed between
+the run that worked and the run that didn't?** `services/runComparison.js`
+diffs two runs of one workflow node by node — status changes, per-step
+duration deltas, and output differences — and names the **slowest
+regression** (the largest positive delta), the first place to look when a run
+got slower overall.
+
+Three decisions keep the diff honest:
+
+- **Node identity is `node_id + node_type`** — the same rule resume uses to
+  match steps across runs — so a node replaced with a different type since
+  the base run reads as *removed + added*, never as a nonsense in-place
+  change.
+- **Output equality is structural.** Parsed outputs are compared ignoring key
+  order; two runs that serialized the same data differently are not a change
+  worth flagging. The inputs are the persisted (secret-redacted) rows, so the
+  diff can't leak anything the run detail wouldn't.
+- **Base is the older run.** Every surface orients the diff as "what happened
+  since", regardless of selection order.
+
+Surfaces: the history panel's **⇄ Compare** (pick two runs, changed rows
+expand to side-by-side outputs), `flowforge compare <exec-id> <exec-id>`, and
+`GET /api/v1/executions/:id/compare/:otherId` (`read` scope).
+
 ### Tuning
 
 | Variable | Default | Effect |

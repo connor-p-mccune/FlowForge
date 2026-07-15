@@ -50,6 +50,7 @@ export FLOWFORGE_TOKEN=ffp_…
 | `flowforge check <id> [--min-success-rate PCT] [--max-p95 SECONDS] [--strict]` | Gate CI on workflow health — exits non-zero on an SLA breach or a degrading trend |
 | `flowforge test <id>` | Run the workflow's test scenarios (FXL assertions over a dry-run) — exits non-zero on any failure |
 | `flowforge run <exec-id> [--watch]` | One run with its steps |
+| `flowforge compare <exec-id> <exec-id>` | Diff two runs of a workflow node by node — status changes, duration deltas, output changes ([docs](../docs/INSIGHTS.md#comparing-two-runs)) |
 | `flowforge cancel <exec-id>` | Stop a queued or running run (cooperative) |
 | `flowforge resume <exec-id> [--watch]` | Continue a failed/cancelled run — succeeded steps are reused, only the failed part re-runs |
 | `flowforge approvals [--status pending]` | Runs waiting on a human, across your workspaces |

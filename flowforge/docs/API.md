@@ -315,6 +315,40 @@ by the execution engine before persistence.
 
 Requires the `read` scope.
 
+### Compare two runs
+
+```bash
+curl -s https://your-flowforge-host/api/v1/executions/e57a…/compare/f81b… \
+  -H "Authorization: Bearer $FLOWFORGE_TOKEN"
+```
+
+Diffs two runs of the same workflow node by node. Response `200`:
+
+```json
+{
+  "base":  { "id": "e57a…", "status": "completed", "durationMs": 2412 },
+  "other": { "id": "f81b…", "status": "failed",    "durationMs": 9101 },
+  "nodes": [
+    {
+      "nodeId": "http-1", "nodeType": "action-http",
+      "base":  { "status": "succeeded", "durationMs": 800,  "output": { "status": 200 }, "error": null },
+      "other": { "status": "failed",    "durationMs": 7500, "output": null, "error": "HTTP 500: …" },
+      "statusChanged": true, "outputChanged": true, "durationDeltaMs": 6700
+    }
+  ],
+  "summary": {
+    "nodesCompared": 4, "onlyInBase": 0, "onlyInOther": 0,
+    "statusChanges": 1, "outputChanges": 1, "slowestRegression": "http-1"
+  }
+}
+```
+
+Output equality is structural (key order ignored) over the persisted,
+secret-redacted rows; `durationDeltaMs` is `other − base`, so positive means
+the other run was slower there, and `summary.slowestRegression` is the node
+with the largest positive delta. Returns `400` if the two executions belong
+to different workflows. Requires the `read` scope.
+
 ### Cancel an execution
 
 ```bash

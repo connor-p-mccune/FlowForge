@@ -132,6 +132,12 @@ order while streaming live progress back to every collaborator on the canvas.
   dependency chain that actually set the run's duration, found with the classic
   critical path method — is highlighted, so what's worth optimising is one look
   away.
+- **Run comparison** — "it worked Tuesday and fails today" is a diff
+  question, so run history answers it with a diff: pick two runs and see
+  them lined up node by node — status changes, per-step duration deltas
+  (with the **slowest regression** called out), and output differences
+  computed structurally so key order can't cry wolf. In the history panel
+  (⇄ Compare), `flowforge compare`, and the public API.
 - **Run insights & SLA monitoring** — every workflow gets a **📊 Insights**
   panel: duration percentiles (p50–p99), success rate, throughput, the slowest
   steps, and a sparkline of recent runs with **anomalous runs flagged** by a
