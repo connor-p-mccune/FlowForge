@@ -188,6 +188,15 @@ order while streaming live progress back to every collaborator on the canvas.
   **correlation id** (inbound `X-Request-Id` honored, echoed on the response,
   included in 500 bodies) and logs one **structured JSON line** — a
   user-reported failure maps to its log lines with one grep.
+- **Outbound circuit breaker** — a host that keeps failing stops being
+  called: after N consecutive failures (connection errors or 5xx) its
+  circuit **opens** and calls fast-fail with a clear error instead of
+  stacking timeouts across node retries and webhook attempts; after a
+  cooldown a single **half-open probe** decides whether to close it. One
+  breaker wraps the shared egress path, so HTTP nodes, Slack nodes, and
+  outbound webhook deliveries are all covered — per host, so one dead API
+  can't fast-fail a healthy one. Trips and open circuits are visible on
+  `/metrics`.
 - **Graceful shutdown** — on SIGTERM the process drains instead of dying
   mid-run: new work stops, in-flight runs settle, the readiness probe flips
   to `503 draining` so the orchestrator routes around it, and a hard deadline
@@ -308,6 +317,8 @@ Copy `.env.example` to `.env` before running. **Never commit `.env`.**
 | `SHUTDOWN_TIMEOUT_MS` | no   | Hard deadline for the graceful-shutdown drain (default 30000) |
 | `NODE_TEST_TIMEOUT_MS` | no  | Per-node timeout for the single-node test bench (default 30000) |
 | `WEBHOOK_MAX_ATTEMPTS` | no  | Delivery attempts per outbound webhook event (default 5) |
+| `CIRCUIT_BREAKER_THRESHOLD` | no | Consecutive failures to one host before its outbound circuit opens (default 5) |
+| `CIRCUIT_BREAKER_COOLDOWN_MS` | no | How long an open circuit fast-fails before probing the host again (default 30000) |
 | `WEBHOOK_DISPATCH_INTERVAL_MS` | no | Outbound webhook delivery-queue poll interval (default 5000) |
 | `EXECUTION_RETENTION_DAYS` | no | Prune terminal runs older than this many days (default: keep forever) |
 | `SLA_SUCCESS_RATE_WINDOW` | no | Runs in the rolling success-rate window for SLA monitoring (default 20) |

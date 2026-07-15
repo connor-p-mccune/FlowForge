@@ -21,6 +21,7 @@
 
 const dns = require('dns').promises
 const net = require('net')
+const { withCircuit } = require('./circuitBreaker')
 
 const MAX_REDIRECTS = 5
 
@@ -156,8 +157,14 @@ async function assertSafeUrl(rawUrl) {
 // Drop-in replacement for fetch() used by the side-effecting node runners. When
 // enforcement is off (default in tests) it is a passthrough. When on, it walks
 // redirects manually, validating each hop, so a public URL can't 30x-redirect the
-// server onto an internal address.
+// server onto an internal address. Every call runs under the target host's
+// circuit breaker (circuitBreaker.js): a host that keeps failing fast-fails
+// here instead of stacking timeouts across node retries and webhook attempts.
 async function safeFetch(rawUrl, options = {}) {
+  return withCircuit(rawUrl, () => guardedFetch(rawUrl, options))
+}
+
+async function guardedFetch(rawUrl, options = {}) {
   if (!enforced()) return fetch(rawUrl, options)
 
   let currentUrl = rawUrl

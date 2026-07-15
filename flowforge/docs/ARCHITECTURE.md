@@ -355,6 +355,40 @@ existed rather than inventing new ones:
 
 ---
 
+## The outbound circuit breaker
+
+`services/circuitBreaker.js` wraps every server-side fetch of a
+user-supplied URL. The problem it solves is amplification: when a host goes
+down, each affected node retries three times, each retry waits out a
+connect timeout inside an execution slot, and the webhook dispatcher burns
+its five-attempt budget against the same dead receiver — the failure of one
+external system degrades throughput for everything else. The breaker
+converts that into a fast, honest failure.
+
+- **State machine per host** (`hostname:port`): after N consecutive
+  failures the circuit *opens* and calls fail immediately with an error
+  naming the host and the retry horizon; after the cooldown, exactly one
+  call becomes the *half-open probe* (concurrent callers keep fast-failing
+  while it's in flight) — success closes the circuit, failure re-opens it
+  for a fresh cooldown.
+- **One integration point.** It wraps `safeFetch` (the SSRF guard), which
+  is already the single egress path shared by the HTTP node, the Slack
+  node, and outbound webhook deliveries — so every consumer is protected
+  without any of them knowing the breaker exists. The breaker only
+  observes: a 5xx response still reaches the caller; 4xx counts as a
+  success because it says nothing about host health.
+- **Interplay with the retry layers is the point.** Node-level retries
+  against an open circuit fail in microseconds instead of holding a slot
+  through three stacked timeouts, and the webhook dispatcher's exponential
+  backoff reschedules on the fast failure — both layers keep their
+  semantics, they just stop paying for a host that's already known-dead.
+- **Bounded and observable.** The tracked-host set is capped (evicting the
+  oldest entry — hosts are user-supplied input, so unbounded growth is the
+  threat), `flowforge_circuit_trips_total` counts opens, and a scrape-time
+  collector reports `flowforge_circuits_open`. Like the SSRF guard, it is
+  skipped under `NODE_ENV=test` unless a suite opts in, because the test
+  suites deliberately hammer failing local servers.
+
 ## Run insights & SLA monitoring
 
 `services/runStats.js` turns recorded run history into statistics, and
