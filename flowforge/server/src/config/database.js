@@ -104,6 +104,13 @@ ensureColumn('executions', 'resumed_from_execution_id', 'TEXT REFERENCES executi
 ensureColumn('workflows', 'sla_max_duration_ms', 'INTEGER')
 ensureColumn('workflows', 'sla_min_success_rate', 'REAL')
 
+// Error-handler workflow (services/errorHandler.js): when one of this
+// workflow's real, top-level runs fails, the designated workflow is triggered
+// with the failure context as its payload (trigger_type 'error-handler').
+// NULL = no handler. ON DELETE SET NULL so deleting the handler workflow
+// quietly clears the reference instead of blocking the delete.
+ensureColumn('workflows', 'error_workflow_id', 'TEXT REFERENCES workflows(id) ON DELETE SET NULL')
+
 // Two-factor authentication (TOTP). Optional, opt-in per user. totp_enabled stays
 // 0 until the user verifies a code from their authenticator, so a half-finished
 // setup never locks them out of login. totp_backup_codes is a JSON array of

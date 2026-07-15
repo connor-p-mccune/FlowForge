@@ -224,6 +224,27 @@ function validateSla(body) {
   return null
 }
 
+// Optional error-handler workflow (services/errorHandler.js). Nullable (null
+// clears the handler); a non-null id must name another workflow in the same
+// workspace — self-handling is refused here because it's almost certainly a
+// mistake, even though the runtime loop guard would cap it at one firing.
+// Returns an error string or null.
+function validateErrorHandler(body, workflow) {
+  if (!('error_workflow_id' in body) || body.error_workflow_id === null) return null
+  const id = body.error_workflow_id
+  if (typeof id !== 'string' || id.trim() === '') {
+    return 'error_workflow_id must be a workflow id, or null to clear it'
+  }
+  if (id === workflow.id) {
+    return 'a workflow cannot be its own error handler'
+  }
+  const target = db.prepare('SELECT id, workspace_id FROM workflows WHERE id = ?').get(id)
+  if (!target || target.workspace_id !== workflow.workspace_id) {
+    return 'error_workflow_id must name a workflow in the same workspace'
+  }
+  return null
+}
+
 router.put('/workflows/:id', auth, validate(workflowRule), (req, res) => {
   try {
     const workflow = db.prepare('SELECT * FROM workflows WHERE id = ?').get(req.params.id)
@@ -236,6 +257,8 @@ router.put('/workflows/:id', auth, validate(workflowRule), (req, res) => {
     if (concurrencyError) return res.status(400).json({ error: concurrencyError })
     const slaError = validateSla(req.body)
     if (slaError) return res.status(400).json({ error: slaError })
+    const handlerError = validateErrorHandler(req.body, workflow)
+    if (handlerError) return res.status(400).json({ error: handlerError })
     const maxConcurrent =
       'max_concurrent_runs' in req.body ? req.body.max_concurrent_runs : workflow.max_concurrent_runs
     const policy =
@@ -244,12 +267,14 @@ router.put('/workflows/:id', auth, validate(workflowRule), (req, res) => {
       'sla_max_duration_ms' in req.body ? req.body.sla_max_duration_ms : workflow.sla_max_duration_ms
     const slaMinSuccess =
       'sla_min_success_rate' in req.body ? req.body.sla_min_success_rate : workflow.sla_min_success_rate
+    const errorWorkflowId =
+      'error_workflow_id' in req.body ? req.body.error_workflow_id : workflow.error_workflow_id
 
     const now = new Date().toISOString()
     db.prepare(
       `UPDATE workflows SET name = ?, description = ?, max_concurrent_runs = ?, concurrency_policy = ?,
-         sla_max_duration_ms = ?, sla_min_success_rate = ?, updated_at = ? WHERE id = ?`
-    ).run(name, description ?? workflow.description, maxConcurrent, policy, slaMaxDuration, slaMinSuccess, now, req.params.id)
+         sla_max_duration_ms = ?, sla_min_success_rate = ?, error_workflow_id = ?, updated_at = ? WHERE id = ?`
+    ).run(name, description ?? workflow.description, maxConcurrent, policy, slaMaxDuration, slaMinSuccess, errorWorkflowId, now, req.params.id)
 
     const updated = db.prepare('SELECT * FROM workflows WHERE id = ?').get(req.params.id)
     activityService.logEvent(workflow.workspace_id, req.user.id, 'workflow.updated', {

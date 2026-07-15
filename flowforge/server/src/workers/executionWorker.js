@@ -5,6 +5,7 @@ const { createNotification } = require('../services/notificationService')
 const { acquireSlot, releaseSlot } = require('../services/concurrencyGate')
 const { recordRunDeferred } = require('../services/metrics')
 const { evaluateRun } = require('../services/slaMonitor')
+const { triggerErrorHandler } = require('../services/errorHandler')
 const db = require('../config/database')
 
 // After a top-level run settles, check it against its workflow's SLA targets and
@@ -92,12 +93,17 @@ function startWorker() {
       ).run(new Date().toISOString(), executionId)
       notifyExecutionFailed(executionId)
       evaluateRunSla(executionId)
+      // Fire-and-forget: the handler run is its own execution through the
+      // queue — awaiting it here would hold this Bull slot through an
+      // unrelated workflow, and triggerErrorHandler never rejects.
+      triggerErrorHandler(executionId)
       throw err
     } finally {
       if (gated) releaseSlot(workflowId)
     }
     notifyExecutionFailed(executionId)
     evaluateRunSla(executionId)
+    triggerErrorHandler(executionId)
   })
 
   console.log(`Execution worker started (concurrency=${CONCURRENCY})`)
