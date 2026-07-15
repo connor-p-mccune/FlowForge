@@ -43,9 +43,9 @@ describe('workflow templates', () => {
       expect(res.status).toBe(200)
       expect(res.body.templates).toBeDefined()
 
-      // Auto-seeded on startup: the eight built-in templates across seven categories.
+      // Auto-seeded on startup: the nine built-in templates across seven categories.
       const all = flatten(res.body.templates)
-      expect(all).toHaveLength(8)
+      expect(all).toHaveLength(9)
       for (const cat of EXPECTED_CATEGORIES) {
         expect(res.body.templates[cat]?.length).toBeGreaterThan(0)
       }
@@ -72,6 +72,19 @@ describe('workflow templates', () => {
       expect(types).toContain('validate')
       expect(types).toContain('switch')
       // The schema, switch cases, and upstream references are all well-formed.
+      const errors = lintGraph(showcase.graph).filter((i) => i.severity === 'error')
+      expect(errors).toEqual([])
+    })
+
+    it('ships an error-branch showcase template that lints without errors', () => {
+      const showcase = buildTemplates().find((t) => /Error Branch/.test(t.name))
+      expect(showcase).toBeDefined()
+      // It exercises per-node error handling and a sticky note.
+      const call = showcase.graph.nodes.find((n) => n.id === 'call')
+      expect(call.data.config.onError).toBe('branch')
+      expect(showcase.graph.edges.some((e) => e.sourceHandle === 'error')).toBe(true)
+      expect(showcase.graph.nodes.some((n) => n.type === 'note')).toBe(true)
+      // The wiring, references, and note all pass the linter clean.
       const errors = lintGraph(showcase.graph).filter((i) => i.severity === 'error')
       expect(errors).toEqual([])
     })

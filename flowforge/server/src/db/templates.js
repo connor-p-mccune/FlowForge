@@ -266,6 +266,51 @@ function buildTemplates() {
         ],
       },
     },
+
+    // 9 ---------------------------------------------------------------------
+    // Showcases per-node error handling: the HTTP call catches its own failure
+    // (after retries) and routes it down the red error branch to an alert,
+    // while the success path carries on — a retry-then-fallback pattern
+    // instead of a failed run. The sticky note documents the trick in place.
+    {
+      name: 'Webhook → HTTP with Error Branch → Alert or Continue',
+      category: 'Resilience',
+      description:
+        'Call a flaky API with a safety net: on success the response flows onward, but if the call still fails after its retries, the dedicated error branch posts an alert with the failure — the run completes either way.',
+      graph: {
+        nodes: [
+          n('trigger', 'trigger-webhook', 'Incoming Job', X(0), Y),
+          n('call', 'action-http', 'Call Flaky API', X(1), Y, {
+            method: 'POST',
+            url: 'https://api.example.com/process',
+            headers: '{}',
+            body: '{"jobId": "{{trigger.jobId}}"}',
+            onError: 'branch',
+          }),
+          n('ok', 'transform', 'Shape Result', X(2), Y - 120, {
+            template: '{\n  "jobId": "{{trigger.jobId}}",\n  "status": "{{call.status}}"\n}',
+          }),
+          n('done', 'output-log', 'Record Success', X(3), Y - 120, {
+            message: 'Job {{ok.jobId}} processed (HTTP {{ok.status}}).',
+          }),
+          n('alert', 'action-slack', 'Alert the Channel', X(2), Y + 120, {
+            webhookUrl: 'https://hooks.slack.com/services/T000/B000/XXXXXXXX',
+            text: 'API call failed for job {{trigger.jobId}} after retries: {{call.error.message}}',
+          }),
+          n('memo', 'note', 'Note', X(0), Y + 190, {
+            text:
+              'The HTTP node catches its own failure: retries run first, then the red error outlet routes {{call.error}} to the alert — the run completes either way. Notes like this never execute.',
+            color: 'yellow',
+          }),
+        ],
+        edges: [
+          e('trigger', 'call'),
+          e('call', 'ok'),
+          e('ok', 'done'),
+          e('call', 'alert', 'error'),
+        ],
+      },
+    },
   ]
 }
 
