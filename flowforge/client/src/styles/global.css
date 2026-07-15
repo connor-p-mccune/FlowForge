@@ -423,6 +423,17 @@ html, body, #root {
   border-color: #db2777;
 }
 
+/* Wait-for-callback gate: teal, to read as "external system" next to the
+   approval gate's pink "human". */
+.node--callback {
+  border-color: #14b8a6;
+  background: #f0fdfa;
+}
+
+.node--callback.node--selected {
+  border-color: #0d9488;
+}
+
 .node__approval-message {
   font-size: 11px;
   color: #9d174d;
@@ -2291,6 +2302,49 @@ html, body, #root {
   background: #fdf2f8;
   border: 1px solid #fbcfe8;
   border-radius: 6px;
+}
+
+/* A running wait-callback step: the one-time URL the run is waiting on. Teal
+   to match the node, laid out like the approval strip. */
+.callback-waiting {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 6px 0 4px 24px;
+  padding: 8px 10px;
+  background: #f0fdfa;
+  border: 1px solid #99f6e4;
+  border-radius: 6px;
+}
+
+.callback-waiting__label {
+  font-size: 12px;
+  color: #0f766e;
+  white-space: nowrap;
+}
+
+.callback-waiting__url {
+  font-size: 11px;
+  color: #134e4a;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+}
+
+.callback-waiting__copy {
+  border: 1px solid #5eead4;
+  background: #ccfbf1;
+  color: #0f766e;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 3px 10px;
+  border-radius: 5px;
+  cursor: pointer;
+}
+
+.callback-waiting__copy:hover {
+  background: #99f6e4;
 }
 
 .approval-actions__message {

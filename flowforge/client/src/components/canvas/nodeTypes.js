@@ -11,6 +11,7 @@ import OutputNode from './nodes/OutputNode'
 import SubWorkflowNode from './nodes/SubWorkflowNode'
 import ForEachNode from './nodes/ForEachNode'
 import ApprovalNode from './nodes/ApprovalNode'
+import WaitCallbackNode from './nodes/WaitCallbackNode'
 
 export const nodeTypes = {
   'trigger-manual': TriggerNode,
@@ -28,6 +29,7 @@ export const nodeTypes = {
   'switch': SwitchNode,
   'validate': ValidateNode,
   'approval': ApprovalNode,
+  'wait-callback': WaitCallbackNode,
   'ai-prompt': AINode,
   'ai-classify': AINode,
   'ai-extract': AINode,

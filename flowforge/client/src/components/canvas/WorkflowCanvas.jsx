@@ -116,6 +116,12 @@ function CanvasInner({ workflowId }) {
   // an ordinary step event) or when a new run starts.
   const [pendingApprovals, setPendingApprovals] = useState({})
 
+  // Wait-for-callback gates on the current run: nodeId -> { url, expiresAt }.
+  // Same lifecycle as approvals — set by 'callback' events, cleared when the
+  // step settles or a new run starts — so the run panel can show the one-time
+  // URL while the run waits on an external system.
+  const [pendingCallbacks, setPendingCallbacks] = useState({})
+
   const handleExecUpdate = useCallback((payload) => {
     if (payload.kind === 'execution') {
       // Adopt runs we didn't start (e.g. triggered by a collaborator)
@@ -123,6 +129,7 @@ function CanvasInner({ workflowId }) {
         executionIdRef.current = payload.executionId
         setExecSteps([])
         setPendingApprovals({})
+        setPendingCallbacks({})
         setIsTestRun(Boolean(payload.dryRun))
         setExecution({ id: payload.executionId, status: 'running', error: null })
         setExecPanelOpen(true)
@@ -172,6 +179,12 @@ function CanvasInner({ workflowId }) {
           delete rest[payload.nodeId]
           return rest
         })
+        setPendingCallbacks((prev) => {
+          if (!prev[payload.nodeId]) return prev
+          const rest = { ...prev }
+          delete rest[payload.nodeId]
+          return rest
+        })
       }
     } else if (
       payload.kind === 'approval' &&
@@ -185,6 +198,15 @@ function CanvasInner({ workflowId }) {
           message: payload.message,
           expiresAt: payload.expiresAt,
         },
+      }))
+    } else if (
+      payload.kind === 'callback' &&
+      payload.executionId === executionIdRef.current &&
+      payload.status === 'waiting'
+    ) {
+      setPendingCallbacks((prev) => ({
+        ...prev,
+        [payload.nodeId]: { url: payload.url, expiresAt: payload.expiresAt },
       }))
     }
   }, [])
@@ -426,6 +448,7 @@ function CanvasInner({ workflowId }) {
       executionIdRef.current = ex.id
       setExecSteps([])
       setPendingApprovals({})
+      setPendingCallbacks({})
       setExecution({ id: ex.id, status: ex.status, error: null })
     } catch (err) {
       executionIdRef.current = null
@@ -447,6 +470,7 @@ function CanvasInner({ workflowId }) {
       executionIdRef.current = ex.id
       setExecSteps([])
       setPendingApprovals({})
+      setPendingCallbacks({})
       setExecution({ id: ex.id, status: ex.status, error: null })
     } catch (err) {
       executionIdRef.current = null
@@ -1089,6 +1113,7 @@ function CanvasInner({ workflowId }) {
         open={execPanelOpen}
         onClose={() => setExecPanelOpen(false)}
         pendingApprovals={pendingApprovals}
+        pendingCallbacks={pendingCallbacks}
         onRespondApproval={handleRespondApproval}
         execution={execution}
         steps={execSteps}

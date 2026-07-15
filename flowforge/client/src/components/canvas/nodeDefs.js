@@ -94,6 +94,15 @@ export const NODE_DEFS = {
     subtype: 'approval',
     config: { message: '', timeoutMinutes: 60, onTimeout: 'reject' },
   },
+  // Wait for callback: pauses the run until an external system POSTs to the
+  // node's one-time callback URL, then routes received / timed-out. Upstream
+  // nodes send the URL out as {{callbacks.<node-id>}}; onTimeout picks what a
+  // silent callback does ('continue' down the timed-out branch, or 'fail').
+  'wait-callback': {
+    label: 'Wait for Callback',
+    subtype: 'callback',
+    config: { timeoutMinutes: 60, onTimeout: 'continue' },
+  },
   'ai-prompt': {
     label: 'AI Prompt',
     subtype: 'prompt',
@@ -153,6 +162,7 @@ export const TOOLBAR_BUTTONS = [
   { type: 'switch', label: 'Switch', className: 'toolbar-btn--condition' },
   { type: 'validate', label: 'Validate', className: 'toolbar-btn--condition' },
   { type: 'approval', label: 'Approval', className: 'toolbar-btn--approval' },
+  { type: 'wait-callback', label: 'Callback', className: 'toolbar-btn--approval' },
   { type: 'ai-prompt', label: 'AI', className: 'toolbar-btn--ai' },
   { type: 'ai-classify', label: 'Classify', className: 'toolbar-btn--ai' },
   { type: 'ai-extract', label: 'Extract', className: 'toolbar-btn--ai' },

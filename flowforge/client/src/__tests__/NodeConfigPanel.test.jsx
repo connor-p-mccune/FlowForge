@@ -84,6 +84,15 @@ describe('NodeConfigPanel rendering', () => {
     expect(screen.getByDisplayValue('item.region')).toBeInTheDocument()
   })
 
+  it('renders timeout fields and the callbacks hint for wait-callback', () => {
+    setup(mk('wait-callback'))
+    expect(screen.getByText('Timeout (minutes)')).toBeInTheDocument()
+    expect(screen.getByText('When the timeout expires')).toBeInTheDocument()
+    expect(screen.getByText(/callbacks\.n1/)).toBeInTheDocument()
+    // Not a catchable type — no on-error policy field.
+    expect(screen.queryByText('If this node fails')).not.toBeInTheDocument()
+  })
+
   it('renders approval fields with the timeout policy for approval', () => {
     setup(mk('approval', { config: { message: 'Ship it?', timeoutMinutes: 30, onTimeout: 'fail' } }))
     expect(screen.getByText(/Message for approvers/)).toBeInTheDocument()

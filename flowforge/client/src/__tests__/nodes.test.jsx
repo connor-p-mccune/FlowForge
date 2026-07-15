@@ -8,6 +8,7 @@ import ConditionNode from '../components/canvas/nodes/ConditionNode'
 import SwitchNode from '../components/canvas/nodes/SwitchNode'
 import ValidateNode from '../components/canvas/nodes/ValidateNode'
 import ApprovalNode from '../components/canvas/nodes/ApprovalNode'
+import WaitCallbackNode from '../components/canvas/nodes/WaitCallbackNode'
 import AINode from '../components/canvas/nodes/AINode'
 import OutputNode from '../components/canvas/nodes/OutputNode'
 
@@ -237,6 +238,28 @@ describe('ApprovalNode', () => {
   it('omits the message line when none is configured', () => {
     const { container } = renderNode(<ApprovalNode data={{ label: 'Gate' }} selected={false} />)
     expect(container.querySelector('.node__approval-message')).toBeNull()
+  })
+})
+
+describe('WaitCallbackNode', () => {
+  it('renders received/timed-out branch labels', () => {
+    renderNode(<WaitCallbackNode data={{ label: 'Await payment' }} selected={false} />)
+    expect(screen.getByText('Await payment')).toBeInTheDocument()
+    expect(screen.getByText('received')).toBeInTheDocument()
+    expect(screen.getByText('timed out')).toBeInTheDocument()
+  })
+
+  it('has handle ids the engine routes on, like the other gates', () => {
+    const { container } = renderNode(<WaitCallbackNode data={{}} selected={false} />)
+    expect(targets(container)).toHaveLength(1)
+    expect(sources(container)).toHaveLength(2)
+    expect(container.querySelector('[data-handleid="received"]')).toBeInTheDocument()
+    expect(container.querySelector('[data-handleid="timed-out"]')).toBeInTheDocument()
+  })
+
+  it('flags a fail-on-timeout gate in its subtitle', () => {
+    renderNode(<WaitCallbackNode data={{ config: { onTimeout: 'fail' } }} selected={false} />)
+    expect(screen.getByText('fails on timeout')).toBeInTheDocument()
   })
 })
 

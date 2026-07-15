@@ -1,14 +1,42 @@
 import { useState } from 'react'
 import ExecutionHistory from './ExecutionHistory'
 
+const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:3001'
+
+// A running wait-callback step: show the one-time URL the run is waiting on,
+// with a copy button, so a manual test (or an operator poking a stuck
+// integration) is one paste away from a curl command.
+function CallbackWaiting({ callback }) {
+  const [copied, setCopied] = useState(false)
+  const url = `${API_BASE}${callback.url}`
+  return (
+    <div className="callback-waiting">
+      <span className="callback-waiting__label">Waiting for POST to</span>
+      <code className="callback-waiting__url">{url}</code>
+      <button
+        type="button"
+        className="callback-waiting__copy"
+        onClick={() => {
+          navigator.clipboard?.writeText(url)
+          setCopied(true)
+          setTimeout(() => setCopied(false), 1500)
+        }}
+      >
+        {copied ? 'Copied' : 'Copy'}
+      </button>
+    </div>
+  )
+}
+
 // `childExecutionsByNode` (optional) maps a step's nodeId → the sub-workflow runs
 // that step spawned, each { execution, steps, childExecutionsByNode } so the tree
 // nests recursively. Present in the History detail view (fetched from
 // GET /api/executions/:id); absent for the live socket-driven run.
 // `pendingApprovals` (optional) maps a nodeId → its waiting approval request;
 // paired with `onRespondApproval`, a running approval step grows inline
-// Approve / Reject controls.
-export function StepList({ steps, nodes, childExecutionsByNode, pendingApprovals, onRespondApproval }) {
+// Approve / Reject controls. `pendingCallbacks` (optional) maps a nodeId → its
+// waiting callback ({ url, expiresAt }) for the same treatment.
+export function StepList({ steps, nodes, childExecutionsByNode, pendingApprovals, onRespondApproval, pendingCallbacks }) {
   // Prefer the canvas node's label; nested child steps belong to another workflow
   // whose nodes aren't on this canvas, so fall back to the step's node type, then id.
   const labelFor = (step) =>
@@ -23,6 +51,7 @@ export function StepList({ steps, nodes, childExecutionsByNode, pendingApprovals
       {steps.map((s) => {
         const children = childExecutionsByNode?.[s.nodeId]
         const approval = s.status === 'running' ? pendingApprovals?.[s.nodeId] : null
+        const callback = s.status === 'running' ? pendingCallbacks?.[s.nodeId] : null
         return (
           <li key={s.nodeId} className="step">
             <span className={`status-badge status-badge--${s.status}`}>{s.status}</span>
@@ -33,6 +62,7 @@ export function StepList({ steps, nodes, childExecutionsByNode, pendingApprovals
                 <pre>{s.error || JSON.stringify(s.output, null, 2)}</pre>
               </details>
             )}
+            {callback && <CallbackWaiting callback={callback} />}
             {approval && onRespondApproval && (
               <div className="approval-actions">
                 <span className="approval-actions__message">
@@ -82,7 +112,7 @@ export function StepList({ steps, nodes, childExecutionsByNode, pendingApprovals
   )
 }
 
-export default function ExecutionPanel({ open, onClose, execution, steps, nodes, workflowId, initialHistoryExecId, onCancel, pendingApprovals, onRespondApproval }) {
+export default function ExecutionPanel({ open, onClose, execution, steps, nodes, workflowId, initialHistoryExecId, onCancel, pendingApprovals, onRespondApproval, pendingCallbacks }) {
   // Arriving via a notification deep link opens straight to the run's history.
   const [tab, setTab] = useState(initialHistoryExecId ? 'history' : 'live')
 
@@ -136,6 +166,7 @@ export default function ExecutionPanel({ open, onClose, execution, steps, nodes,
                 nodes={nodes}
                 pendingApprovals={pendingApprovals}
                 onRespondApproval={onRespondApproval}
+                pendingCallbacks={pendingCallbacks}
               />
             </>
           ) : (

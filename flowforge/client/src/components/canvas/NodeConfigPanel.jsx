@@ -745,6 +745,39 @@ export default function NodeConfigPanel({
             </p>
           </>
         )
+      case 'wait-callback':
+        return (
+          <>
+            <label className="config-panel__field">
+              <span>Timeout (minutes)</span>
+              <input
+                type="number"
+                min={1}
+                value={config.timeoutMinutes ?? 60}
+                onChange={(e) => setConfig('timeoutMinutes', Number(e.target.value))}
+              />
+            </label>
+            <label className="config-panel__field">
+              <span>When the timeout expires</span>
+              <select
+                value={config.onTimeout || 'continue'}
+                onChange={(e) => setConfig('onTimeout', e.target.value)}
+              >
+                <option value="continue">Take the timed-out branch</option>
+                <option value="fail">Fail the run</option>
+              </select>
+            </label>
+            <p className="config-panel__hint">
+              The run pauses here until an external system POSTs to this node’s
+              one-time callback URL. Send the URL out from an upstream node as{' '}
+              <code>{'{{callbacks.' + node.id + '}}'}</code> — it’s minted before
+              anything executes, so an early reply is never lost. The delivered
+              JSON body continues down the <strong>received</strong> branch as{' '}
+              <code>{'{{' + node.id + '.payload}}'}</code>; while the run waits,
+              the URL also shows in the run panel. Test runs skip the wait.
+            </p>
+          </>
+        )
       case 'ai-prompt':
         return (
           <>
