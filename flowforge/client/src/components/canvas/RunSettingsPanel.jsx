@@ -14,6 +14,11 @@ export default function RunSettingsPanel({ workflowId, open, onClose }) {
   const [policy, setPolicy] = useState('queue')
   const [slaDurationInput, setSlaDurationInput] = useState('') // seconds, '' = no target
   const [slaSuccessInput, setSlaSuccessInput] = useState('') // percent, '' = no target
+  // Error-handler workflow: '' = none. Options are the workspace's *deployed*
+  // workflows (the runtime requirement), excluding this one (the route
+  // refuses self-handling).
+  const [handlerId, setHandlerId] = useState('')
+  const [handlerOptions, setHandlerOptions] = useState([])
   const [error, setError] = useState(null)
   const [saving, setSaving] = useState(false)
   const toast = useToast()
@@ -33,6 +38,15 @@ export default function RunSettingsPanel({ workflowId, open, onClose }) {
         setSlaDurationInput(wf.sla_max_duration_ms ? String(wf.sla_max_duration_ms / 1000) : '')
         setSlaSuccessInput(
           wf.sla_min_success_rate != null ? String(Math.round(wf.sla_min_success_rate * 100)) : ''
+        )
+        setHandlerId(wf.error_workflow_id || '')
+        return apiFetch(`/api/workspaces/${wf.workspace_id}/workflows`).then(
+          ({ workflows: list }) => {
+            if (cancelled) return
+            setHandlerOptions(
+              (list || []).filter((w) => w.status === 'deployed' && w.id !== workflowId)
+            )
+          }
         )
       })
       .catch((err) => {
@@ -79,6 +93,7 @@ export default function RunSettingsPanel({ workflowId, open, onClose }) {
           concurrency_policy: policy,
           sla_max_duration_ms: durSeconds === null ? null : Math.round(durSeconds * 1000),
           sla_min_success_rate: successPct === null ? null : successPct / 100,
+          error_workflow_id: handlerId || null,
         },
       })
       toast.success('Run settings saved')
@@ -163,6 +178,37 @@ export default function RunSettingsPanel({ workflowId, open, onClose }) {
                   onChange={(e) => setSlaSuccessInput(e.target.value)}
                 />
               </label>
+
+              <div className="run-settings__section">Error handler</div>
+              <p className="webhook-panel__hint">
+                Optionally run another workflow whenever a real run of this one
+                fails — it receives the failure (workflow, run id, failed node,
+                error message) as its trigger data, so escalation is just
+                another workflow. Only deployed workflows can be handlers.
+              </p>
+              <label className="run-settings__field">
+                <span className="run-settings__label">On failure, run</span>
+                <select value={handlerId} onChange={(e) => setHandlerId(e.target.value)}>
+                  <option value="">Nothing (default)</option>
+                  {/* A saved handler that's been deleted or undeployed still
+                      renders, so the select shows the truth instead of
+                      silently displaying "Nothing". */}
+                  {handlerId && !handlerOptions.some((w) => w.id === handlerId) && (
+                    <option value={handlerId}>Unavailable workflow</option>
+                  )}
+                  {handlerOptions.map((w) => (
+                    <option key={w.id} value={w.id}>
+                      {w.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              {handlerId && !handlerOptions.some((w) => w.id === handlerId) && (
+                <p className="webhook-panel__hint">
+                  The current handler is no longer deployed in this workspace —
+                  failures are not being escalated. Pick another or clear it.
+                </p>
+              )}
 
               <button className="webhook-panel__create" onClick={handleSave} disabled={saving}>
                 {saving ? 'Saving…' : 'Save settings'}

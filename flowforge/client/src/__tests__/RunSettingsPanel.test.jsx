@@ -12,15 +12,27 @@ const WORKFLOW = {
   id: 'wf1',
   name: 'Nightly sync',
   description: 'syncs things',
+  workspace_id: 'ws1',
   max_concurrent_runs: 2,
   concurrency_policy: 'reject',
 }
+
+// The workspace list backing the error-handler picker: only deployed
+// workflows other than wf1 itself are eligible.
+const WORKSPACE_WORKFLOWS = [
+  { id: 'wf1', name: 'Nightly sync', status: 'deployed' },
+  { id: 'wf2', name: 'Pager', status: 'deployed' },
+  { id: 'wf3', name: 'Draft thing', status: 'draft' },
+]
 
 beforeEach(() => {
   vi.clearAllMocks()
   apiFetch.mockImplementation((path, opts) => {
     if (path === '/api/workflows/wf1' && !opts) {
       return Promise.resolve({ workflow: WORKFLOW })
+    }
+    if (path === '/api/workspaces/ws1/workflows') {
+      return Promise.resolve({ workflows: WORKSPACE_WORKFLOWS })
     }
     if (path === '/api/workflows/wf1' && opts?.method === 'PUT') {
       return Promise.resolve({ workflow: { ...WORKFLOW, ...opts.body } })
@@ -147,6 +159,43 @@ describe('RunSettingsPanel', () => {
     fireEvent.click(screen.getByRole('button', { name: /save settings/i }))
     expect(await screen.findByText(/percentage from 0 to 100/i)).toBeInTheDocument()
     expect(apiFetch).not.toHaveBeenCalledWith('/api/workflows/wf1', expect.objectContaining({ method: 'PUT' }))
+  })
+
+  it('offers only other deployed workflows as error handlers', async () => {
+    setup()
+    const select = await screen.findByLabelText(/on failure, run/i)
+    const labels = [...select.querySelectorAll('option')].map((o) => o.textContent)
+    expect(labels).toEqual(['Nothing (default)', 'Pager'])
+  })
+
+  it('saves the chosen error handler (and null when cleared)', async () => {
+    setup()
+    const select = await screen.findByLabelText(/on failure, run/i)
+    fireEvent.change(select, { target: { value: 'wf2' } })
+    fireEvent.click(screen.getByRole('button', { name: /save settings/i }))
+    await waitFor(() =>
+      expect(apiFetch).toHaveBeenCalledWith('/api/workflows/wf1', {
+        method: 'PUT',
+        body: expect.objectContaining({ error_workflow_id: 'wf2' }),
+      })
+    )
+  })
+
+  it('flags a saved handler that is no longer deployed', async () => {
+    apiFetch.mockImplementation((path, opts) => {
+      if (path === '/api/workflows/wf1' && !opts) {
+        return Promise.resolve({ workflow: { ...WORKFLOW, error_workflow_id: 'wf-gone' } })
+      }
+      if (path === '/api/workspaces/ws1/workflows') {
+        return Promise.resolve({ workflows: WORKSPACE_WORKFLOWS })
+      }
+      return Promise.reject(new Error(`unexpected: ${path}`))
+    })
+    setup()
+    const select = await screen.findByLabelText(/on failure, run/i)
+    expect(select).toHaveValue('wf-gone')
+    expect(screen.getByText('Unavailable workflow')).toBeInTheDocument()
+    expect(screen.getByText(/failures are not being escalated/i)).toBeInTheDocument()
   })
 
   it('surfaces a server error and stays open', async () => {
