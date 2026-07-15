@@ -28,6 +28,7 @@ describe('GET /api/v1/openapi.json', () => {
       '/approvals/{approvalId}/respond',
       '/executions/{executionId}',
       '/executions/{executionId}/cancel',
+      '/executions/{executionId}/compare/{otherExecutionId}',
       '/executions/{executionId}/resume',
       '/workflows',
       '/workflows/{workflowId}/executions',

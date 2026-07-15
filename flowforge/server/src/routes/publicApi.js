@@ -22,6 +22,7 @@ const { admitRun } = require('../services/concurrencyGate')
 const { computeInsights, forecastFor, parseLimit } = require('./insights')
 const { scheduleExpressionOf, previewFor, parseCount } = require('./schedule')
 const { runSuite } = require('../services/workflowTester')
+const { compareRuns } = require('../services/runComparison')
 
 const router = express.Router()
 
@@ -287,6 +288,42 @@ router.get('/executions/:id', tokenAuth('read'), (req, res) => {
       },
       steps,
     })
+  } catch (err) {
+    console.error(err)
+    res.status(500).json({ error: 'Internal server error' })
+  }
+})
+
+// GET /api/v1/executions/:id/compare/:otherId — diff two runs of the same
+// workflow node by node. Mirrors the session route: status changes, duration
+// deltas, output differences over the persisted (secret-redacted) rows.
+router.get('/executions/:id/compare/:otherId', tokenAuth('read'), (req, res) => {
+  try {
+    const readExecution = db.prepare('SELECT * FROM executions WHERE id = ?')
+    const base = readExecution.get(req.params.id)
+    const other = readExecution.get(req.params.otherId)
+    if (!base || !other) return res.status(404).json({ error: 'Execution not found' })
+    if (!getWorkflowForMember(base.workflow_id, req.user.id)) {
+      return res.status(404).json({ error: 'Execution not found' })
+    }
+    if (base.workflow_id !== other.workflow_id) {
+      return res.status(400).json({ error: 'Executions belong to different workflows' })
+    }
+
+    const readSteps = db.prepare(
+      'SELECT * FROM execution_steps WHERE execution_id = ? ORDER BY rowid'
+    )
+    const { nodes, summary } = compareRuns(readSteps.all(base.id), readSteps.all(other.id))
+    const runOf = (e) => ({
+      id: e.id,
+      status: e.status,
+      triggerType: e.trigger_type,
+      startedAt: e.started_at,
+      finishedAt: e.finished_at,
+      durationMs:
+        e.started_at && e.finished_at ? new Date(e.finished_at) - new Date(e.started_at) : null,
+    })
+    res.json({ base: runOf(base), other: runOf(other), nodes, summary })
   } catch (err) {
     console.error(err)
     res.status(500).json({ error: 'Internal server error' })

@@ -183,4 +183,22 @@ describe('GET /api/executions/:id/compare/:otherId', () => {
       .set('Authorization', `Bearer ${token}`)
     expect(unknown.status).toBe(404)
   })
+
+  it('is mirrored on the public API for read tokens', async () => {
+    const minted = await request(app)
+      .post('/api/tokens')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ name: 'cmp-reader', scopes: ['read'] })
+    const res = await request(app)
+      .get(`/api/v1/executions/${baseId}/compare/${otherId}`)
+      .set('Authorization', `Bearer ${minted.body.token}`)
+    expect(res.status).toBe(200)
+    expect(res.body.summary.slowestRegression).toBe('h')
+
+    // A session JWT is not accepted on /api/v1 — the surfaces stay disjoint.
+    const asJwt = await request(app)
+      .get(`/api/v1/executions/${baseId}/compare/${otherId}`)
+      .set('Authorization', `Bearer ${token}`)
+    expect(asJwt.status).toBe(401)
+  })
 })

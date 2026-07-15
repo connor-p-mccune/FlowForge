@@ -20,6 +20,7 @@ const COMMANDS = {
   check: require('../src/commands/check'),
   test: require('../src/commands/test'),
   run: require('../src/commands/run'),
+  compare: require('../src/commands/compare'),
   cancel: require('../src/commands/cancel'),
   resume: require('../src/commands/resume'),
   approvals: require('../src/commands/approvals'),
@@ -40,6 +41,7 @@ Usage:
   flowforge check <workflow-id> [--strict]         Gate CI on workflow health (exits non-zero on a breach)
   flowforge test <workflow-id>                     Run the workflow's test scenarios (exits non-zero on failure)
   flowforge run <execution-id> [--watch]           One run with its steps
+  flowforge compare <execution-id> <execution-id>  Diff two runs node by node
   flowforge cancel <execution-id>                  Stop a queued or running run
   flowforge resume <execution-id> [--watch]        Re-run only the failed part of a run
   flowforge approvals [--status pending]           Runs waiting on a human

@@ -334,6 +334,57 @@ const spec = {
         },
       },
     },
+    '/executions/{executionId}/compare/{otherExecutionId}': {
+      get: {
+        tags: ['executions'],
+        summary: 'Compare two runs',
+        description:
+          'Diffs two runs of the same workflow node by node: status changes, ' +
+          'per-step duration deltas, and output differences (computed over ' +
+          'the persisted, secret-redacted step rows; output equality is ' +
+          'structural, ignoring key order). The summary names the slowest ' +
+          'regression. Requires the `read` scope.',
+        operationId: 'compareExecutions',
+        parameters: [
+          { $ref: '#/components/parameters/ExecutionId' },
+          {
+            name: 'otherExecutionId',
+            in: 'path',
+            required: true,
+            schema: { type: 'string' },
+          },
+        ],
+        responses: {
+          200: {
+            description: 'The node-by-node diff with a summary.',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    base: { $ref: '#/components/schemas/ComparedRun' },
+                    other: { $ref: '#/components/schemas/ComparedRun' },
+                    nodes: {
+                      type: 'array',
+                      items: { $ref: '#/components/schemas/NodeComparison' },
+                    },
+                    summary: { $ref: '#/components/schemas/ComparisonSummary' },
+                  },
+                },
+              },
+            },
+          },
+          400: {
+            description: 'The executions belong to different workflows.',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } },
+          },
+          401: { $ref: '#/components/responses/Unauthorized' },
+          403: { $ref: '#/components/responses/Forbidden' },
+          404: { $ref: '#/components/responses/NotFound' },
+          429: { $ref: '#/components/responses/RateLimited' },
+        },
+      },
+    },
     '/approvals': {
       get: {
         tags: ['approvals'],
@@ -747,16 +798,79 @@ const spec = {
           node_type: { type: 'string', nullable: true, example: 'action-http' },
           status: {
             type: 'string',
-            enum: ['pending', 'running', 'succeeded', 'failed', 'skipped', 'reused'],
+            enum: ['pending', 'running', 'succeeded', 'failed', 'skipped', 'reused', 'caught'],
             description:
               '`reused` appears in resumed runs: the step was not re-executed — ' +
-              'its output was adopted from the run being resumed.',
+              'its output was adopted from the run being resumed. `caught` marks ' +
+              'a failure handled by the node’s on-error policy: the node failed ' +
+              'after its retries, but the run continued (down the error branch ' +
+              'or with the error object as the node’s output).',
           },
           input_json: { type: 'string', nullable: true },
           output_json: { type: 'string', nullable: true },
           error: { type: 'string', nullable: true },
           started_at: { type: 'string', format: 'date-time', nullable: true },
           finished_at: { type: 'string', format: 'date-time', nullable: true },
+        },
+      },
+      ComparedRun: {
+        type: 'object',
+        properties: {
+          id: { type: 'string' },
+          status: { type: 'string' },
+          triggerType: { type: 'string', nullable: true },
+          startedAt: { type: 'string', format: 'date-time', nullable: true },
+          finishedAt: { type: 'string', format: 'date-time', nullable: true },
+          durationMs: { type: 'integer', nullable: true },
+        },
+      },
+      NodeComparison: {
+        type: 'object',
+        properties: {
+          nodeId: { type: 'string' },
+          nodeType: { type: 'string', nullable: true },
+          base: {
+            $ref: '#/components/schemas/ComparisonSide',
+          },
+          other: {
+            $ref: '#/components/schemas/ComparisonSide',
+          },
+          statusChanged: { type: 'boolean' },
+          outputChanged: {
+            type: 'boolean',
+            description: 'Structural comparison of the parsed outputs — key order is ignored.',
+          },
+          durationDeltaMs: {
+            type: 'integer',
+            nullable: true,
+            description: 'other − base; positive means the other run was slower here.',
+          },
+        },
+      },
+      ComparisonSide: {
+        type: 'object',
+        nullable: true,
+        description: 'Null when the node ran in only one of the two runs.',
+        properties: {
+          status: { type: 'string' },
+          durationMs: { type: 'integer', nullable: true },
+          output: { nullable: true },
+          error: { type: 'string', nullable: true },
+        },
+      },
+      ComparisonSummary: {
+        type: 'object',
+        properties: {
+          nodesCompared: { type: 'integer' },
+          onlyInBase: { type: 'integer' },
+          onlyInOther: { type: 'integer' },
+          statusChanges: { type: 'integer' },
+          outputChanges: { type: 'integer' },
+          slowestRegression: {
+            type: 'string',
+            nullable: true,
+            description: 'Node id with the largest positive duration delta.',
+          },
         },
       },
       Forecast: {

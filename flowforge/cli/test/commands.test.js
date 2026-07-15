@@ -16,6 +16,7 @@ const check = require('../src/commands/check')
 const runCmd = require('../src/commands/run')
 const cancel = require('../src/commands/cancel')
 const resume = require('../src/commands/resume')
+const compare = require('../src/commands/compare')
 const login = require('../src/commands/login')
 const { ApiError } = require('../src/api')
 
@@ -616,4 +617,55 @@ test('login verifies the token, writes the config file, and resolveConfig reads 
     delete process.env.FLOWFORGE_CONFIG
     fs.rmSync(dir, { recursive: true, force: true })
   }
+})
+
+test('compare renders the node diff and names the slowest regression', async () => {
+  const stub = await startStub((method, url) => {
+    assert.equal(method, 'GET')
+    assert.equal(url, '/api/v1/executions/exec-a/compare/exec-b')
+    return {
+      json: {
+        base: { id: 'exec-a', status: 'completed', durationMs: 4000 },
+        other: { id: 'exec-b', status: 'failed', durationMs: 9000 },
+        nodes: [
+          {
+            nodeId: 'fetch', nodeType: 'action-http',
+            base: { status: 'succeeded', durationMs: 1000 },
+            other: { status: 'failed', durationMs: 6000 },
+            statusChanged: true, outputChanged: true, durationDeltaMs: 5000,
+          },
+          {
+            nodeId: 'log', nodeType: 'output-log',
+            base: { status: 'succeeded', durationMs: 10 },
+            other: null,
+            statusChanged: true, outputChanged: true, durationDeltaMs: null,
+          },
+        ],
+        summary: {
+          nodesCompared: 1, onlyInBase: 1, onlyInOther: 0,
+          statusChanges: 1, outputChanges: 1, slowestRegression: 'fetch',
+        },
+      },
+    }
+  })
+  const ctx = makeCtx(stub.api)
+  const code = await compare({ positionals: ['exec-a', 'exec-b'], flags: {} }, ctx)
+  await stub.close()
+
+  assert.equal(code, 0)
+  assert.match(ctx.output(), /fetch/)
+  assert.match(ctx.output(), /\+5\.0s/)
+  assert.match(ctx.output(), /1 only in base/)
+  assert.match(ctx.output(), /Slowest regression: .*fetch/)
+})
+
+test('compare without both ids prints usage and exits 1', async () => {
+  const stub = await startStub(() => ({ json: {} }))
+  const ctx = makeCtx(stub.api)
+  const code = await compare({ positionals: ['exec-a'], flags: {} }, ctx)
+  await stub.close()
+
+  assert.equal(code, 1)
+  assert.equal(stub.requests.length, 0)
+  assert.match(ctx.output(), /Usage: flowforge compare/)
 })
