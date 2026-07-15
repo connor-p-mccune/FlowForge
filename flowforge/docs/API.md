@@ -75,6 +75,31 @@ Response `200`:
 
 Requires the `read` scope.
 
+### Export a workflow
+
+```bash
+curl -s https://your-flowforge-host/api/v1/workflows/6f0c…/export \
+  -H "Authorization: Bearer $FLOWFORGE_TOKEN" > workflows/nightly-sync.json
+```
+
+Returns the workflow as a **portable, self-contained document** — the same
+shape the app's Export button downloads, with no internal ids or ownership —
+so workflow definitions can live in version control and go through code
+review. It round-trips through the app's import. `flowforge export <id>` on
+the CLI prints exactly this to stdout.
+
+```json
+{
+  "exportVersion": "1.0",
+  "name": "Nightly sync",
+  "description": null,
+  "graph_data": { "nodes": [ … ], "edges": [ … ] },
+  "exportedAt": "2026-07-15T09:00:00.000Z"
+}
+```
+
+Requires the `read` scope.
+
 ### Trigger a workflow
 
 ```bash

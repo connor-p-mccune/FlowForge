@@ -270,6 +270,48 @@ const spec = {
         },
       },
     },
+    '/workflows/{workflowId}/export': {
+      get: {
+        tags: ['workflows'],
+        summary: 'Export a workflow as a portable document',
+        description:
+          'The workflow in the same portable, self-contained shape the app’s ' +
+          'Export button downloads (no internal ids or ownership) — pipe it to ' +
+          'a file and check it into version control. The document round-trips ' +
+          'through the app’s import. Requires the `read` scope.',
+        operationId: 'exportWorkflow',
+        parameters: [{ $ref: '#/components/parameters/WorkflowId' }],
+        responses: {
+          200: {
+            description: 'The portable workflow document.',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    exportVersion: { type: 'string', example: '1.0' },
+                    name: { type: 'string' },
+                    description: { type: 'string', nullable: true },
+                    graph_data: {
+                      type: 'object',
+                      properties: {
+                        nodes: { type: 'array', items: { type: 'object' } },
+                        edges: { type: 'array', items: { type: 'object' } },
+                      },
+                    },
+                    exportedAt: { type: 'string', format: 'date-time' },
+                  },
+                },
+              },
+            },
+          },
+          401: { $ref: '#/components/responses/Unauthorized' },
+          403: { $ref: '#/components/responses/Forbidden' },
+          404: { $ref: '#/components/responses/NotFound' },
+          429: { $ref: '#/components/responses/RateLimited' },
+        },
+      },
+    },
     '/workflows/{workflowId}/tests/run': {
       post: {
         tags: ['workflows'],

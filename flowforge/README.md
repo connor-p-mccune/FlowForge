@@ -125,6 +125,11 @@ order while streaming live progress back to every collaborator on the canvas.
   preview any version, restore it (reversibly), or **diff it against the live
   canvas** — nodes added/removed, changed config fields, and rewired
   connections.
+- **Workflows as code** — export any workflow as a **portable JSON document**
+  (no internal ids or ownership) and import it into any workspace. The same
+  document comes out of `flowforge export <id>` on the CLI, so workflow
+  definitions can live in git and get diffs, history, and code review like
+  everything else that matters.
 - **Status badges** — mint a per-workflow badge token and embed a live SVG of
   its latest run status (passing / failing / running) in a README or dashboard,
   just like a CI badge — hand-rendered, cached, and revocable by rotating the

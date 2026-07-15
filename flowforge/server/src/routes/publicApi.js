@@ -248,6 +248,38 @@ router.get('/workflows/:id/schedule', tokenAuth('read'), (req, res) => {
   }
 })
 
+// GET /api/v1/workflows/:id/export — the workflow as the same portable,
+// self-contained document the session export produces (no internal ids or
+// ownership): pipe it to a file and check it into git, so workflow definitions
+// get code review and history like everything else that matters. `read` scope.
+router.get('/workflows/:id/export', tokenAuth('read'), (req, res) => {
+  try {
+    const workflow = getWorkflowForMember(req.params.id, req.user.id)
+    if (!workflow) return res.status(404).json({ error: 'Workflow not found' })
+
+    let graphData = { nodes: [], edges: [] }
+    try {
+      const parsed = JSON.parse(workflow.graph_json)
+      graphData = {
+        nodes: Array.isArray(parsed.nodes) ? parsed.nodes : [],
+        edges: Array.isArray(parsed.edges) ? parsed.edges : [],
+      }
+    } catch {
+      /* unparseable graph — export the empty shape rather than fail */
+    }
+    res.json({
+      exportVersion: '1.0',
+      name: workflow.name,
+      description: workflow.description,
+      graph_data: graphData,
+      exportedAt: new Date().toISOString(),
+    })
+  } catch (err) {
+    console.error(err)
+    res.status(500).json({ error: 'Internal server error' })
+  }
+})
+
 // POST /api/v1/workflows/:id/tests/run — run the workflow's test scenarios and
 // return a pass/fail rollup. This is the CI gate: `ok: false` (or a non-2xx)
 // fails the pipeline. Requires the `trigger` scope because it executes the

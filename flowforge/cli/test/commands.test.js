@@ -17,6 +17,7 @@ const runCmd = require('../src/commands/run')
 const cancel = require('../src/commands/cancel')
 const resume = require('../src/commands/resume')
 const compare = require('../src/commands/compare')
+const exportCmd = require('../src/commands/export')
 const login = require('../src/commands/login')
 const { ApiError } = require('../src/api')
 
@@ -668,4 +669,36 @@ test('compare without both ids prints usage and exits 1', async () => {
   assert.equal(code, 1)
   assert.equal(stub.requests.length, 0)
   assert.match(ctx.output(), /Usage: flowforge compare/)
+})
+
+test('export prints the portable document as pretty JSON', async () => {
+  const doc = {
+    exportVersion: '1.0',
+    name: 'Nightly sync',
+    description: null,
+    graph_data: { nodes: [{ id: 't1', type: 'trigger-manual' }], edges: [] },
+    exportedAt: '2026-07-15T00:00:00.000Z',
+  }
+  const stub = await startStub((method, url) => {
+    assert.equal(method, 'GET')
+    assert.equal(url, '/api/v1/workflows/wf-1/export')
+    return { json: doc }
+  })
+  const ctx = makeCtx(stub.api)
+  const code = await exportCmd({ positionals: ['wf-1'], flags: {} }, ctx)
+  await stub.close()
+
+  assert.equal(code, 0)
+  // stdout is exactly the parseable document — safe to redirect to a file.
+  assert.deepEqual(JSON.parse(ctx.output()), doc)
+})
+
+test('export without an id prints usage and exits 1', async () => {
+  const stub = await startStub(() => ({ json: {} }))
+  const ctx = makeCtx(stub.api)
+  const code = await exportCmd({ positionals: [], flags: {} }, ctx)
+  await stub.close()
+
+  assert.equal(code, 1)
+  assert.equal(stub.requests.length, 0)
 })
