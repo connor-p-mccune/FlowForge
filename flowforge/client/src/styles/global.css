@@ -2708,6 +2708,138 @@ html, body, #root {
   background: #f9f9f9;
 }
 
+/* Compare mode: the toolbar toggle, the pick highlight, and the diff view. */
+.exec-history__toolbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+
+.exec-history__compare-toggle {
+  border: 1px solid #e5e7eb;
+  background: #fff;
+  font-size: 12px;
+  padding: 4px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.exec-history__compare-toggle--active {
+  border-color: #6366f1;
+  background: #eef2ff;
+  color: #4338ca;
+}
+
+.exec-history__compare-hint {
+  font-size: 12px;
+  color: #6b7280;
+}
+
+.exec-history__row--picked {
+  border-color: #6366f1;
+  background: #eef2ff;
+}
+
+.run-compare__header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 10px 0;
+}
+
+.run-compare__header-duration {
+  font-size: 12px;
+  color: #6b7280;
+}
+
+.run-compare__arrow {
+  color: #9ca3af;
+}
+
+.run-compare__table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.run-compare__table th {
+  text-align: left;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #6b7280;
+  padding: 6px 8px;
+  border-bottom: 1px solid #e5e7eb;
+}
+
+.run-compare__table td {
+  padding: 6px 8px;
+  border-bottom: 1px solid #f3f4f6;
+}
+
+.run-compare__row {
+  cursor: pointer;
+}
+
+.run-compare__row:hover {
+  background: #f9fafb;
+}
+
+.run-compare__row--changed {
+  background: #fffbeb;
+}
+
+.run-compare__row--changed:hover {
+  background: #fef3c7;
+}
+
+.run-compare__node {
+  font-weight: 600;
+}
+
+.run-compare__delta--slower { color: #b91c1c; font-weight: 600; }
+.run-compare__delta--faster { color: #15803d; font-weight: 600; }
+.run-compare__changed { color: #b45309; font-weight: 600; }
+.run-compare__same { color: #9ca3af; }
+
+.run-compare__outputs {
+  display: flex;
+  gap: 10px;
+}
+
+.run-compare__output {
+  flex: 1;
+  min-width: 0;
+}
+
+.run-compare__output-title {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #6b7280;
+  margin-bottom: 4px;
+}
+
+.run-compare__output-body {
+  background: #f9fafb;
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+  padding: 8px;
+  font-size: 11px;
+  max-height: 220px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.run-compare__summary {
+  margin-top: 10px;
+  font-size: 12px;
+  color: #6b7280;
+}
+
 /* Dry-run (Test) executions stand out from real runs in the history list */
 .exec-history__row--test {
   background: #fffbeb;

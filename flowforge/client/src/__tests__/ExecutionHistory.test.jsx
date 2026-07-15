@@ -255,3 +255,91 @@ describe('ExecutionHistory dry-run (test) badge', () => {
     )
   })
 })
+
+describe('ExecutionHistory compare', () => {
+  const COMPARISON = {
+    base: { id: 'exA', status: 'completed', durationMs: 1000 },
+    other: { id: 'exB', status: 'failed', durationMs: 4000 },
+    nodes: [
+      {
+        nodeId: 'h1',
+        nodeType: 'action-http',
+        base: { status: 'succeeded', durationMs: 500, output: { status: 200 }, error: null },
+        other: { status: 'failed', durationMs: 3500, output: null, error: 'HTTP 500' },
+        statusChanged: true,
+        outputChanged: true,
+        durationDeltaMs: 3000,
+      },
+    ],
+    summary: {
+      nodesCompared: 1,
+      onlyInBase: 0,
+      onlyInOther: 0,
+      statusChanges: 1,
+      outputChanges: 1,
+      slowestRegression: 'h1',
+    },
+  }
+
+  function mockCompareApi() {
+    apiFetch.mockImplementation((path) => {
+      if (path === '/api/workflows/wf1/executions') {
+        return Promise.resolve({ executions: EXECS, workflowUpdatedAt: WF_UPDATED })
+      }
+      // Base must be the older run (exA) regardless of pick order.
+      if (path === '/api/executions/exA/compare/exB') {
+        return Promise.resolve(COMPARISON)
+      }
+      return Promise.reject(new Error(`unexpected request: ${path}`))
+    })
+  }
+
+  it('picking two runs in compare mode fetches and renders the diff', async () => {
+    mockCompareApi()
+    setup()
+    await screen.findByText('completed')
+
+    fireEvent.click(screen.getByRole('button', { name: '⇄ Compare' }))
+    expect(screen.getByText('Pick two runs to diff')).toBeInTheDocument()
+
+    // Pick the newer run first — base must still be the older one.
+    fireEvent.click(screen.getByText('failed'))
+    expect(screen.getByText('Pick one more run')).toBeInTheDocument()
+    fireEvent.click(screen.getByText('completed'))
+
+    await screen.findByText('Δ time')
+    expect(apiFetch).toHaveBeenCalledWith('/api/executions/exA/compare/exB')
+    // The run-level header delta and the node row's delta both read +3.0s.
+    expect(screen.getAllByText('+3.0s')).toHaveLength(2)
+    expect(screen.getByText('changed')).toBeInTheDocument()
+    expect(screen.getByText(/slowest regression/)).toBeInTheDocument()
+  })
+
+  it('a changed row expands to side-by-side outputs', async () => {
+    mockCompareApi()
+    setup()
+    await screen.findByText('completed')
+    fireEvent.click(screen.getByRole('button', { name: '⇄ Compare' }))
+    fireEvent.click(screen.getByText('failed'))
+    fireEvent.click(screen.getByText('completed'))
+    await screen.findByText('Δ time')
+
+    fireEvent.click(screen.getByText('action-http'))
+    expect(screen.getByText('HTTP 500')).toBeInTheDocument()
+    expect(screen.getByText(/"status": 200/)).toBeInTheDocument()
+  })
+
+  it('back returns to the run list', async () => {
+    mockCompareApi()
+    setup()
+    await screen.findByText('completed')
+    fireEvent.click(screen.getByRole('button', { name: '⇄ Compare' }))
+    fireEvent.click(screen.getByText('failed'))
+    fireEvent.click(screen.getByText('completed'))
+    await screen.findByText('Δ time')
+
+    fireEvent.click(screen.getByText('← All runs'))
+    expect(screen.queryByText('Δ time')).toBeNull()
+    expect(screen.getAllByRole('button', { name: 'Replay this run' })).toHaveLength(2)
+  })
+})

@@ -3,6 +3,7 @@ import { apiFetch } from '../../services/api'
 import { useToast } from '../../hooks/useToast'
 import { StepList } from './ExecutionPanel'
 import ExecutionTimeline from './ExecutionTimeline'
+import RunComparison from './RunComparison'
 import { SkeletonRows } from '../Skeleton'
 
 function parseSteps(rows) {
@@ -130,6 +131,10 @@ export default function ExecutionHistory({ workflowId, nodes, autoOpenId }) {
   const [pendingResume, setPendingResume] = useState(null) // execution awaiting confirm
   const [replaying, setReplaying] = useState(false)
   const [resuming, setResuming] = useState(false)
+  // Compare mode: pick two runs from the list, see them diffed node by node.
+  const [compareMode, setCompareMode] = useState(false)
+  const [comparePicks, setComparePicks] = useState([]) // execution ids, max 2
+  const [comparison, setComparison] = useState(null) // GET .../compare result
   const [error, setError] = useState(null)
   const [loading, setLoading] = useState(true)
   const toast = useToast()
@@ -205,6 +210,33 @@ export default function ExecutionHistory({ workflowId, nodes, autoOpenId }) {
     }
   }
 
+  // Toggle a run in/out of the compare selection; the second pick fetches the
+  // diff. Base is always the older run so the comparison reads "what changed
+  // since" regardless of click order.
+  async function togglePick(ex) {
+    if (comparePicks.includes(ex.id)) {
+      setComparePicks(comparePicks.filter((id) => id !== ex.id))
+      return
+    }
+    const picks = [...comparePicks, ex.id]
+    setComparePicks(picks)
+    if (picks.length < 2) return
+    const [a, b] = picks.map((id) => executions.find((e) => e.id === id))
+    const [base, other] = new Date(a.created_at) <= new Date(b.created_at) ? [a, b] : [b, a]
+    try {
+      const data = await apiFetch(`/api/executions/${base.id}/compare/${other.id}`)
+      setComparison(data)
+    } catch (err) {
+      toast.error(`Couldn’t compare runs: ${err.message}`)
+      setComparePicks([])
+    }
+  }
+
+  function exitCompare() {
+    setComparison(null)
+    setComparePicks([])
+  }
+
   async function handleResume() {
     if (!pendingResume) return
     setResuming(true)
@@ -223,6 +255,10 @@ export default function ExecutionHistory({ workflowId, nodes, autoOpenId }) {
 
   if (error) return <p className="exec-panel__error">{error}</p>
   if (loading) return <SkeletonRows count={4} height={34} />
+
+  if (comparison) {
+    return <RunComparison data={comparison} nodes={nodes} onBack={exitCompare} />
+  }
 
   if (selected) {
     const showReplayConfirm = pendingReplay?.id === selected.execution.id
@@ -327,13 +363,32 @@ export default function ExecutionHistory({ workflowId, nodes, autoOpenId }) {
   }
 
   return (
-    <ul className="exec-history">
+    <>
+      {executions.length > 1 && (
+        <div className="exec-history__toolbar">
+          <button
+            className={`exec-history__compare-toggle${compareMode ? ' exec-history__compare-toggle--active' : ''}`}
+            onClick={() => {
+              setCompareMode((v) => !v)
+              setComparePicks([])
+            }}
+          >
+            ⇄ Compare
+          </button>
+          {compareMode && (
+            <span className="exec-history__compare-hint">
+              {comparePicks.length === 0 ? 'Pick two runs to diff' : 'Pick one more run'}
+            </span>
+          )}
+        </div>
+      )}
+      <ul className="exec-history">
       {executions.map((ex) => (
         <li className="exec-history__item" key={ex.id}>
           <div className="exec-history__row-wrap">
             <button
-              className={`exec-history__row${ex.trigger_type === 'dry-run' ? ' exec-history__row--test' : ''}`}
-              onClick={() => openRun(ex.id)}
+              className={`exec-history__row${ex.trigger_type === 'dry-run' ? ' exec-history__row--test' : ''}${comparePicks.includes(ex.id) ? ' exec-history__row--picked' : ''}`}
+              onClick={() => (compareMode ? togglePick(ex) : openRun(ex.id))}
             >
               <span className={`status-badge status-badge--${ex.status}`}>{ex.status}</span>
               {ex.trigger_type === 'dry-run' && (
@@ -398,6 +453,7 @@ export default function ExecutionHistory({ workflowId, nodes, autoOpenId }) {
           )}
         </li>
       ))}
-    </ul>
+      </ul>
+    </>
   )
 }
