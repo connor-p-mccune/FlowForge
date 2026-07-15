@@ -412,6 +412,30 @@ can trigger runs cannot implicitly wave them through their own gates.
 Exactly one responder wins a race: the loser gets `409` with the verdict.
 `404` for unknown ids or non-members.
 
+### Deliver a callback to a waiting run
+
+A run paused at a **Wait for Callback** node resumes when your system POSTs
+to the node's one-time callback URL. The URL isn't under `/api/v1` and needs
+**no token** — the 48-hex-char callback token in the path is the whole
+credential, minted per run per node and dead once the run settles:
+
+```bash
+curl -s -X POST https://your-flowforge-host/api/callbacks/<token> \
+  -H "Content-Type: application/json" \
+  -d '{"jobId": "abc", "status": "done"}'
+```
+
+Your system learns the URL because the workflow sends it: an upstream node
+(usually the HTTP request that kicks off your async job) includes
+`{{callbacks.<node-id>}}` in its payload. The JSON body becomes the wait
+node's `payload` output on the **received** branch.
+
+Responses: `202` accepted (even if the reply arrives before the run reaches
+the wait node — it's stored and adopted the moment the node starts waiting),
+`409` if the callback was already delivered (first delivery wins; the
+original payload is untouched), `410` if the wait timed out or the run
+settled, `404` for an unknown token.
+
 ## Receiving events (outbound webhooks)
 
 Instead of polling, a workspace can push its events to you: add a

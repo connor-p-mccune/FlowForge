@@ -155,6 +155,32 @@ usually an answer, not an outage — with an opt-in `fail` mode for gates
 where silence must stop the world. Dry runs auto-approve so test mode never
 blocks on a human.
 
+### Machine-in-the-loop callbacks
+
+The wait-callback node is the same gate pattern pointed at a machine: the
+run pauses until an external system POSTs to a one-time URL
+(`/api/callbacks/:token`), then routes down the `received` or `timed-out`
+branch with the delivered JSON as its output. It reuses everything approval
+proved out — the database row as the only synchronization point, the
+runner's poll loop, status-guarded UPDATEs so exactly one settle wins,
+cancellation retiring the wait — with one problem approval doesn't have:
+**the other side needs the URL before the node runs.**
+
+An async job API wants the callback address *in the request that starts the
+job*, which an upstream HTTP node sends — but the wait node hasn't executed
+yet. So the engine arms every wait-callback row (and mints its token) **at
+run start, before anything executes**, and exposes the URLs to template
+resolution as `{{callbacks.<node-id>}}` — a reserved scope entry beside
+`secrets`, never part of node output. Arming up front also closes the
+inverse race: a reply that beats the runner to the node lands on the
+`armed` row and is stored; the runner adopts it the instant it arrives at
+the node instead of losing it. Delivery is first-wins (a duplicate gets
+`409` and cannot overwrite the payload), an expired or retired token gets
+`410`, and the engine closes out leftover `armed`/`waiting` rows at every
+terminal path — a token dies with its run. The endpoint is deliberately
+anonymous: the unguessable per-run token is the credential, exactly the
+badge-token model, rate-limited like the public webhook trigger.
+
 ### Resume from failure
 
 A failed or cancelled run can be **resumed**: a fresh execution points back at

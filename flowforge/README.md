@@ -54,6 +54,14 @@ order while streaming live progress back to every collaborator on the canvas.
   the public API (dedicated `approve` token scope), or `flowforge approve` in
   a terminal. Timeouts are configurable (reject the branch or fail the run),
   and test runs auto-approve.
+- **Machine-in-the-loop callbacks** — a **Wait for Callback** node pauses the
+  run until an external system POSTs to its one-time URL, then routes down
+  the received or timed-out branch with the delivered payload: async job
+  APIs and payment confirmations become a single node. The URL is minted
+  **before anything executes** and referenced upstream as
+  `{{callbacks.node-id}}`, so a reply that arrives before the run even
+  reaches the wait node is stored, not lost; delivery is first-wins, and the
+  token dies with the run.
 - **Execution engine** — parses the graph into a DAG and schedules it with a
   ready-set scheduler: independent branches run **in parallel** (bounded by
   `EXEC_MAX_PARALLEL`), joins wait for every upstream branch, `{{node-id.field}}`
