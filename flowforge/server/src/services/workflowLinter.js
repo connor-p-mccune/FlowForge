@@ -266,6 +266,34 @@ function lintNodeConfig(node, { workflowTargets }) {
       }
       break
     }
+    case 'wait-callback': {
+      // Same shape as approval: bad values fall back to runner defaults, but
+      // silently waiting an hour when the author typed "5m" (or taking the
+      // timed-out branch when they wanted a hard failure) is lint's job to
+      // surface now.
+      const timeout = config.timeoutMinutes
+      if (!isBlank(timeout) && (!Number.isFinite(Number(timeout)) || Number(timeout) <= 0)) {
+        issues.push(
+          issue(
+            'warning',
+            'invalid-config',
+            `${name}: the timeout must be a positive number of minutes — the 60-minute default applies`,
+            node.id
+          )
+        )
+      }
+      if (!isBlank(config.onTimeout) && !['continue', 'fail'].includes(config.onTimeout)) {
+        issues.push(
+          issue(
+            'warning',
+            'invalid-config',
+            `${name}: on-timeout must be "continue" or "fail" — defaulting to continue`,
+            node.id
+          )
+        )
+      }
+      break
+    }
     case 'transform':
       if (isBlank(config.template)) {
         issues.push(
@@ -409,40 +437,54 @@ function lintGraph({ nodes = [], edges = [] } = {}, { secretNames, workflowTarge
     }
   }
 
-  // Branching nodes route on their two source handles (condition: true/false,
-  // approval: approved/rejected); a missing side means one outcome silently
-  // ends the flow.
-  const BRANCH_NAMES = {
-    condition: { true: 'true', false: 'false' },
-    approval: { true: 'approved', false: 'rejected' },
+  // Branching nodes route on their source handles (condition: true/false,
+  // approval: approved/rejected, wait-callback: received/timed-out); a
+  // missing side means one outcome silently ends the flow.
+  const BRANCH_HANDLES = {
+    condition: { handles: { true: 'true', false: 'false' }, noun: 'result' },
+    approval: { handles: { true: 'approved', false: 'rejected' }, noun: 'decision' },
+    'wait-callback': {
+      handles: { received: 'received', 'timed-out': 'timed-out' },
+      noun: 'callback',
+    },
   }
   for (const node of nodes) {
-    const branchNames = BRANCH_NAMES[node.type]
-    if (!branchNames) continue
+    const spec = BRANCH_HANDLES[node.type]
+    if (!spec) continue
+    // A callback gate configured to fail on timeout has no timed-out branch
+    // to wire — only the received side is expected.
+    const expected = Object.keys(spec.handles).filter(
+      (h) =>
+        !(
+          node.type === 'wait-callback' &&
+          h === 'timed-out' &&
+          node.data?.config?.onTimeout === 'fail'
+        )
+    )
     const handles = new Set(
       validEdges.filter((e) => e.source === node.id).map((e) => e.sourceHandle)
     )
-    const missing = ['true', 'false'].filter((h) => !handles.has(h))
-    if (missing.length === 1) {
+    const missing = expected.filter((h) => !handles.has(h))
+    if (missing.length === expected.length && missing.length > 1) {
       issues.push(
         issue(
           'warning',
           'unwired-branch',
-          `${label(node)}: the ${branchNames[missing[0]]} branch is not connected`,
+          `${label(node)}: neither branch is connected — the ${spec.noun} is never used`,
           node.id
         )
       )
-    } else if (missing.length === 2) {
-      issues.push(
-        issue(
-          'warning',
-          'unwired-branch',
-          `${label(node)}: neither branch is connected — the ${
-            node.type === 'approval' ? 'decision' : 'result'
-          } is never used`,
-          node.id
+    } else {
+      for (const h of missing) {
+        issues.push(
+          issue(
+            'warning',
+            'unwired-branch',
+            `${label(node)}: the ${spec.handles[h]} branch is not connected`,
+            node.id
+          )
         )
-      )
+      }
     }
   }
 
@@ -515,6 +557,24 @@ function lintGraph({ nodes = [], edges = [] } = {}, { secretNames, workflowTarge
               'error',
               'unknown-secret',
               `${label(node)}: secret "${secretName}" does not exist in this workspace`,
+              node.id
+            )
+          )
+        }
+        continue
+      }
+      if (ref.head === 'callbacks') {
+        // {{callbacks.<node-id>}} resolves to a wait-callback node's one-time
+        // URL. Anything else resolves to empty at runtime — the external
+        // system would be handed a blank instead of a callback address.
+        const target = ref.rest[0]
+        const targetNode = target ? nodes.find((n) => n.id === target) : null
+        if (!targetNode || targetNode.type !== 'wait-callback') {
+          issues.push(
+            issue(
+              'error',
+              'unknown-callback-ref',
+              `${label(node)}: {{callbacks.${target ?? ''}…}} doesn't reference a wait-for-callback node`,
               node.id
             )
           )

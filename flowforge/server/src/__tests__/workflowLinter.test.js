@@ -417,6 +417,75 @@ describe('lintGraph', () => {
       expect(unwired.severity).toBe('warning')
     })
 
+    it('flags miswired callback gates and callback references', () => {
+      const graph = {
+        nodes: [
+          node('t1', 'trigger-manual'),
+          node('h1', 'action-http', {
+            method: 'POST',
+            url: 'https://api.example.com/jobs',
+            headers: '{}',
+            body: '{"callbackUrl": "{{callbacks.w1}}"}',
+          }),
+          node('w1', 'wait-callback', { timeoutMinutes: 30 }),
+          node('got', 'output-log', { message: 'ok' }),
+          node('late', 'output-log', { message: 'late' }),
+        ],
+        edges: [
+          edge('t1', 'h1'),
+          edge('h1', 'w1'),
+          edge('w1', 'got', 'received'),
+          edge('w1', 'late', 'timed-out'),
+        ],
+      }
+      // Fully wired: clean.
+      expect(lintGraph(graph)).toEqual([])
+
+      // Drop the timed-out edge: warn — unless onTimeout is 'fail', where
+      // there is no timed-out branch to wire.
+      const noTimeoutEdge = { ...graph, edges: graph.edges.slice(0, 3) }
+      expect(
+        lintGraph(noTimeoutEdge).find((i) => i.code === 'unwired-branch').message
+      ).toMatch(/timed-out branch/)
+      const failMode = {
+        ...noTimeoutEdge,
+        nodes: noTimeoutEdge.nodes.map((n) =>
+          n.id === 'w1' ? node('w1', 'wait-callback', { timeoutMinutes: 30, onTimeout: 'fail' }) : n
+        ),
+      }
+      expect(codes(lintGraph(failMode))).not.toContain('unwired-branch')
+
+      // A callbacks reference must point at a wait-callback node.
+      const badRef = {
+        ...graph,
+        nodes: graph.nodes.map((n) =>
+          n.id === 'h1'
+            ? node('h1', 'action-http', {
+                method: 'POST',
+                url: 'https://api.example.com/jobs',
+                headers: '{}',
+                body: '{"callbackUrl": "{{callbacks.nope}}"}',
+              })
+            : n
+        ),
+      }
+      const refIssue = lintGraph(badRef).find((i) => i.code === 'unknown-callback-ref')
+      expect(refIssue).toBeTruthy()
+      expect(refIssue.severity).toBe('error')
+
+      // Invalid timeout / on-timeout values warn like approval's do.
+      const badConfig = {
+        ...graph,
+        nodes: graph.nodes.map((n) =>
+          n.id === 'w1' ? node('w1', 'wait-callback', { timeoutMinutes: -5, onTimeout: 'retry' }) : n
+        ),
+      }
+      const invalid = lintGraph(badConfig).filter(
+        (i) => i.code === 'invalid-config' && i.nodeId === 'w1'
+      )
+      expect(invalid).toHaveLength(2)
+    })
+
     it('warns on an unknown policy value and on uncatchable types', () => {
       const graph = {
         nodes: [
