@@ -120,6 +120,18 @@ describe('NodeConfigPanel rendering', () => {
     expect(screen.getByText(/^Message/)).toBeInTheDocument()
   })
 
+  it('renders text and color controls for a note, hiding the bench and explorer', () => {
+    const { onChange } = setup(mk('note', { config: { text: 'context', color: 'yellow' } }))
+    expect(screen.getByText('Note text')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('radio', { name: 'pink' }))
+    expect(onChange).toHaveBeenCalledWith('n1', {
+      config: { text: 'context', color: 'pink' },
+    })
+    // Annotations have no upstream data and nothing to bench.
+    expect(screen.queryByText(/Test this node/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/Insert data from upstream/)).not.toBeInTheDocument()
+  })
+
   it('shows only a hint (no extra inputs) for trigger-manual', () => {
     setup(mk('trigger-manual'))
     expect(screen.getByText(/Manual triggers start the workflow/)).toBeInTheDocument()

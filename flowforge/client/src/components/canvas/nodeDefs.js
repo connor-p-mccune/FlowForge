@@ -128,6 +128,13 @@ export const NODE_DEFS = {
     subtype: 'return',
     config: {},
   },
+  // Note: a sticky-note annotation. No handles, never executes — the engine
+  // and linter ignore it. text is the note body; color picks the sticky tint.
+  'note': {
+    label: 'Note',
+    subtype: 'note',
+    config: { text: '', color: 'yellow' },
+  },
   // Sub-workflow: runs another deployed workflow as a step. workflowId is the
   // target (the only field the runner reads); workflowName is denormalized purely
   // for the canvas label and is refreshed from the live list in the config panel.
@@ -170,4 +177,5 @@ export const TOOLBAR_BUTTONS = [
   { type: 'output-return', label: 'Return', className: 'toolbar-btn--output' },
   { type: 'sub-workflow', label: 'Sub-workflow', className: 'toolbar-btn--subworkflow' },
   { type: 'for-each', label: 'For Each', className: 'toolbar-btn--foreach' },
+  { type: 'note', label: '📝 Note', className: 'toolbar-btn--note' },
 ]

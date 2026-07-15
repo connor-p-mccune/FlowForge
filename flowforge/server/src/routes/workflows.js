@@ -409,6 +409,7 @@ const BENCH_UNSUPPORTED = {
   'for-each': 'For-each nodes fan a workflow out over a list — use a test run instead',
   'wait-callback':
     'Wait-for-callback nodes pause a real run until an external system calls back — use a test run instead',
+  note: 'Notes are canvas annotations — they never execute',
 }
 
 // A bench run must not hang the HTTP request it rides on (e.g. a delay node

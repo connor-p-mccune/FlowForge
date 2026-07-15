@@ -11,6 +11,7 @@ import ApprovalNode from '../components/canvas/nodes/ApprovalNode'
 import WaitCallbackNode from '../components/canvas/nodes/WaitCallbackNode'
 import AINode from '../components/canvas/nodes/AINode'
 import OutputNode from '../components/canvas/nodes/OutputNode'
+import NoteNode from '../components/canvas/nodes/NoteNode'
 
 // React Flow's <Handle> reads from the flow store, so every node must render
 // inside a ReactFlowProvider.
@@ -270,6 +271,23 @@ describe('AINode', () => {
     expect(screen.getByText('prompt')).toBeInTheDocument()
     expect(targets(container)).toHaveLength(1)
     expect(sources(container)).toHaveLength(1)
+  })
+})
+
+describe('NoteNode', () => {
+  it('renders its text with the chosen color and no handles at all', () => {
+    const { container } = renderNode(
+      <NoteNode data={{ config: { text: 'watch this branch', color: 'blue' } }} selected={false} />
+    )
+    expect(screen.getByText('watch this branch')).toBeInTheDocument()
+    expect(container.querySelector('.node--note')).toHaveClass('note--blue')
+    expect(handles(container)).toHaveLength(0)
+  })
+
+  it('defaults to yellow with a helper prompt when empty', () => {
+    const { container } = renderNode(<NoteNode data={{}} selected={false} />)
+    expect(container.querySelector('.node--note')).toHaveClass('note--yellow')
+    expect(screen.getByText(/edit the text in the panel/i)).toBeInTheDocument()
   })
 })
 

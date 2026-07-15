@@ -257,7 +257,13 @@ async function runExecution(
   // scrubs the plaintext from everything persisted or published below.
   const secrets = loadWorkspaceSecrets(workflow.workspace_id)
   const redact = buildRedactor(Object.values(secrets))
-  const { nodes = [], edges = [] } = JSON.parse(workflow.graph_json)
+  const graph = JSON.parse(workflow.graph_json)
+  // Sticky notes are canvas annotations, not steps: they never execute, get
+  // no step rows, and any edge touching one (only possible in a hand-edited
+  // import — the UI renders notes without handles) is dropped with them.
+  const noteIds = new Set((graph.nodes || []).filter((n) => n.type === 'note').map((n) => n.id))
+  const nodes = (graph.nodes || []).filter((n) => !noteIds.has(n.id))
+  const edges = (graph.edges || []).filter((e) => !noteIds.has(e.source) && !noteIds.has(e.target))
   const nodeById = Object.fromEntries(nodes.map((n) => [n.id, n]))
 
   // Resume-from-failure: when this run continues an earlier failed/cancelled

@@ -366,6 +366,28 @@ describe('lintGraph', () => {
     expect(issues[issues.length - 1].severity).toBe('warning')
   })
 
+  describe('sticky notes', () => {
+    it('notes raise no issues and are invisible to reachability checks', () => {
+      const graph = {
+        nodes: [
+          node('t1', 'trigger-manual'),
+          node('o1', 'output-log', { message: 'hi' }),
+          node('memo', 'note', { text: 'context for the next person' }),
+        ],
+        edges: [edge('t1', 'o1')],
+      }
+      expect(lintGraph(graph)).toEqual([])
+    })
+
+    it('a graph of only notes still reads as empty', () => {
+      const graph = {
+        nodes: [node('memo', 'note', { text: 'todo: build this' })],
+        edges: [],
+      }
+      expect(codes(lintGraph(graph))).toEqual(['empty-graph'])
+    })
+  })
+
   describe('on-error policy wiring', () => {
     const httpNode = (id, onError) =>
       node(id, 'action-http', {

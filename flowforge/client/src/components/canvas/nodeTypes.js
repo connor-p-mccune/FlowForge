@@ -12,6 +12,7 @@ import SubWorkflowNode from './nodes/SubWorkflowNode'
 import ForEachNode from './nodes/ForEachNode'
 import ApprovalNode from './nodes/ApprovalNode'
 import WaitCallbackNode from './nodes/WaitCallbackNode'
+import NoteNode from './nodes/NoteNode'
 
 export const nodeTypes = {
   'trigger-manual': TriggerNode,
@@ -37,4 +38,5 @@ export const nodeTypes = {
   'output-return': OutputNode,
   'sub-workflow': SubWorkflowNode,
   'for-each': ForEachNode,
+  'note': NoteNode,
 }

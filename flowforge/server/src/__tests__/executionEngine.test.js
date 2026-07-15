@@ -104,6 +104,29 @@ describe('runExecution', () => {
     expect(kinds[kinds.length - 1]).toBe('execution:completed')
   })
 
+  it('sticky notes never execute and cannot break the run', async () => {
+    const graph = {
+      nodes: [
+        node('t1', 'trigger-manual'),
+        node('memo', 'note', { text: 'explains the flow', color: 'blue' }),
+        node('o1', 'output-log', { message: 'ran' }),
+      ],
+      edges: [
+        edge('t1', 'o1'),
+        // Only possible in a hand-edited import — the UI renders notes without
+        // handles. The engine must drop it with the note, not choke on it.
+        edge('memo', 'o1'),
+      ],
+    }
+    const { execId } = seedWorkflow(graph)
+    await runExecution(execId, { publish: () => {} })
+
+    expect(getExecution(execId).status).toBe('completed')
+    const steps = getSteps(execId)
+    expect(steps.map((s) => s.node_id).sort()).toEqual(['o1', 't1'])
+    expect(stepFor(execId, 'o1').status).toBe('succeeded')
+  })
+
   it('feeds the passed-in trigger payload into trigger-node output', async () => {
     const graph = {
       nodes: [

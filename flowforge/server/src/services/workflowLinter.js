@@ -360,8 +360,15 @@ function buildAncestors(order, incomingByNode) {
 //   secretNames     — Set of the workspace's secret names, for {{secrets.*}}
 //   workflowTargets — Map(workflowId -> { name, status }) for sub-workflow /
 //                     for-each target validation
-function lintGraph({ nodes = [], edges = [] } = {}, { secretNames, workflowTargets } = {}) {
+function lintGraph({ nodes: rawNodes = [], edges: rawEdges = [] } = {}, { secretNames, workflowTargets } = {}) {
   const issues = []
+
+  // Sticky notes are annotations: the engine drops them (and any edge touching
+  // one) before building the DAG, so the linter sees exactly the graph that
+  // will run — a note can't be "unreachable" or "missing config".
+  const noteIds = new Set(rawNodes.filter((n) => n.type === 'note').map((n) => n.id))
+  const nodes = rawNodes.filter((n) => !noteIds.has(n.id))
+  const edges = rawEdges.filter((e) => !noteIds.has(e.source) && !noteIds.has(e.target))
 
   if (nodes.length === 0) {
     issues.push(issue('warning', 'empty-graph', 'The workflow has no nodes yet'))

@@ -912,6 +912,43 @@ export default function NodeConfigPanel({
             </p>
           </>
         )
+      case 'note':
+        return (
+          <>
+            <label className="config-panel__field">
+              <span>Note text</span>
+              <textarea
+                rows={5}
+                value={config.text || ''}
+                placeholder="Explain this part of the workflow to the next person…"
+                onChange={(e) => setConfig('text', e.target.value)}
+              />
+            </label>
+            <div className="config-panel__field">
+              <span className="config-panel__field-label">Color</span>
+              <div className="note-colors" role="radiogroup" aria-label="Note color">
+                {['yellow', 'pink', 'blue', 'green'].map((c) => (
+                  <button
+                    key={c}
+                    type="button"
+                    role="radio"
+                    aria-checked={(config.color || 'yellow') === c}
+                    aria-label={c}
+                    className={`note-colors__swatch note-colors__swatch--${c}${
+                      (config.color || 'yellow') === c ? ' note-colors__swatch--active' : ''
+                    }`}
+                    onClick={() => setConfig('color', c)}
+                  />
+                ))}
+              </div>
+            </div>
+            <p className="config-panel__hint">
+              Notes are annotations: they have no connections, never execute, and
+              the linter ignores them. Use them to explain a branch, mark a TODO,
+              or leave context for collaborators.
+            </p>
+          </>
+        )
       case 'output-return':
         return (
           <p className="config-panel__hint">
@@ -941,8 +978,9 @@ export default function NodeConfigPanel({
         </label>
         {renderFields()}
         {CATCHABLE_TYPES.has(node.type) && <OnErrorField config={config} setConfig={setConfig} />}
-        <VariableExplorer node={node} nodes={nodes} edges={edges} />
-        <NodeTester workflowId={currentWorkflowId} node={node} />
+        {/* Notes are annotations — no upstream data to explore, nothing to bench. */}
+        {node.type !== 'note' && <VariableExplorer node={node} nodes={nodes} edges={edges} />}
+        {node.type !== 'note' && <NodeTester workflowId={currentWorkflowId} node={node} />}
         <div className="config-panel__node-id">
           Node ID: <code>{node.id}</code>
         </div>
