@@ -204,6 +204,21 @@ describe('RunSettingsPanel', () => {
     expect(screen.getByText(/failures are not being escalated/i)).toBeInTheDocument()
   })
 
+  it('loads and saves the default run priority', async () => {
+    setup()
+    const select = await screen.findByLabelText(/default run priority/i)
+    expect(select).toHaveValue('normal')
+
+    fireEvent.change(select, { target: { value: 'low' } })
+    fireEvent.click(screen.getByRole('button', { name: /save settings/i }))
+    await waitFor(() =>
+      expect(apiFetch).toHaveBeenCalledWith('/api/workflows/wf1', {
+        method: 'PUT',
+        body: expect.objectContaining({ default_priority: 'low' }),
+      })
+    )
+  })
+
   it('shows live step-cache stats and clears them on demand', async () => {
     setup()
     expect(await screen.findByText(/2 live cached results, reused 5 times/i)).toBeInTheDocument()

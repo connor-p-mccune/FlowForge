@@ -12,6 +12,7 @@ export default function RunSettingsPanel({ workflowId, open, onClose }) {
   const [workflow, setWorkflow] = useState(null)
   const [limitInput, setLimitInput] = useState('') // '' = unlimited
   const [policy, setPolicy] = useState('queue')
+  const [priority, setPriority] = useState('normal') // default queue lane
   const [slaDurationInput, setSlaDurationInput] = useState('') // seconds, '' = no target
   const [slaSuccessInput, setSlaSuccessInput] = useState('') // percent, '' = no target
   // Error-handler workflow: '' = none. Options are the workspace's *deployed*
@@ -45,6 +46,7 @@ export default function RunSettingsPanel({ workflowId, open, onClose }) {
         setWorkflow(wf)
         setLimitInput(wf.max_concurrent_runs ? String(wf.max_concurrent_runs) : '')
         setPolicy(wf.concurrency_policy || 'queue')
+        setPriority(wf.default_priority || 'normal')
         // Stored in ms / as a 0..1 fraction; shown in the friendlier seconds / %.
         setSlaDurationInput(wf.sla_max_duration_ms ? String(wf.sla_max_duration_ms / 1000) : '')
         setSlaSuccessInput(
@@ -122,6 +124,7 @@ export default function RunSettingsPanel({ workflowId, open, onClose }) {
           sla_max_duration_ms: durSeconds === null ? null : Math.round(durSeconds * 1000),
           sla_min_success_rate: successPct === null ? null : successPct / 100,
           error_workflow_id: handlerId || null,
+          default_priority: priority,
         },
       })
       toast.success('Run settings saved')
@@ -175,6 +178,21 @@ export default function RunSettingsPanel({ workflowId, open, onClose }) {
                 {policy === 'reject'
                   ? 'Submissions at the cap fail immediately (409) — callers find out now instead of watching a run sit queued. Scheduled ticks are skipped, which is exactly “don’t overlap” for cron workflows.'
                   : 'Runs at the cap wait and start automatically once a slot frees. Order across waiting runs is not guaranteed.'}
+              </p>
+
+              <label className="run-settings__field">
+                <span className="run-settings__label">Default run priority</span>
+                <select value={priority} onChange={(e) => setPriority(e.target.value)}>
+                  <option value="high">High — picked up before other work</option>
+                  <option value="normal">Normal (default)</option>
+                  <option value="low">Low — yields to everything else</option>
+                </select>
+              </label>
+              <p className="webhook-panel__hint">
+                The queue lane this workflow’s runs take (API triggers can
+                override per run with <code>?priority=</code>). Priority orders
+                pickup — it never interrupts runs already executing — and test
+                runs always ride the high lane.
               </p>
 
               <div className="run-settings__section">SLA targets</div>
