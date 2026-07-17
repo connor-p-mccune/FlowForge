@@ -113,7 +113,8 @@ describe('personal access tokens + public API v1', () => {
     expect(row).toMatchObject({ workflow_id: workflowId, trigger_type: 'api', triggered_by: userId })
     expect(JSON.parse(row.trigger_data)).toEqual({ orderId: 42 })
     expect(mockAdd).toHaveBeenCalledWith(
-      expect.objectContaining({ workflowId, payload: { orderId: 42 } })
+      expect.objectContaining({ workflowId, payload: { orderId: 42 } }),
+      { priority: 5 }
     )
   })
 

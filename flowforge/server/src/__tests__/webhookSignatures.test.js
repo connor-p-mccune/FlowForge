@@ -81,7 +81,8 @@ describe('webhook signatures', () => {
       .send(body)
     expect(res.status).toBe(202)
     expect(mockAdd).toHaveBeenCalledWith(
-      expect.objectContaining({ payload: { orderId: 42 } })
+      expect.objectContaining({ payload: { orderId: 42 } }),
+      { priority: 5 }
     )
   })
 
