@@ -96,7 +96,8 @@ describe('execution replay', () => {
         executionId: replay.id,
         workflowId: workflow.id,
         payload: { order: 42, user: 'ada' },
-      })
+      }),
+      { priority: 5 }
     )
   })
 
@@ -115,7 +116,7 @@ describe('execution replay', () => {
     expect(res.status).toBe(202)
     expect(res.body.execution.trigger_type).toBe('replay')
     expect(res.body.execution.trigger_data).toBeNull()
-    expect(mockAdd).toHaveBeenCalledWith(expect.objectContaining({ payload: {} }))
+    expect(mockAdd).toHaveBeenCalledWith(expect.objectContaining({ payload: {} }), { priority: 5 })
   })
 
   it('returns 404 for an unknown execution', async () => {

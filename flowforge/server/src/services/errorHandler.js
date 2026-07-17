@@ -20,6 +20,7 @@ const { v4: uuidv4 } = require('uuid')
 const db = require('../config/database')
 const { getExecutionQueue } = require('../config/queue')
 const { admitRun } = require('./concurrencyGate')
+const { resolvePriority, enqueueOpts } = require('./runPriority')
 
 // The failure context handed to the handler as its trigger payload. The run's
 // error lives on its failed step (the engine persists no run-level error
@@ -81,19 +82,22 @@ async function triggerErrorHandler(executionId) {
     }
 
     const payload = buildPayload(execution, workflow)
+    // The handler's own default lane applies — escalation urgency is the
+    // handler author's call, not something this trigger path decides.
+    const priority = resolvePriority(null, handler)
     const handlerExecutionId = uuidv4()
     db.prepare(
-      `INSERT INTO executions (id, workflow_id, status, triggered_by, trigger_type, trigger_data, created_at)
-       VALUES (?, ?, 'pending', ?, 'error-handler', ?, ?)`
+      `INSERT INTO executions (id, workflow_id, status, triggered_by, trigger_type, trigger_data, priority, created_at)
+       VALUES (?, ?, 'pending', ?, 'error-handler', ?, ?, ?)`
     ).run(
       handlerExecutionId, handler.id, execution.triggered_by ?? null,
-      JSON.stringify(payload), new Date().toISOString()
+      JSON.stringify(payload), priority, new Date().toISOString()
     )
     await getExecutionQueue().add({
       executionId: handlerExecutionId,
       workflowId: handler.id,
       payload,
-    })
+    }, enqueueOpts(priority))
     return handlerExecutionId
   } catch (err) {
     console.error('Error-handler trigger failed:', err.message)

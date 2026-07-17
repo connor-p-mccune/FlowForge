@@ -10,6 +10,7 @@ const scheduler = require('../services/scheduler')
 const activityService = require('../services/activityService')
 const { lintGraph } = require('../services/workflowLinter')
 const stepCache = require('../services/stepCache')
+const { isValidPriority } = require('../services/runPriority')
 const {
   getRunner,
   loadWorkspaceSecrets,
@@ -246,6 +247,15 @@ function validateErrorHandler(body, workflow) {
   return null
 }
 
+// Optional default run priority (services/runPriority.js). Not nullable — a
+// workflow always has a lane, so "clearing" it means setting 'normal'.
+function validatePriority(body) {
+  if ('default_priority' in body && !isValidPriority(body.default_priority)) {
+    return 'default_priority must be "high", "normal", or "low"'
+  }
+  return null
+}
+
 router.put('/workflows/:id', auth, validate(workflowRule), (req, res) => {
   try {
     const workflow = db.prepare('SELECT * FROM workflows WHERE id = ?').get(req.params.id)
@@ -260,6 +270,8 @@ router.put('/workflows/:id', auth, validate(workflowRule), (req, res) => {
     if (slaError) return res.status(400).json({ error: slaError })
     const handlerError = validateErrorHandler(req.body, workflow)
     if (handlerError) return res.status(400).json({ error: handlerError })
+    const priorityError = validatePriority(req.body)
+    if (priorityError) return res.status(400).json({ error: priorityError })
     const maxConcurrent =
       'max_concurrent_runs' in req.body ? req.body.max_concurrent_runs : workflow.max_concurrent_runs
     const policy =
@@ -270,12 +282,14 @@ router.put('/workflows/:id', auth, validate(workflowRule), (req, res) => {
       'sla_min_success_rate' in req.body ? req.body.sla_min_success_rate : workflow.sla_min_success_rate
     const errorWorkflowId =
       'error_workflow_id' in req.body ? req.body.error_workflow_id : workflow.error_workflow_id
+    const defaultPriority =
+      'default_priority' in req.body ? req.body.default_priority : workflow.default_priority
 
     const now = new Date().toISOString()
     db.prepare(
       `UPDATE workflows SET name = ?, description = ?, max_concurrent_runs = ?, concurrency_policy = ?,
-         sla_max_duration_ms = ?, sla_min_success_rate = ?, error_workflow_id = ?, updated_at = ? WHERE id = ?`
-    ).run(name, description ?? workflow.description, maxConcurrent, policy, slaMaxDuration, slaMinSuccess, errorWorkflowId, now, req.params.id)
+         sla_max_duration_ms = ?, sla_min_success_rate = ?, error_workflow_id = ?, default_priority = ?, updated_at = ? WHERE id = ?`
+    ).run(name, description ?? workflow.description, maxConcurrent, policy, slaMaxDuration, slaMinSuccess, errorWorkflowId, defaultPriority, now, req.params.id)
 
     const updated = db.prepare('SELECT * FROM workflows WHERE id = ?').get(req.params.id)
     activityService.logEvent(workflow.workspace_id, req.user.id, 'workflow.updated', {

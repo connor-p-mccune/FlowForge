@@ -85,7 +85,8 @@ describe('triggerErrorHandler', () => {
     })
 
     expect(mockAdd).toHaveBeenCalledWith(
-      expect.objectContaining({ executionId: handlerExecId, workflowId: handlerId })
+      expect.objectContaining({ executionId: handlerExecId, workflowId: handlerId }),
+      { priority: 5 }
     )
   })
 

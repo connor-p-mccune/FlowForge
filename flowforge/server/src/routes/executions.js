@@ -7,6 +7,7 @@ const { requestCancel } = require('../services/executionControl')
 const { admitRun } = require('../services/concurrencyGate')
 const { computeCriticalPath } = require('../services/criticalPath')
 const { compareRuns } = require('../services/runComparison')
+const { isValidPriority, resolvePriority, enqueueOpts } = require('../services/runPriority')
 
 const router = express.Router()
 
@@ -41,7 +42,9 @@ function buildChildExecutions(parentExecutionId, depth = 0) {
   }))
 }
 
-// POST /api/workflows/:id/execute — enqueue a run
+// POST /api/workflows/:id/execute — enqueue a run. An optional body
+// { priority: 'high' | 'normal' | 'low' } overrides the workflow's default
+// lane for this run only.
 router.post('/workflows/:id/execute', auth, async (req, res) => {
   try {
     const workflow = getWorkflowForMember(req.params.id, req.user.id)
@@ -52,20 +55,26 @@ router.post('/workflows/:id/execute', auth, async (req, res) => {
       return res.status(400).json({ error: 'Workflow has no nodes to execute' })
     }
 
+    const requested = req.body?.priority
+    if (requested != null && !isValidPriority(requested)) {
+      return res.status(400).json({ error: 'priority must be "high", "normal", or "low"' })
+    }
+
     // 'reject' concurrency policy: refuse the submission at the cap so the
     // caller finds out now rather than watching a run sit queued.
     const admission = admitRun(workflow)
     if (!admission.ok) return res.status(409).json({ error: admission.error })
 
+    const priority = resolvePriority(requested, workflow)
     const executionId = uuidv4()
     const now = new Date().toISOString()
     // Manual runs carry no trigger payload (trigger_data null); trigger_type marks
     // the source so a replay of this run starts from the same empty input.
     db.prepare(
-      'INSERT INTO executions (id, workflow_id, status, triggered_by, trigger_type, created_at) VALUES (?, ?, ?, ?, ?, ?)'
-    ).run(executionId, workflow.id, 'pending', req.user.id, 'manual', now)
+      'INSERT INTO executions (id, workflow_id, status, triggered_by, trigger_type, priority, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)'
+    ).run(executionId, workflow.id, 'pending', req.user.id, 'manual', priority, now)
 
-    await getExecutionQueue().add({ executionId, workflowId: workflow.id })
+    await getExecutionQueue().add({ executionId, workflowId: workflow.id }, enqueueOpts(priority))
 
     const execution = db.prepare('SELECT * FROM executions WHERE id = ?').get(executionId)
     res.status(202).json({ execution })
@@ -93,11 +102,16 @@ router.post('/workflows/:id/test', auth, async (req, res) => {
     const now = new Date().toISOString()
     // triggered_by stays the user FK (who ran the test); trigger_type 'dry-run'
     // is the marker, mirroring how 'manual'/'webhook'/'replay' are recorded.
+    // Dry runs always ride the high lane: someone is watching the canvas, and
+    // an interactive test stuck behind a bulk backlog defeats its purpose.
     db.prepare(
-      'INSERT INTO executions (id, workflow_id, status, triggered_by, trigger_type, created_at) VALUES (?, ?, ?, ?, ?, ?)'
+      "INSERT INTO executions (id, workflow_id, status, triggered_by, trigger_type, priority, created_at) VALUES (?, ?, ?, ?, ?, 'high', ?)"
     ).run(executionId, workflow.id, 'pending', req.user.id, 'dry-run', now)
 
-    await getExecutionQueue().add({ executionId, workflowId: workflow.id, dryRun: true })
+    await getExecutionQueue().add(
+      { executionId, workflowId: workflow.id, dryRun: true },
+      enqueueOpts('high')
+    )
 
     const execution = db.prepare('SELECT * FROM executions WHERE id = ?').get(executionId)
     res.status(202).json({ execution })
@@ -270,20 +284,24 @@ router.post('/executions/:id/replay', auth, async (req, res) => {
       if (!admission.ok) return res.status(409).json({ error: admission.error })
     }
 
+    // A replay takes the original run's lane (a dry-run replay stays high,
+    // like any dry run); an original without a recorded lane falls back to
+    // the workflow's current default.
+    const priority = isDryRun ? 'high' : resolvePriority(original.priority, workflow)
     const executionId = uuidv4()
     const now = new Date().toISOString()
     // triggered_by is the user who clicked Replay; trigger_type marks it a replay
     // (or 'dry-run' when the original was a test).
     db.prepare(
-      'INSERT INTO executions (id, workflow_id, status, triggered_by, trigger_type, trigger_data, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)'
-    ).run(executionId, workflow.id, 'pending', req.user.id, isDryRun ? 'dry-run' : 'replay', original.trigger_data ?? null, now)
+      'INSERT INTO executions (id, workflow_id, status, triggered_by, trigger_type, trigger_data, priority, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
+    ).run(executionId, workflow.id, 'pending', req.user.id, isDryRun ? 'dry-run' : 'replay', original.trigger_data ?? null, priority, now)
 
     await getExecutionQueue().add({
       executionId,
       workflowId: workflow.id,
       payload,
       ...(isDryRun ? { dryRun: true } : {}),
-    })
+    }, enqueueOpts(priority))
 
     const execution = db.prepare('SELECT * FROM executions WHERE id = ?').get(executionId)
     res.status(202).json({ execution })
@@ -341,15 +359,17 @@ router.post('/executions/:id/resume', auth, async (req, res) => {
       if (!admission.ok) return res.status(409).json({ error: admission.error })
     }
 
+    // Like replay: a resume continues the original run, so it keeps its lane.
+    const priority = isDryRun ? 'high' : resolvePriority(original.priority, workflow)
     const executionId = uuidv4()
     const now = new Date().toISOString()
     db.prepare(
       `INSERT INTO executions
-         (id, workflow_id, status, triggered_by, trigger_type, trigger_data, resumed_from_execution_id, created_at)
-       VALUES (?, ?, 'pending', ?, ?, ?, ?, ?)`
+         (id, workflow_id, status, triggered_by, trigger_type, trigger_data, resumed_from_execution_id, priority, created_at)
+       VALUES (?, ?, 'pending', ?, ?, ?, ?, ?, ?)`
     ).run(
       executionId, workflow.id, req.user.id, isDryRun ? 'dry-run' : 'resume',
-      original.trigger_data ?? null, original.id, now
+      original.trigger_data ?? null, original.id, priority, now
     )
 
     await getExecutionQueue().add({
@@ -357,7 +377,7 @@ router.post('/executions/:id/resume', auth, async (req, res) => {
       workflowId: workflow.id,
       payload,
       ...(isDryRun ? { dryRun: true } : {}),
-    })
+    }, enqueueOpts(priority))
 
     const execution = db.prepare('SELECT * FROM executions WHERE id = ?').get(executionId)
     res.status(202).json({ execution })

@@ -137,7 +137,8 @@ describe('resume from failure', () => {
     expect(res.body.execution.resumed_from_execution_id).toBe(original.id)
     // The route enqueued the job; the worker is mocked, so run it directly.
     expect(mockAdd).toHaveBeenCalledWith(
-      expect.objectContaining({ executionId: res.body.execution.id, workflowId: workflow.id })
+      expect.objectContaining({ executionId: res.body.execution.id, workflowId: workflow.id }),
+      { priority: 5 }
     )
     await runExecution(res.body.execution.id, { publish: () => {} })
 
@@ -315,7 +316,7 @@ describe('resume from failure', () => {
     const res = await resume(test.body.execution.id)
     expect(res.status).toBe(202)
     expect(res.body.execution.trigger_type).toBe('dry-run')
-    expect(mockAdd).toHaveBeenCalledWith(expect.objectContaining({ dryRun: true }))
+    expect(mockAdd).toHaveBeenCalledWith(expect.objectContaining({ dryRun: true }), { priority: 1 })
   })
 
   it('rejects resuming a run that is not failed or cancelled', async () => {

@@ -93,7 +93,8 @@ describe('webhooks', () => {
         executionId: fire.body.executionId,
         workflowId: workflow.id,
         payload: { hello: 'world' },
-      })
+      }),
+      { priority: 5 }
     )
 
     // The execution row exists and is owned by the workflow's workspace

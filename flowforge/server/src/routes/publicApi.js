@@ -19,6 +19,7 @@ const { getExecutionQueue } = require('../config/queue')
 const { requestCancel } = require('../services/executionControl')
 const { respondToApproval } = require('../services/approvals')
 const { admitRun } = require('../services/concurrencyGate')
+const { isValidPriority, resolvePriority, enqueueOpts } = require('../services/runPriority')
 const { computeInsights, forecastFor, parseLimit } = require('./insights')
 const { scheduleExpressionOf, previewFor, parseCount } = require('./schedule')
 const { runSuite } = require('../services/workflowTester')
@@ -139,6 +140,10 @@ router.post('/workspaces/:id/workflows/import', tokenAuth('manage'), (req, res) 
 // token owner, per workflow) returns the original run instead of starting a
 // duplicate, for 24 hours. The key is pinned to its payload — reusing it with
 // a different body is a 409, never a silent replay of the wrong input.
+//
+// ?priority=high|normal|low overrides the workflow's default lane for this
+// run. A query param, not a body field, because the entire body is the
+// trigger payload — mixing control knobs into it would make them data.
 router.post('/workflows/:id/trigger', tokenAuth('trigger'), async (req, res) => {
   try {
     const workflow = getWorkflowForMember(req.params.id, req.user.id)
@@ -147,6 +152,11 @@ router.post('/workflows/:id/trigger', tokenAuth('trigger'), async (req, res) => 
     const { nodes } = JSON.parse(workflow.graph_json)
     if (!nodes || nodes.length === 0) {
       return res.status(400).json({ error: 'Workflow has no nodes to execute' })
+    }
+
+    const requestedPriority = req.query.priority
+    if (requestedPriority !== undefined && !isValidPriority(requestedPriority)) {
+      return res.status(400).json({ error: 'priority must be "high", "normal", or "low"' })
     }
 
     const payload = req.body && typeof req.body === 'object' && !Array.isArray(req.body) ? req.body : {}
@@ -193,14 +203,15 @@ router.post('/workflows/:id/trigger', tokenAuth('trigger'), async (req, res) => 
     const admission = admitRun(workflow)
     if (!admission.ok) return res.status(409).json({ error: admission.error })
 
+    const priority = resolvePriority(requestedPriority, workflow)
     const executionId = uuidv4()
     const now = new Date().toISOString()
     // trigger_type 'api' marks the source; trigger_data persists the payload so
     // the run is replayable like a webhook-triggered one.
     db.prepare(
-      `INSERT INTO executions (id, workflow_id, status, triggered_by, trigger_type, trigger_data, created_at)
-       VALUES (?, ?, 'pending', ?, 'api', ?, ?)`
-    ).run(executionId, workflow.id, req.user.id, Object.keys(payload).length ? JSON.stringify(payload) : null, now)
+      `INSERT INTO executions (id, workflow_id, status, triggered_by, trigger_type, trigger_data, priority, created_at)
+       VALUES (?, ?, 'pending', ?, 'api', ?, ?, ?)`
+    ).run(executionId, workflow.id, req.user.id, Object.keys(payload).length ? JSON.stringify(payload) : null, priority, now)
 
     if (requestHash) {
       db.prepare(
@@ -209,7 +220,10 @@ router.post('/workflows/:id/trigger', tokenAuth('trigger'), async (req, res) => 
       ).run(idempotencyKey, req.user.id, workflow.id, requestHash, executionId, now)
     }
 
-    await getExecutionQueue().add({ executionId, workflowId: workflow.id, payload })
+    await getExecutionQueue().add(
+      { executionId, workflowId: workflow.id, payload },
+      enqueueOpts(priority)
+    )
 
     res.status(202).json({
       execution: { id: executionId, workflowId: workflow.id, status: 'pending' },
@@ -234,7 +248,7 @@ router.get('/workflows/:id/executions', tokenAuth('read'), (req, res) => {
     const limit = Number.isFinite(requested) ? Math.min(Math.max(requested, 1), 100) : 20
 
     const rows = db.prepare(
-      `SELECT id, status, trigger_type, started_at, finished_at, created_at
+      `SELECT id, status, trigger_type, priority, started_at, finished_at, created_at
          FROM executions
         WHERE workflow_id = ?
         ORDER BY created_at DESC, rowid DESC
@@ -247,6 +261,7 @@ router.get('/workflows/:id/executions', tokenAuth('read'), (req, res) => {
         workflowId: workflow.id,
         status: r.status,
         triggerType: r.trigger_type,
+        priority: r.priority,
         startedAt: r.started_at,
         finishedAt: r.finished_at,
         createdAt: r.created_at,
@@ -570,15 +585,17 @@ router.post('/executions/:id/resume', tokenAuth('trigger'), async (req, res) => 
       if (!admission.ok) return res.status(409).json({ error: admission.error })
     }
 
+    // A resume continues the original run, so it keeps the original's lane.
+    const priority = isDryRun ? 'high' : resolvePriority(original.priority, workflow)
     const executionId = uuidv4()
     const now = new Date().toISOString()
     db.prepare(
       `INSERT INTO executions
-         (id, workflow_id, status, triggered_by, trigger_type, trigger_data, resumed_from_execution_id, created_at)
-       VALUES (?, ?, 'pending', ?, ?, ?, ?, ?)`
+         (id, workflow_id, status, triggered_by, trigger_type, trigger_data, resumed_from_execution_id, priority, created_at)
+       VALUES (?, ?, 'pending', ?, ?, ?, ?, ?, ?)`
     ).run(
       executionId, workflow.id, req.user.id, isDryRun ? 'dry-run' : 'resume',
-      original.trigger_data ?? null, original.id, now
+      original.trigger_data ?? null, original.id, priority, now
     )
 
     await getExecutionQueue().add({
@@ -586,7 +603,7 @@ router.post('/executions/:id/resume', tokenAuth('trigger'), async (req, res) => 
       workflowId: workflow.id,
       payload,
       ...(isDryRun ? { dryRun: true } : {}),
-    })
+    }, enqueueOpts(priority))
 
     res.status(202).json({
       execution: { id: executionId, workflowId: workflow.id, status: 'pending' },

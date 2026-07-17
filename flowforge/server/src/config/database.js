@@ -111,6 +111,14 @@ ensureColumn('workflows', 'sla_min_success_rate', 'REAL')
 // quietly clears the reference instead of blocking the delete.
 ensureColumn('workflows', 'error_workflow_id', 'TEXT REFERENCES workflows(id) ON DELETE SET NULL')
 
+// Run priority lanes (services/runPriority.js): default_priority is the lane
+// this workflow's runs take unless a trigger overrides it per run
+// ('high' | 'normal' | 'low'); executions.priority records the lane each run
+// actually took, so history can show it. Added here (idempotent ALTER) so
+// existing databases pick up the columns without a wipe.
+ensureColumn('workflows', 'default_priority', "TEXT NOT NULL DEFAULT 'normal'")
+ensureColumn('executions', 'priority', 'TEXT')
+
 // Two-factor authentication (TOTP). Optional, opt-in per user. totp_enabled stays
 // 0 until the user verifies a code from their authenticator, so a half-finished
 // setup never locks them out of login. totp_backup_codes is a JSON array of

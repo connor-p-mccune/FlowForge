@@ -185,6 +185,18 @@ const spec = {
               'request. Scoped to the token owner and workflow.',
             schema: { type: 'string', maxLength: 255 },
           },
+          {
+            name: 'priority',
+            in: 'query',
+            required: false,
+            description:
+              'Queue lane for this run, overriding the workflow’s default. ' +
+              'Priority orders pickup from the queue (high before normal ' +
+              'before low); it never preempts runs already executing. A ' +
+              'query parameter — not a body field — because the entire body ' +
+              'is the trigger payload.',
+            schema: { type: 'string', enum: ['high', 'normal', 'low'] },
+          },
         ],
         requestBody: {
           required: false,
@@ -796,6 +808,12 @@ const spec = {
           workflowId: { type: 'string' },
           status: { $ref: '#/components/schemas/ExecutionStatus' },
           triggerType: { type: 'string', nullable: true, example: 'webhook' },
+          priority: {
+            type: 'string',
+            enum: ['high', 'normal', 'low'],
+            nullable: true,
+            description: 'The queue lane the run took (null on runs predating lanes).',
+          },
           startedAt: { type: 'string', format: 'date-time', nullable: true },
           finishedAt: { type: 'string', format: 'date-time', nullable: true },
           createdAt: { type: 'string', format: 'date-time' },

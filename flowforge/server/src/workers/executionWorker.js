@@ -74,11 +74,16 @@ function startWorker() {
     // Per-workflow concurrency cap. A run at the cap is re-parked with a short
     // delay instead of held — this Bull slot frees for other workflows and the
     // clone re-checks once DEFER_DELAY_MS passes. Dry runs are interactive and
-    // exempt: they neither consume slots nor wait on them.
+    // exempt: they neither consume slots nor wait on them. The re-park carries
+    // the job's Bull priority forward — deferral must not silently demote a
+    // high-lane run to the back of the normal queue.
     const gated = !dryRun && Boolean(workflowId)
     if (gated && !acquireSlot(workflowId)) {
       recordRunDeferred()
-      await queue.add(job.data, { delay: DEFER_DELAY_MS })
+      await queue.add(job.data, {
+        delay: DEFER_DELAY_MS,
+        ...(job.opts?.priority != null ? { priority: job.opts.priority } : {}),
+      })
       return
     }
 

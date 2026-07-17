@@ -71,7 +71,8 @@ describe('runScheduledExecution', () => {
     )
     expect(mockAdd).toHaveBeenCalledTimes(1)
     expect(mockAdd).toHaveBeenCalledWith(
-      expect.objectContaining({ workflowId: wfId, payload: {} })
+      expect.objectContaining({ workflowId: wfId, payload: {} }),
+      { priority: 5 }
     )
 
     const execs = db.prepare('SELECT * FROM executions WHERE workflow_id = ?').all(wfId)

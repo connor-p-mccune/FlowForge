@@ -103,6 +103,24 @@ describe('worker concurrency gate', () => {
     await job2
   })
 
+  it('a re-park carries the job Bull priority forward', async () => {
+    const wfId = seedWorkflow({ limit: 1 })
+    const exec1 = seedExecution(wfId)
+    const exec2 = seedExecution(wfId)
+
+    const job1 = processor({ data: { executionId: exec1, workflowId: wfId } })
+    // A high-lane job (Bull priority 1) deferred at the cap must not silently
+    // demote to the default lane when it re-enqueues.
+    await processor({ data: { executionId: exec2, workflowId: wfId }, opts: { priority: 1 } })
+    expect(mockAdd).toHaveBeenCalledWith(
+      { executionId: exec2, workflowId: wfId },
+      { delay: 100, priority: 1 }
+    )
+
+    runResolvers[exec1]({})
+    await job1
+  })
+
   it('exempts dry runs from the cap', async () => {
     const wfId = seedWorkflow({ limit: 1 })
     const exec1 = seedExecution(wfId)

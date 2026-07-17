@@ -61,8 +61,10 @@ describe('dry-run (test mode) execution', () => {
     expect(execution.triggered_by).toBe(userId)
 
     expect(mockAdd).toHaveBeenCalledTimes(1)
+    // Dry runs are interactive, so they always ride the high lane (Bull 1).
     expect(mockAdd).toHaveBeenCalledWith(
-      expect.objectContaining({ executionId: execution.id, workflowId: workflow.id, dryRun: true })
+      expect.objectContaining({ executionId: execution.id, workflowId: workflow.id, dryRun: true }),
+      { priority: 1 }
     )
   })
 
@@ -105,6 +107,6 @@ describe('dry-run (test mode) execution', () => {
       .set('Authorization', `Bearer ${token}`)
     expect(res.status).toBe(202)
     expect(res.body.execution.trigger_type).toBe('dry-run')
-    expect(mockAdd).toHaveBeenCalledWith(expect.objectContaining({ dryRun: true }))
+    expect(mockAdd).toHaveBeenCalledWith(expect.objectContaining({ dryRun: true }), { priority: 1 })
   })
 })

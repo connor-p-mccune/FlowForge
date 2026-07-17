@@ -19,6 +19,7 @@ const db = require('../config/database')
 const redis = require('../config/redis')
 const { getExecutionQueue } = require('../config/queue')
 const { admitRun } = require('../services/concurrencyGate')
+const { resolvePriority, enqueueOpts } = require('./runPriority')
 
 // workflowId -> { task, cron } for every currently-registered schedule.
 const activeTasks = new Map()
@@ -67,14 +68,19 @@ async function runScheduledExecution(workflowId) {
       return
     }
 
+    // Cron doesn't pick lanes — the workflow's default decides.
+    const priority = resolvePriority(null, workflow)
     const executionId = uuidv4()
     const now = new Date().toISOString()
     // Scheduled ticks carry no payload; trigger_type marks the source for history.
     db.prepare(
-      'INSERT INTO executions (id, workflow_id, status, triggered_by, trigger_type, created_at) VALUES (?, ?, ?, ?, ?, ?)'
-    ).run(executionId, workflow.id, 'pending', null, 'schedule', now)
+      'INSERT INTO executions (id, workflow_id, status, triggered_by, trigger_type, priority, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)'
+    ).run(executionId, workflow.id, 'pending', null, 'schedule', priority, now)
 
-    await getExecutionQueue().add({ executionId, workflowId: workflow.id, payload: {} })
+    await getExecutionQueue().add(
+      { executionId, workflowId: workflow.id, payload: {} },
+      enqueueOpts(priority)
+    )
   } catch (err) {
     console.error(`Scheduled run failed for ${workflowId}:`, err.message)
   } finally {

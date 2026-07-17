@@ -8,6 +8,7 @@ const { webhookLimiter } = require('../middleware/rateLimit')
 const { getExecutionQueue } = require('../config/queue')
 const { generateSigningSecret, verifyWebhookSignature } = require('../services/webhookSignature')
 const { admitRun } = require('../services/concurrencyGate')
+const { resolvePriority, enqueueOpts } = require('../services/runPriority')
 
 const router = express.Router()
 
@@ -127,18 +128,20 @@ router.post('/webhooks/:key', webhookLimiter, async (req, res) => {
     // record persisted on the execution row, so the run can later be replayed
     // with identical input.
     const triggerData = req.body && typeof req.body === 'object' ? req.body : {}
+    // Webhook senders don't pick lanes — the workflow's default decides.
+    const priority = resolvePriority(null, workflow)
     const executionId = uuidv4()
     const now = new Date().toISOString()
     db.prepare(
-      'INSERT INTO executions (id, workflow_id, status, triggered_by, trigger_type, trigger_data, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)'
-    ).run(executionId, workflow.id, 'pending', null, 'webhook', JSON.stringify(triggerData), now)
+      'INSERT INTO executions (id, workflow_id, status, triggered_by, trigger_type, trigger_data, priority, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
+    ).run(executionId, workflow.id, 'pending', null, 'webhook', JSON.stringify(triggerData), priority, now)
     db.prepare('UPDATE webhooks SET last_triggered_at = ? WHERE id = ?').run(now, webhook.id)
 
     await getExecutionQueue().add({
       executionId,
       workflowId: workflow.id,
       payload: triggerData,
-    })
+    }, enqueueOpts(priority))
 
     res.status(202).json({ executionId, status: 'pending' })
   } catch (err) {
