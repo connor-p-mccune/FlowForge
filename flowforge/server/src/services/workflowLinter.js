@@ -16,6 +16,7 @@
 const cron = require('node-cron')
 const { buildAdjacency, topoSort } = require('./dagParser')
 const { analyze } = require('./expression')
+const { CACHEABLE_TYPES, DEFAULT_TTL_SECONDS } = require('./stepCache')
 
 const PLACEHOLDER = /\{\{\s*([\w-]+(?:\.[\w-]+)*)\s*\}\}/g
 
@@ -541,6 +542,52 @@ function lintGraph({ nodes: rawNodes = [], edges: rawEdges = [] } = {}, { secret
           'warning',
           'unwired-branch',
           `${label(node)}: on-error takes the error branch, but it isn't connected — a caught failure ends the flow there`,
+          node.id
+        )
+      )
+    }
+  }
+
+  // Step caching. The engine honors config.cache only on cacheable node types
+  // (stepCache.CACHEABLE_TYPES), so caching enabled anywhere else is config
+  // that silently does nothing. On an HTTP node, caching a non-GET request is
+  // legal — the author is declaring the call idempotent — but worth a nudge:
+  // a hit within the TTL skips the request entirely, so a cached POST doesn't
+  // post.
+  for (const node of nodes) {
+    const cache = node.data?.config?.cache
+    if (!cache || typeof cache !== 'object' || cache.enabled !== true) continue
+    if (!CACHEABLE_TYPES.has(node.type)) {
+      issues.push(
+        issue(
+          'warning',
+          'invalid-config',
+          `${label(node)}: caching has no effect on ${node.type} nodes — the output is never reused`,
+          node.id
+        )
+      )
+      continue
+    }
+    if (node.type === 'action-http') {
+      const method = String(node.data?.config?.method || 'GET').toUpperCase()
+      if (method !== 'GET' && method !== 'HEAD') {
+        issues.push(
+          issue(
+            'warning',
+            'cached-side-effect',
+            `${label(node)}: caches a ${method} request — a repeat within the TTL reuses the recorded response and never calls the API`,
+            node.id
+          )
+        )
+      }
+    }
+    const ttl = cache.ttlSeconds
+    if (ttl != null && ttl !== '' && (!Number.isFinite(Number(ttl)) || Number(ttl) <= 0)) {
+      issues.push(
+        issue(
+          'warning',
+          'invalid-config',
+          `${label(node)}: the cache TTL must be a positive number of seconds — the ${DEFAULT_TTL_SECONDS}-second default applies`,
           node.id
         )
       )

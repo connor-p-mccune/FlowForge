@@ -522,6 +522,56 @@ describe('lintGraph', () => {
       expect(issues.some((i) => i.nodeId === 'c1' && /no effect/.test(i.message))).toBe(true)
     })
   })
+
+  describe('step-cache config', () => {
+    const cachedGraph = (nodeOverride) => ({
+      nodes: [node('t1', 'trigger-manual'), nodeOverride],
+      edges: [edge('t1', nodeOverride.id)],
+    })
+
+    it('accepts caching on a cacheable node with a sane TTL', () => {
+      const graph = cachedGraph(
+        node('h1', 'action-http', {
+          method: 'GET', url: 'https://api.example.com', headers: '{}',
+          cache: { enabled: true, ttlSeconds: 600 },
+        })
+      )
+      expect(lintGraph(graph)).toEqual([])
+    })
+
+    it('warns when caching is enabled on a type the engine never caches', () => {
+      const graph = cachedGraph(
+        node('e1', 'action-email', { to: 'a@b.c', subject: 's', cache: { enabled: true } })
+      )
+      const issues = lintGraph(graph).filter((i) => i.nodeId === 'e1' && i.code === 'invalid-config')
+      expect(issues.some((i) => /caching has no effect/.test(i.message))).toBe(true)
+    })
+
+    it('warns when a cached HTTP node is not a GET', () => {
+      const graph = cachedGraph(
+        node('h1', 'action-http', {
+          method: 'POST', url: 'https://api.example.com', headers: '{}',
+          cache: { enabled: true },
+        })
+      )
+      const issues = lintGraph(graph)
+      expect(codes(issues)).toContain('cached-side-effect')
+      expect(issues.find((i) => i.code === 'cached-side-effect').message).toMatch(/POST/)
+    })
+
+    it('warns on a nonsense TTL and stays quiet when caching is off', () => {
+      const bad = cachedGraph(
+        node('m1', 'map', { source: '{{t1.items}}', mapping: 'item', cache: { enabled: true, ttlSeconds: 'soon' } })
+      )
+      const issues = lintGraph(bad).filter((i) => i.nodeId === 'm1' && i.code === 'invalid-config')
+      expect(issues.some((i) => /cache TTL/.test(i.message))).toBe(true)
+
+      const off = cachedGraph(
+        node('e1', 'action-email', { to: 'a@b.c', subject: 's', cache: { enabled: false } })
+      )
+      expect(lintGraph(off)).toEqual([])
+    })
+  })
 })
 
 describe('POST /api/workflows/:id/lint', () => {
