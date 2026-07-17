@@ -157,6 +157,13 @@ order while streaming live progress back to every collaborator on the canvas.
   token.
 - **Command palette** — `Ctrl/⌘-K` fuzzy-jumps to any workflow, page, or action
   across every workspace.
+- **Full-text search** — "which workflow calls the Stripe API?" is a query,
+  not an archaeology project: an **SQLite FTS5** index over names,
+  descriptions, and graph contents (node labels, config strings, sticky
+  notes) powers deep results in the command palette, `GET /api/v1/search`,
+  and `flowforge search`. The index maintains itself **lazily at read time**
+  (no write-path hooks to forget), ranks name matches above config mentions,
+  and every hit shows a snippet of why it surfaced.
 - **Live execution streaming** — step-by-step status updates pushed to the UI
   over WebSockets as a run progresses, with a **Stop** button for cooperative
   cancellation.

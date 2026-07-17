@@ -76,6 +76,42 @@ Response `200`:
 
 Requires the `read` scope.
 
+### Search workflows
+
+```bash
+curl -s "https://your-flowforge-host/api/v1/search?q=stripe" \
+  -H "Authorization: Bearer $FLOWFORGE_TOKEN"
+```
+
+Full-text search over workflow **names, descriptions, and graph contents** —
+node labels, config strings, sticky-note text — across every workspace the
+token's owner belongs to. "Which workflow calls the Stripe API?" is exactly
+the query it exists for. The final term prefix-matches (`stri` finds
+stripe), and search-as-you-type is what the app's command palette does with
+this same engine.
+
+Response `200` — ranked matches, best first (name matches outrank config
+mentions). `field` says where the best match landed; `snippet` wraps the
+matched terms in `[brackets]`:
+
+```json
+{
+  "results": [
+    {
+      "workflowId": "6f0c…",
+      "name": "Payments sync",
+      "status": "deployed",
+      "workspaceId": "a1b2…",
+      "field": "nodes",
+      "snippet": "POST https://api.[stripe].com/v1/charges"
+    }
+  ]
+}
+```
+
+`q` is required (≤ 200 chars); `limit` caps results (1–50, default 20).
+Requires the `read` scope. From the CLI: `flowforge search stripe`.
+
 ### Export a workflow
 
 ```bash

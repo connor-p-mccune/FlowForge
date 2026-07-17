@@ -741,6 +741,37 @@ ISO-8601 `Z` instants, and an unreachable schedule is reported as
 `reachable: false` rather than an error. The same parser backs `isValid`, so a
 schedule that previews is a schedule that will run.
 
+## Full-text search
+
+"Which workflow calls the Stripe API?" can't be answered from a name list —
+the evidence lives inside node configs. `services/workflowSearch.js` makes
+each workflow one **SQLite FTS5 document** (name, description, and
+`node_text`: every node label, type, and string config value, sticky-note
+text included, config *keys* excluded — indexing "url" would match every
+HTTP node) and serves the app's command palette, `GET /api/search`, the
+public `GET /api/v1/search`, and `flowforge search` from one engine.
+
+The interesting decision is index maintenance: **lazily, at read time**. The
+alternative — hooking every write path — is a list that only grows (create,
+rename, graph save, import, restore, template clone…) and a stale-index bug
+every time someone adds a path and forgets the hook. Instead,
+`workflow_search_state` records the `updated_at` each document was built
+from, and a search pass re-indexes exactly the searched workspaces' rows
+whose `updated_at` moved. Writes stay oblivious to the index, and staleness
+is repaired by the very query that would have observed it. Deletes need no
+hook either: results join back to `workflows`, so a deleted workflow's
+document just stops surfacing — and is swept when a search notices the
+orphan.
+
+Query handling is hardened by construction: user text is never spliced into
+FTS5 syntax — each whitespace term becomes a quoted phrase token, the last
+gets a `*` so search-as-you-type prefix-matches, and anything that looks
+like an operator rides inside the quotes as literal text. Ranking is bm25
+with the name column weighted well above node_text, so a workflow *named*
+"stripe sync" beats one that merely mentions stripe in a config; each hit
+reports which field matched and an FTS5 `snippet()` with the matched terms
+bracketed, so the palette can show *why* a result surfaced.
+
 ## Security architecture
 
 [SECURITY.md](../SECURITY.md) is the authoritative threat model. The load-
