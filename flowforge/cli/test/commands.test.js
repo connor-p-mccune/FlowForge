@@ -454,6 +454,44 @@ test('test exits 1 and shows the failing assertion when a scenario fails', async
   assert.match(ctx.output(), /output\.total == 999/)
 })
 
+test('test --junit writes a report CI can render', async () => {
+  const stub = await startStub(() => ({
+    json: {
+      ok: false,
+      total: 2,
+      passed: 1,
+      failed: 1,
+      scenarios: [
+        { name: 'happy', passed: true, runStatus: 'completed', assertions: [] },
+        {
+          name: 'breaks on <edge> & "quotes"',
+          passed: false,
+          runStatus: 'completed',
+          assertions: [
+            { expression: 'output.total == 999', description: 'bad', passed: false, error: null },
+          ],
+        },
+      ],
+    },
+  }))
+  const ctx = makeCtx(stub.api)
+  const reportPath = path.join(os.tmpdir(), `flowforge-junit-${Date.now()}.xml`)
+  try {
+    const code = await testCmd({ positionals: ['wf-1'], flags: { junit: reportPath } }, ctx)
+    await stub.close()
+
+    assert.equal(code, 1) // the exit code still gates CI
+    const xml = fs.readFileSync(reportPath, 'utf8')
+    assert.match(xml, /<testsuite name="flowforge:wf-1" tests="2" failures="1">/)
+    assert.match(xml, /<testcase classname="wf-1" name="happy"\/>/)
+    // Scenario names and assertion text are XML-escaped, not trusted.
+    assert.match(xml, /breaks on &lt;edge&gt; &amp; &quot;quotes&quot;/)
+    assert.match(xml, /<failure message="1 assertion failed">output\.total == 999 \(bad\)<\/failure>/)
+  } finally {
+    fs.rmSync(reportPath, { force: true })
+  }
+})
+
 test('test skips (exit 0) when the workflow has no scenarios', async () => {
   const stub = await startStub(() => ({ json: { ok: false, total: 0, passed: 0, failed: 0, scenarios: [] } }))
   const ctx = makeCtx(stub.api)

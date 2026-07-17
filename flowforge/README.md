@@ -133,7 +133,8 @@ order while streaming live progress back to every collaborator on the canvas.
   `status == "completed"`); running it drives the workflow in dry-run mode
   (nothing fires, approvals auto-approve) and reports exactly which assertion
   failed. Author and run them in the canvas's **🧪 Tests** panel, and gate CI on
-  the whole suite with `flowforge test <id>` (exits non-zero on any failure) or
+  the whole suite with `flowforge test <id>` (exits non-zero on any failure;
+  `--junit <file>` writes a report GitHub/GitLab/Jenkins render natively) or
   the public `POST /api/v1/workflows/:id/tests/run` endpoint — the same testing
   discipline the codebase applies to itself, pointed at the workflows you build.
 - **Workflow linter** — one click checks the canvas before you run it: cycles,

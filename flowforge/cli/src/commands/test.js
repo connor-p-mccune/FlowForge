@@ -1,10 +1,14 @@
-// flowforge test <workflow-id> — run a workflow's test scenarios and gate CI on
-// them. POSTs to /api/v1/workflows/:id/tests/run (the dry-run suite) and exits
-// non-zero when any scenario fails, so a deploy pipeline can block on "do this
-// workflow's assertions still hold?". An empty suite is a skip, not a failure —
-// an untested workflow isn't broken, just unverified.
+// flowforge test <workflow-id> [--junit <file>] — run a workflow's test
+// scenarios and gate CI on them. POSTs to /api/v1/workflows/:id/tests/run
+// (the dry-run suite) and exits non-zero when any scenario fails, so a
+// deploy pipeline can block on "do this workflow's assertions still hold?".
+// An empty suite is a skip, not a failure — an untested workflow isn't
+// broken, just unverified. --junit additionally writes the results as JUnit
+// XML, so CI renders workflow scenarios beside ordinary unit tests.
 
+const fs = require('node:fs')
 const { bold, green, red, yellow, gray } = require('../format')
+const { junitXml } = require('../junit')
 
 // A single assertion line: label with its optional description, red on failure
 // (with the reason it couldn't be evaluated, if any).
@@ -18,10 +22,17 @@ function assertionLine(a) {
 module.exports = async function test(args, ctx) {
   const workflowId = args.positionals[0]
   if (!workflowId) {
-    ctx.log('Usage: flowforge test <workflow-id>')
+    ctx.log('Usage: flowforge test <workflow-id> [--junit <file>]')
     return 1
   }
   const data = await ctx.api.post(`/api/v1/workflows/${workflowId}/tests/run`)
+
+  // Written even for an empty or failing suite: CI readers expect the report
+  // file to exist whenever the flag was passed.
+  if (args.flags.junit && typeof args.flags.junit === 'string') {
+    fs.writeFileSync(args.flags.junit, junitXml(workflowId, data))
+    ctx.log(gray(`JUnit report written to ${args.flags.junit}`))
+  }
 
   if (!data.total) {
     ctx.log(yellow('No test scenarios defined for this workflow.'))

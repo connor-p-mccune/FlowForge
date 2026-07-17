@@ -47,7 +47,7 @@ Usage:
   flowforge forecast <workflow-id>                 Predicted next-run duration and bottleneck
   flowforge schedule <workflow-id> [--count N]     Upcoming scheduled run times (UTC)
   flowforge check <workflow-id> [--strict]         Gate CI on workflow health (exits non-zero on a breach)
-  flowforge test <workflow-id>                     Run the workflow's test scenarios (exits non-zero on failure)
+  flowforge test <workflow-id> [--junit <file>]    Run the workflow's test scenarios (exits non-zero on failure)
   flowforge run <execution-id> [--watch]           One run with its steps
   flowforge compare <execution-id> <execution-id>  Diff two runs node by node
   flowforge cancel <execution-id>                  Stop a queued or running run
