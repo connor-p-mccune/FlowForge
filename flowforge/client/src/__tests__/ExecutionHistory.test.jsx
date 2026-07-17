@@ -214,6 +214,27 @@ describe('ExecutionHistory resume', () => {
     await screen.findByText('← All runs')
     expect(screen.getByRole('button', { name: 'Resume this run' })).toBeInTheDocument()
   })
+
+  it('chips non-default priority lanes and stays quiet for normal runs', async () => {
+    apiFetch.mockImplementation((path) => {
+      if (path === '/api/workflows/wf1/executions') {
+        return Promise.resolve({
+          executions: [
+            { ...EXECS[0], id: 'exHigh', priority: 'high' },
+            { ...EXECS[0], id: 'exNormal', priority: 'normal' },
+            { ...EXECS[0], id: 'exLegacy', priority: null },
+          ],
+          workflowUpdatedAt: WF_UPDATED,
+        })
+      }
+      return Promise.reject(new Error(`unexpected request: ${path}`))
+    })
+    setup()
+    expect(await screen.findByText('high')).toBeInTheDocument()
+    expect(screen.getByText('high')).toHaveAttribute('title', expect.stringMatching(/priority lane/))
+    // Normal and legacy (pre-lanes) rows carry no chip.
+    expect(screen.queryByText('normal')).not.toBeInTheDocument()
+  })
 })
 
 describe('ExecutionHistory dry-run (test) badge', () => {

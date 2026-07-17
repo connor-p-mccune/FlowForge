@@ -2970,6 +2970,29 @@ html, body, #root {
   letter-spacing: 0.04em;
 }
 
+/* Queue lane chip — shown only when the run took a non-default lane. */
+.exec-history__lane-badge {
+  flex-shrink: 0;
+  padding: 1px 7px;
+  border-radius: 10px;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.exec-history__lane-badge--high {
+  background: #fef3c7;
+  border: 1px solid #f59e0b;
+  color: #b45309;
+}
+
+.exec-history__lane-badge--low {
+  background: #f3f4f6;
+  border: 1px solid #d1d5db;
+  color: #6b7280;
+}
+
 .exec-history__date {
   flex: 1;
   color: #555;

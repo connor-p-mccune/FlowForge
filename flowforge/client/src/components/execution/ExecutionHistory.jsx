@@ -404,6 +404,16 @@ export default function ExecutionHistory({ workflowId, nodes, autoOpenId }) {
                   Resumed
                 </span>
               )}
+              {/* The queue lane, when it wasn't the default. Dry runs always
+                  ride high, so the chip would be noise on every test row. */}
+              {ex.priority && ex.priority !== 'normal' && ex.trigger_type !== 'dry-run' && (
+                <span
+                  className={`exec-history__lane-badge exec-history__lane-badge--${ex.priority}`}
+                  title={`Queued on the ${ex.priority} priority lane`}
+                >
+                  {ex.priority}
+                </span>
+              )}
               <span className="exec-history__date">
                 {new Date(ex.created_at).toLocaleString()}
               </span>
