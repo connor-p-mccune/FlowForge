@@ -220,7 +220,12 @@ order while streaming live progress back to every collaborator on the canvas.
 - **Webhook triggers** — generate a public URL that fires a workflow on POST;
   the request body flows into the graph as the trigger's output. Optionally
   **HMAC-signed**: deliveries must carry a timestamped SHA-256 signature over
-  the raw body (constant-time verified, replay-window bounded).
+  the raw body (constant-time verified, replay-window bounded). And optionally
+  **gated**: an FXL predicate over the delivery body (`event == "push" &&
+  ref == "main"`) decides at the door whether a delivery fires — non-matching
+  deliveries are acknowledged (so senders don't retry) but start no run,
+  validated at save time like every other expression, and editable without
+  rotating the URL senders hold.
 - **Outbound webhooks** — push workspace events (`execution.failed`,
   `workflow.*`, …) to your own systems: durable SQLite-backed delivery queue,
   exponential-backoff retries, HMAC-signed payloads, a per-endpoint delivery
