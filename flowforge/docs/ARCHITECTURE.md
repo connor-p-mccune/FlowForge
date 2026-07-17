@@ -247,6 +247,54 @@ Node identity (id + type) is what matches steps across runs; config edits
 don't invalidate reuse on their own — like replay, a resume runs the current
 definition, and the UI warns when the workflow changed since the source run.
 
+### Step-level result caching
+
+Resume reuses outputs *within a lineage of runs*; the step cache
+(`services/stepCache.js`) generalizes the idea *across* runs: a node that
+opts in (`config.cache.enabled`) memoises its output under a
+**content-addressed key** — a SHA-256 over the node's type, its fully
+resolved config (templates and secrets substituted, the cache block itself
+excluded), and its merged input, scoped by workflow id. A later run whose
+node would do byte-for-byte the same work adopts the recorded output (step
+status `cached`) and never invokes its runner — settling **synchronously,
+like a skip or a resume reuse**, so a hit never occupies an execution slot
+and a fully-cached prefix replays in one scheduling pass.
+
+Content addressing is the entire invalidation story. There is no "stale
+cache" state to reason about: change the config, an upstream output, or a
+referenced secret and the key changes with it, so the old entry simply stops
+being found (and ages out via its TTL — bounded to [1s, 24h], default 300s,
+with lazy delete-on-read plus a bulk prune in the retention sweep). Hashing
+the *resolved* config is what makes secret rotation safe — a response
+fetched with the old credential can never be served against the new one —
+and a one-way hash means the key betrays nothing about the secret. The
+serialisation is key-order-stable, so two configs that differ only in
+property order hash identically.
+
+The boundaries mirror decisions made elsewhere in the engine:
+
+- **Only re-runnable types are cacheable** (HTTP, transform/filter/map/
+  aggregate, the AI nodes). Side-effect actions are excluded — a cache hit
+  on an email node would silently not send — as are branching/waiting nodes
+  and sub-workflows. The policy is read from the **raw config, like
+  `onError`**, so upstream data can't toggle it; the engine ignores cache
+  config on ineligible types and the linter says so (including the nudge
+  that a cached POST doesn't post).
+- **The stored value is the persisted (redacted) serialisation** — the exact
+  trade resume makes, for the same reason: a secret echoed back by an API
+  must not outlive the run that saw it.
+- **Only clean successes are memoised.** A `caught` failure is data, not a
+  result worth replaying, and dry runs bypass the cache both ways —
+  simulated outputs must not poison it.
+- **Cache faults degrade to a miss.** A run that would have succeeded can
+  never fail because memoisation hiccuped.
+
+Effectiveness is observable: `flowforge_step_cache_events_total` counts
+hits/misses/stores on `/metrics`, the run settings panel shows live entries
+and their reuse count with a manual clear (`DELETE
+/api/workflows/:id/cache`) for the one case content addressing can't see —
+the upstream *data* changed behind an identical request.
+
 ### Sub-workflows and for-each
 
 A sub-workflow node runs another workflow synchronously through the same

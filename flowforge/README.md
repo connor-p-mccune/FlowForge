@@ -79,6 +79,17 @@ order while streaming live progress back to every collaborator on the canvas.
   — an approval gate that was already granted is not asked twice — and only
   the failed remainder runs again. Available from run history, the public API,
   and `flowforge resume --watch` in CI.
+- **Step-level result caching** — a node that opts in memoises its output
+  under a **content-addressed key** (SHA-256 of its type + resolved config +
+  input): a later run doing byte-for-byte the same work adopts the recorded
+  output — step status **cached** — instead of re-fetching or re-paying for
+  an AI call. Invalidation is the addressing: any change to config, upstream
+  data, or a rotated secret is a different key, so nothing goes stale
+  silently; a TTL bounds how long repeats may coast, only clean successes
+  are stored (redacted, like everything persisted), dry runs bypass the
+  cache both ways, and hit/miss/store counts land on `/metrics`. The linter
+  flags cache config that can't take effect (and the POST that wouldn't
+  post).
 - **Per-node error handling** — decide per node what its failure means. The
   default still fails the run, but a node can **continue** (its
   `{ failed, error }` object flows downstream as ordinary data) or take a
@@ -331,6 +342,7 @@ Copy `.env.example` to `.env` before running. **Never commit `.env`.**
 | `LOG_FORMAT`      | no       | `pretty` for human-readable dev logs (default: one JSON line per event) |
 | `SHUTDOWN_TIMEOUT_MS` | no   | Hard deadline for the graceful-shutdown drain (default 30000) |
 | `NODE_TEST_TIMEOUT_MS` | no  | Per-node timeout for the single-node test bench (default 30000) |
+| `STEP_CACHE_MAX_BYTES` | no  | Largest step output the result cache will store (default 262144) |
 | `WEBHOOK_MAX_ATTEMPTS` | no  | Delivery attempts per outbound webhook event (default 5) |
 | `CIRCUIT_BREAKER_THRESHOLD` | no | Consecutive failures to one host before its outbound circuit opens (default 5) |
 | `CIRCUIT_BREAKER_COOLDOWN_MS` | no | How long an open circuit fast-fails before probing the host again (default 30000) |
