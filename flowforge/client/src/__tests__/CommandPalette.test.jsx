@@ -130,4 +130,60 @@ describe('CommandPalette', () => {
     fireEvent.change(screen.getByLabelText('Search'), { target: { value: 'zzzzzz' } })
     expect(screen.getByText(/No matches/)).toBeInTheDocument()
   })
+
+  describe('deep (server) search', () => {
+    const SEARCH_RESULTS = [
+      {
+        workflowId: 'wf9',
+        name: 'Billing pipeline',
+        status: 'deployed',
+        workspaceId: 'ws1',
+        field: 'nodes',
+        snippet: 'POST https://api.[stripe].com/v1/charges',
+      },
+      // Already surfaced by the fuzzy tier under its name — must not repeat.
+      { workflowId: 'wf1', name: 'Nightly Sync', status: 'draft', workspaceId: 'ws1', field: 'name', snippet: '[Nightly] Sync' },
+    ]
+
+    beforeEach(() => {
+      const base = apiFetch.getMockImplementation()
+      apiFetch.mockImplementation((url, options = {}) => {
+        if (url.startsWith('/api/search')) return Promise.resolve({ results: SEARCH_RESULTS })
+        return base(url, options)
+      })
+    })
+
+    it('surfaces matches from inside workflows, deduped and highlighted', async () => {
+      renderPalette()
+      await screen.findByText('Nightly Sync')
+
+      fireEvent.change(screen.getByLabelText('Search'), { target: { value: 'stripe' } })
+      // Debounced server hit lands and renders under its own divider.
+      expect(await screen.findByText('Billing pipeline')).toBeInTheDocument()
+      expect(screen.getByText('Found inside workflows')).toBeInTheDocument()
+      expect(screen.getByText('stripe')).toHaveClass('palette__mark')
+      expect(apiFetch).toHaveBeenCalledWith('/api/search?q=stripe&limit=6')
+      // wf1 already shows as a fuzzy row (by name)… nowhere near 'stripe',
+      // so here it only appears once — via the deep tier's dedupe rule the
+      // fuzzy tier doesn't list it at all for this query.
+      expect(screen.getAllByText(/Nightly Sync/)).toHaveLength(1)
+    })
+
+    it('opens a deep result on click', async () => {
+      renderPalette()
+      await screen.findByText('Nightly Sync')
+      fireEvent.change(screen.getByLabelText('Search'), { target: { value: 'stripe' } })
+
+      fireEvent.click(await screen.findByText('Billing pipeline'))
+      await waitFor(() => expect(mockNavigate).toHaveBeenCalledWith('/workflow/wf9'))
+    })
+
+    it('stays quiet for one-character queries', async () => {
+      renderPalette()
+      await screen.findByText('Nightly Sync')
+      fireEvent.change(screen.getByLabelText('Search'), { target: { value: 's' } })
+      await new Promise((r) => setTimeout(r, 300))
+      expect(apiFetch).not.toHaveBeenCalledWith(expect.stringContaining('/api/search'))
+    })
+  })
 })

@@ -5789,6 +5789,28 @@ html, body, #root {
   letter-spacing: 0.04em;
 }
 
+/* Deep-search rows show the matched snippet, not a category tag — keep the
+   original casing and truncate long config strings. */
+.palette__detail--snippet {
+  text-transform: none;
+  letter-spacing: normal;
+  max-width: 45%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Divider above the server-search tier of results. */
+.palette__section {
+  padding: 8px 14px 4px;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: #9ca3af;
+  border-top: 1px solid #f0f0f2;
+}
+
 .palette__footer {
   display: flex;
   gap: 16px;
