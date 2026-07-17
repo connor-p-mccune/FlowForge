@@ -13,6 +13,7 @@ const COMMANDS = {
   login: require('../src/commands/login'),
   workflows: require('../src/commands/workflows'),
   workspaces: require('../src/commands/workspaces'),
+  search: require('../src/commands/search'),
   export: require('../src/commands/export'),
   import: require('../src/commands/import'),
   trigger: require('../src/commands/trigger'),
@@ -37,6 +38,7 @@ Usage:
   flowforge login --url <server> --token <ffp_…>   Store credentials (~/.flowforge.json)
   flowforge workflows                              List workflows visible to the token
   flowforge workspaces                             List workspaces (import targets)
+  flowforge search <query> [--limit N]             Find workflows by name or by what's inside them
   flowforge export <workflow-id>                   Print the portable workflow JSON (pipe to a file)
   flowforge import <workspace-id> <file> [--name]  Create a draft workflow from an exported file
   flowforge trigger <workflow-id> [--data <json>] [--key <idempotency-key>] [--priority high|normal|low] [--watch]

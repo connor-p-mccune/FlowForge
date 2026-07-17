@@ -47,6 +47,43 @@ test('workflows lists id, name, and status', async () => {
   assert.equal(stub.requests[0].headers.authorization, 'Bearer ffp_testtoken')
 })
 
+test('search renders ranked hits with the match context', async () => {
+  const searchCmd = require('../src/commands/search')
+  const stub = await startStub(() => ({
+    json: {
+      results: [
+        {
+          workflowId: 'wf-7',
+          name: 'Billing pipeline',
+          status: 'deployed',
+          workspaceId: 'ws-1',
+          field: 'nodes',
+          snippet: 'POST https://api.[stripe].com/v1/charges',
+        },
+      ],
+    },
+  }))
+  const ctx = makeCtx(stub.api)
+  const code = await searchCmd({ positionals: ['stripe', 'charges'], flags: { limit: '5' } }, ctx)
+  await stub.close()
+
+  assert.equal(code, 0)
+  assert.equal(stub.requests[0].path, '/api/v1/search?q=stripe+charges&limit=5')
+  assert.match(ctx.output(), /Billing pipeline/)
+  assert.match(ctx.output(), /nodes:/)
+  assert.match(ctx.output(), /stripe/)
+})
+
+test('search without a query prints usage and exits 1', async () => {
+  const searchCmd = require('../src/commands/search')
+  const stub = await startStub(() => ({ json: {} }))
+  const ctx = makeCtx(stub.api)
+  const code = await searchCmd({ positionals: [], flags: {} }, ctx)
+  await stub.close()
+  assert.equal(code, 1)
+  assert.equal(stub.requests.length, 0)
+})
+
 test('trigger POSTs the payload and idempotency key', async () => {
   const stub = await startStub(() => ({
     status: 202,

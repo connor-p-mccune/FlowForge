@@ -24,6 +24,7 @@ const { computeInsights, forecastFor, parseLimit } = require('./insights')
 const { scheduleExpressionOf, previewFor, parseCount } = require('./schedule')
 const { runSuite } = require('../services/workflowTester')
 const { compareRuns } = require('../services/runComparison')
+const { searchWorkflows } = require('../services/workflowSearch')
 
 const router = express.Router()
 
@@ -60,6 +61,28 @@ router.get('/workflows', tokenAuth('read'), (req, res) => {
         ORDER BY wf.updated_at DESC`
     ).all(req.user.id)
     res.json({ workflows })
+  } catch (err) {
+    console.error(err)
+    res.status(500).json({ error: 'Internal server error' })
+  }
+})
+
+// GET /api/v1/search?q=… — full-text search over the workflows the token's
+// owner can see: names, descriptions, and what's inside the graphs (node
+// labels, config strings, sticky notes). Same engine as the app's command
+// palette (services/workflowSearch.js); `read` scope.
+router.get('/search', tokenAuth('read'), (req, res) => {
+  try {
+    const q = typeof req.query.q === 'string' ? req.query.q.trim() : ''
+    if (!q) return res.status(400).json({ error: 'q is required' })
+    if (q.length > 200) return res.status(400).json({ error: 'q must be at most 200 characters' })
+
+    const workspaceIds = db.prepare(
+      'SELECT workspace_id FROM workspace_members WHERE user_id = ?'
+    ).all(req.user.id).map((r) => r.workspace_id)
+
+    const results = searchWorkflows(workspaceIds, q, { limit: req.query.limit })
+    res.json({ results })
   } catch (err) {
     console.error(err)
     res.status(500).json({ error: 'Internal server error' })

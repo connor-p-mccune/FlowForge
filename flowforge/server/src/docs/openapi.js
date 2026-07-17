@@ -161,6 +161,61 @@ const spec = {
         },
       },
     },
+    '/search': {
+      get: {
+        tags: ['workflows'],
+        summary: 'Full-text search across workflows',
+        description:
+          'Searches workflow names, descriptions, and graph contents — node ' +
+          'labels, config strings, sticky-note text — across every workspace ' +
+          'the token’s owner belongs to. The final term prefix-matches, so ' +
+          '`stri` finds stripe. Each hit reports which field matched and a ' +
+          'snippet with the matched terms in [brackets]. Requires the `read` ' +
+          'scope.',
+        operationId: 'searchWorkflows',
+        parameters: [
+          {
+            name: 'q',
+            in: 'query',
+            required: true,
+            description: 'Free-text query (1–200 chars).',
+            schema: { type: 'string', maxLength: 200 },
+          },
+          {
+            name: 'limit',
+            in: 'query',
+            required: false,
+            description: 'Maximum hits to return (1–50, default 20).',
+            schema: { type: 'integer', minimum: 1, maximum: 50, default: 20 },
+          },
+        ],
+        responses: {
+          200: {
+            description: 'Ranked matches, best first.',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    results: {
+                      type: 'array',
+                      items: { $ref: '#/components/schemas/SearchResult' },
+                    },
+                  },
+                },
+              },
+            },
+          },
+          400: {
+            description: 'Missing or over-long query.',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } },
+          },
+          401: { $ref: '#/components/responses/Unauthorized' },
+          403: { $ref: '#/components/responses/Forbidden' },
+          429: { $ref: '#/components/responses/RateLimited' },
+        },
+      },
+    },
     '/workflows/{workflowId}/trigger': {
       post: {
         tags: ['workflows'],
@@ -788,6 +843,25 @@ const spec = {
           id: { type: 'string' },
           workflowId: { type: 'string' },
           status: { $ref: '#/components/schemas/ExecutionStatus' },
+        },
+      },
+      SearchResult: {
+        type: 'object',
+        properties: {
+          workflowId: { type: 'string' },
+          name: { type: 'string' },
+          status: { type: 'string', enum: ['draft', 'deployed', 'archived'] },
+          workspaceId: { type: 'string' },
+          field: {
+            type: 'string',
+            enum: ['name', 'description', 'nodes'],
+            description: 'Which document field the best match landed in.',
+          },
+          snippet: {
+            type: 'string',
+            description: 'Match context with the matched terms in [brackets].',
+            example: 'POST https://api.[stripe].com/v1/charges',
+          },
         },
       },
       Execution: {
