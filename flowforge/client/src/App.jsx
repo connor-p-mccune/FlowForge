@@ -6,6 +6,7 @@ import DashboardPage from './components/dashboard/DashboardPage'
 import AnalyticsPage from './components/analytics/AnalyticsPage'
 import ActivityPage from './components/activity/ActivityPage'
 import SecretsPage from './components/secrets/SecretsPage'
+import VariablesPage from './components/variables/VariablesPage'
 import WebhooksPage from './components/webhooks/WebhooksPage'
 import SettingsPage from './components/settings/SettingsPage'
 import WorkflowCanvas from './components/canvas/WorkflowCanvas'
@@ -50,6 +51,15 @@ function SecretsRoute() {
   )
 }
 
+function VariablesRoute() {
+  const { wsId } = useParams()
+  return (
+    <AppShell>
+      <VariablesPage workspaceId={wsId} />
+    </AppShell>
+  )
+}
+
 function WebhooksRoute() {
   const { wsId } = useParams()
   return (
@@ -75,6 +85,7 @@ export default function App() {
               <Route path="/workspace/:wsId/analytics" element={<AnalyticsRoute />} />
               <Route path="/workspace/:wsId/activity" element={<ActivityRoute />} />
               <Route path="/workspace/:wsId/secrets" element={<SecretsRoute />} />
+              <Route path="/workspace/:wsId/variables" element={<VariablesRoute />} />
               <Route path="/workspace/:wsId/webhooks" element={<WebhooksRoute />} />
               <Route
                 path="/settings"
