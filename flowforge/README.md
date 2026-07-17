@@ -69,6 +69,14 @@ order while streaming live progress back to every collaborator on the canvas.
   `EXEC_MAX_PARALLEL`), joins wait for every upstream branch, `{{node-id.field}}`
   templates resolve between steps, failures retry with backoff, and every step
   is recorded.
+- **Run priority lanes** — every run enters the queue as **high**, **normal**,
+  or **low**: a workflow sets its default lane in Run limits, any API trigger
+  overrides it per run (`?priority=high`, `flowforge trigger --priority`),
+  and the lane is recorded on the run for history. Priority orders pickup —
+  it never preempts executing runs, and stays FIFO within a lane. Dry runs
+  always ride the high lane (someone is watching), replays and resumes keep
+  their original's lane, and a run deferred at a concurrency cap re-parks
+  without being demoted.
 - **Concurrency limits** — cap how many runs of a workflow execute at once
   (singleton deploys, non-overlapping syncs) and choose the at-limit behavior:
   **queue** parks the run until a slot frees, **reject** refuses it with a

@@ -180,6 +180,21 @@ curl -s -X POST …/trigger \
 - Keys are scoped to the token's owner and the workflow, so two clients (or
   two workflows) can't collide.
 
+**Priority lanes.** Every run enters the queue as `high`, `normal`
+(default), or `low`. Add `?priority=` to pick the lane for this run,
+overriding the workflow's default (set in the app under Run limits):
+
+```bash
+curl -s -X POST "…/trigger?priority=high" \
+  -H "Authorization: Bearer $FLOWFORGE_TOKEN" \
+  -d '{"orderId": 42}'
+```
+
+Priority orders **pickup** — a high run is dequeued before waiting normal
+ones — and never preempts runs already executing; within one lane, runs
+still execute in submission order. An invalid value is a `400`. From the
+CLI: `flowforge trigger <id> --priority high`.
+
 ### List a workflow's runs
 
 ```bash
@@ -198,6 +213,7 @@ execution for those). `limit` is 1–100, default 20:
       "workflowId": "6f0c…",
       "status": "completed",
       "triggerType": "api",
+      "priority": "normal",
       "startedAt": "2026-07-09T09:00:01.000Z",
       "finishedAt": "2026-07-09T09:00:03.412Z",
       "createdAt": "2026-07-09T09:00:00.000Z"

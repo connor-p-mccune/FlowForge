@@ -404,6 +404,29 @@ inside their parent's engine loop, not through the queue, so limits apply to
 top-level runs — which also means a workflow calling itself through a gate
 can't deadlock.
 
+### Priority lanes
+
+Every run enters the queue in one of three lanes — `high`, `normal`
+(default), `low` — mapped to Bull priorities (`services/runPriority.js`).
+Resolution is two knobs deep: an explicit per-trigger override (API body,
+public-API `?priority=` query param — a query param because the entire body
+is the trigger payload — or `flowforge trigger --priority`) beats the
+workflow's `default_priority` column, which beats `normal`. Priority orders
+**pickup only**: Bull dequeues high before normal before low and stays FIFO
+within a lane, and nothing preempts a run already executing — lanes decide
+who goes next, never who gets interrupted.
+
+The edges hold the design together: dry runs always ride the high lane
+(someone is watching the canvas — an interactive test stuck behind fifty
+bulk imports defeats its purpose); replays and resumes inherit the original
+run's recorded lane (`executions.priority`, also surfaced on run summaries)
+rather than re-resolving it; webhook, schedule, and error-handler runs take
+their workflow's default — escalation urgency is the handler author's call;
+and a re-park at a concurrency cap carries the Bull priority forward, so
+deferral never silently demotes a high-lane run. An invalid explicit lane is
+a 400 at the door, while an invalid *stored* default quietly resolves to
+`normal` — a corrupt row must not break runs.
+
 ---
 
 ## Outbound webhooks
