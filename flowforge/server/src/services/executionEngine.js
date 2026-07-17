@@ -11,7 +11,8 @@ const { v4: uuidv4 } = require('uuid')
 const db = require('../config/database')
 const { buildAdjacency, topoSort } = require('./dagParser')
 const { decryptSecret } = require('./secretVault')
-const { recordExecution } = require('./metrics')
+const { recordExecution, recordStepCache } = require('./metrics')
+const stepCache = require('./stepCache')
 
 const runners = {
   'action-http': require('./nodeRunners/httpRequest'),
@@ -281,7 +282,7 @@ async function runExecution(
   const priorOutputs = {}
   if (execution.resumed_from_execution_id) {
     const priorSteps = db.prepare(
-      "SELECT node_id, node_type, output_json FROM execution_steps WHERE execution_id = ? AND status IN ('succeeded', 'reused')"
+      "SELECT node_id, node_type, output_json FROM execution_steps WHERE execution_id = ? AND status IN ('succeeded', 'reused', 'cached')"
     ).all(execution.resumed_from_execution_id)
     for (const step of priorSteps) {
       const node = nodeById[step.node_id]
@@ -531,6 +532,47 @@ async function runExecution(
       ...activeIncomingFor(nodeId).map((e) => context[e.source] || {})
     )
 
+    // Step cache read: a caching node whose exact work — type + resolved
+    // config + merged input — has a live entry settles synchronously, like a
+    // skip or a resume reuse: the recorded output is adopted (step status
+    // 'cached'), the runner is never invoked, and no execution slot is
+    // occupied. The adopted value is the *persisted* (redacted)
+    // serialisation, mirroring resume's 'reused' semantics — a secret echoed
+    // back by the original call does not survive a hit. Dry runs bypass the
+    // cache both ways (simulated outputs must not poison it), and any cache
+    // fault degrades to a miss — memoisation must never fail a run that
+    // would otherwise succeed. Everything upstream has settled by the time a
+    // node launches, so resolving the config here reads the same values the
+    // runner would.
+    const cachePolicy = dryRun ? null : stepCache.cachePolicy(node)
+    let cacheKey = null
+    if (cachePolicy) {
+      try {
+        const config = resolveTemplates(node.data?.config || {}, {
+          ...context,
+          secrets,
+          callbacks: callbackUrls,
+        })
+        cacheKey = stepCache.cacheKey(workflowId, node.type, config, input)
+        const hit = stepCache.lookup(cacheKey)
+        if (hit) {
+          const output = JSON.parse(hit.outputJson)
+          context[nodeId] = output
+          nodeStatus[nodeId] = 'success'
+          updateStep.run(
+            'cached', redact(JSON.stringify(input)), hit.outputJson, null,
+            now(), now(), stepIdByNode[nodeId]
+          )
+          publishStep(nodeId, 'cached', { output })
+          recordStepCache('hit')
+          return
+        }
+        recordStepCache('miss')
+      } catch (err) {
+        console.error(`Step cache read failed for ${nodeId}: ${err.message}`)
+      }
+    }
+
     updateStep.run('running', redact(JSON.stringify(input)), null, null, now(), null, stepIdByNode[nodeId])
     publishStep(nodeId, 'running')
 
@@ -558,11 +600,31 @@ async function runExecution(
         const output = (await runWithRetries(node, config, input, dryRun, ctx)) ?? {}
         context[nodeId] = output
         nodeStatus[nodeId] = 'success'
+        const outputJson = redact(JSON.stringify(output))
         updateStep.run(
-          'succeeded', redact(JSON.stringify(input)), redact(JSON.stringify(output)), null,
+          'succeeded', redact(JSON.stringify(input)), outputJson, null,
           now(), now(), stepIdByNode[nodeId]
         )
         publishStep(nodeId, 'succeeded', { output })
+        // Only clean successes are memoised — a caught failure is data, not
+        // a result worth replaying. cacheKey was derived in launchNode from
+        // the same resolved config and input this attempt just ran with.
+        if (cachePolicy && cacheKey) {
+          try {
+            if (
+              stepCache.store(cacheKey, {
+                workflowId,
+                nodeId,
+                outputJson,
+                ttlSeconds: cachePolicy.ttlSeconds,
+              })
+            ) {
+              recordStepCache('store')
+            }
+          } catch (err) {
+            console.error(`Step cache store failed for ${nodeId}: ${err.message}`)
+          }
+        }
       } catch (err) {
         const policy = errorPolicy(node)
         if (policy !== 'fail') {

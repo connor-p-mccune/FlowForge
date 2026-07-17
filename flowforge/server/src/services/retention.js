@@ -11,12 +11,16 @@
 //   older than WEBHOOK_DELIVERY_RETENTION_DAYS (default 30) are pruned. The
 //   delivery log is a debugging surface, not an archive; pending rows are
 //   never touched — they're the queue.
+// - **Step cache** (always on): expired entries are garbage by definition —
+//   a lookup already treats them as misses — so the sweep just reclaims the
+//   space (services/stepCache.js handles the per-read lazy delete).
 //
 // The sweep runs at startup and every 6 hours. Deletes are bounded per pass
 // so a first sweep over a years-old database can't hold the synchronous
 // SQLite connection for seconds; the next pass picks up where it left off.
 
 const db = require('../config/database')
+const { pruneExpired } = require('./stepCache')
 
 const SWEEP_INTERVAL_MS = 6 * 60 * 60 * 1000
 const MAX_DELETES_PER_PASS = 5000
@@ -33,10 +37,10 @@ function deliveryRetentionDays() {
 
 const cutoffIso = (days) => new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString()
 
-// One sweep pass. Returns { executions, deliveries } deleted counts (handy
-// for tests and the startup log line).
+// One sweep pass. Returns { executions, deliveries, cacheEntries } deleted
+// counts (handy for tests and the startup log line).
 function sweepOnce() {
-  const result = { executions: 0, deliveries: 0 }
+  const result = { executions: 0, deliveries: 0, cacheEntries: 0 }
 
   const execDays = executionRetentionDays()
   if (execDays > 0) {
@@ -63,6 +67,8 @@ function sweepOnce() {
         )`
     ).run(cutoffIso(deliveryDays), MAX_DELETES_PER_PASS).changes
   }
+
+  result.cacheEntries = pruneExpired(MAX_DELETES_PER_PASS)
 
   return result
 }

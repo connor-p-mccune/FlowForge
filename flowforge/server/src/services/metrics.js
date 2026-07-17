@@ -192,6 +192,17 @@ const slaBreaches = counter(
   ['type']
 )
 
+// Step-level result cache (services/stepCache.js). event: 'hit' (output
+// adopted, runner skipped) | 'miss' (key absent or expired) | 'store'
+// (fresh output memoised). hit/(hit+miss) is the cache's effectiveness — a
+// near-zero ratio means the cached node's inputs churn every run and the
+// cache is pure overhead.
+const stepCacheEvents = counter(
+  'flowforge_step_cache_events_total',
+  'Step cache activity, by event (hit, miss, store).',
+  ['event']
+)
+
 const processUptime = gauge('process_uptime_seconds', 'Process uptime in seconds.')
 const processMemory = gauge(
   'process_resident_memory_bytes',
@@ -239,6 +250,11 @@ function recordSlaBreach(type) {
   slaBreaches.inc({ type })
 }
 
+// Called by the engine on every cache decision for a caching node.
+function recordStepCache(event) {
+  stepCacheEvents.inc({ event })
+}
+
 module.exports = {
   counter,
   gauge,
@@ -250,6 +266,7 @@ module.exports = {
   recordWebhookDelivery,
   recordRunDeferred,
   recordSlaBreach,
+  recordStepCache,
   queueJobs,
   webhookPending,
 }

@@ -382,3 +382,25 @@ CREATE TABLE IF NOT EXISTS execution_callbacks (
 -- The runner reads its own row by (execution, node).
 CREATE INDEX IF NOT EXISTS idx_execution_callbacks_execution
   ON execution_callbacks (execution_id, node_id);
+
+-- Step-level result cache (services/stepCache.js): content-addressed
+-- memoisation for nodes that opt in via config.cache. cache_key is a SHA-256
+-- over the node's type + fully resolved config + merged input (scoped by
+-- workflow id), so "the same work" is the primary key and invalidation is
+-- automatic — any change upstream produces a different key. output_json is
+-- the redacted serialisation (same string persisted on the step row), so a
+-- secret echoed back by an API never lands here. Expiry is lazy on read plus
+-- a bulk prune in the retention sweep; hits is bookkeeping for the curious.
+CREATE TABLE IF NOT EXISTS step_cache (
+  cache_key   TEXT PRIMARY KEY,
+  workflow_id TEXT NOT NULL REFERENCES workflows(id) ON DELETE CASCADE,
+  node_id     TEXT NOT NULL,
+  output_json TEXT NOT NULL,
+  hits        INTEGER NOT NULL DEFAULT 0,
+  created_at  TEXT NOT NULL,
+  expires_at  TEXT NOT NULL
+);
+
+-- Clear-by-workflow (the manual invalidation route) and the expiry prune.
+CREATE INDEX IF NOT EXISTS idx_step_cache_workflow ON step_cache (workflow_id);
+CREATE INDEX IF NOT EXISTS idx_step_cache_expires ON step_cache (expires_at);
