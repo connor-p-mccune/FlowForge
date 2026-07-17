@@ -134,6 +134,27 @@ describe('lintGraph', () => {
     })
   })
 
+  it('checks {{vars.*}} against the workspace variable names when provided', () => {
+    const graph = {
+      nodes: [
+        node('t1', 'trigger-manual'),
+        node('h1', 'action-http', { url: '{{vars.API_BASE_URL}}/orders' }),
+      ],
+      edges: [edge('t1', 'h1')],
+    }
+    // Without context the rule is skipped entirely — and the vars head is
+    // never mistaken for a node reference.
+    expect(codes(lintGraph(graph))).toEqual([])
+
+    expect(codes(lintGraph(graph, { variableNames: new Set(['API_BASE_URL']) }))).toEqual([])
+
+    const issues = lintGraph(graph, { variableNames: new Set(['OTHER_VAR']) })
+    expect(issues.find((i) => i.code === 'unknown-variable')).toMatchObject({
+      severity: 'error',
+      nodeId: 'h1',
+    })
+  })
+
   it('validates sub-workflow targets against the workspace', () => {
     const graph = {
       nodes: [
@@ -661,6 +682,34 @@ describe('POST /api/workflows/:id/lint', () => {
       .set('Authorization', `Bearer ${token}`)
       .send(graphWith('NOPE'))
     expect(bad.body.issues.map((i) => i.code)).toContain('unknown-secret')
+  })
+
+  it('uses real workspace variables for {{vars.*}} checks', async () => {
+    await request(app)
+      .put(`/api/workspaces/${workspaceId}/variables/BASE_URL`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ value: 'https://api.example.com' })
+
+    const workflow = await createWorkflow()
+    const graphWith = (varName) => ({
+      nodes: [
+        node('t1', 'trigger-manual'),
+        node('h1', 'action-http', { url: `{{vars.${varName}}}/orders` }),
+      ],
+      edges: [edge('t1', 'h1')],
+    })
+
+    const ok = await request(app)
+      .post(`/api/workflows/${workflow.id}/lint`)
+      .set('Authorization', `Bearer ${token}`)
+      .send(graphWith('BASE_URL'))
+    expect(ok.body.issues).toEqual([])
+
+    const bad = await request(app)
+      .post(`/api/workflows/${workflow.id}/lint`)
+      .set('Authorization', `Bearer ${token}`)
+      .send(graphWith('TYPO_URL'))
+    expect(bad.body.issues.map((i) => i.code)).toContain('unknown-variable')
   })
 
   it('404s for non-members', async () => {

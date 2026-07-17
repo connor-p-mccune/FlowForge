@@ -359,9 +359,10 @@ function buildAncestors(order, incomingByNode) {
 
 // Lint a graph. Options (all optional — omitted context skips those rules):
 //   secretNames     — Set of the workspace's secret names, for {{secrets.*}}
+//   variableNames   — Set of the workspace's variable names, for {{vars.*}}
 //   workflowTargets — Map(workflowId -> { name, status }) for sub-workflow /
 //                     for-each target validation
-function lintGraph({ nodes: rawNodes = [], edges: rawEdges = [] } = {}, { secretNames, workflowTargets } = {}) {
+function lintGraph({ nodes: rawNodes = [], edges: rawEdges = [] } = {}, { secretNames, variableNames, workflowTargets } = {}) {
   const issues = []
 
   // Sticky notes are annotations: the engine drops them (and any edge touching
@@ -611,6 +612,23 @@ function lintGraph({ nodes: rawNodes = [], edges: rawEdges = [] } = {}, { secret
               'error',
               'unknown-secret',
               `${label(node)}: secret "${secretName}" does not exist in this workspace`,
+              node.id
+            )
+          )
+        }
+        continue
+      }
+      if (ref.head === 'vars') {
+        // {{vars.NAME}} resolves against the workspace's variables — a name
+        // that doesn't exist resolves to empty at runtime, exactly like an
+        // unknown secret, and is just as certainly a typo.
+        const varName = ref.rest[0]
+        if (variableNames && varName && !variableNames.has(varName)) {
+          issues.push(
+            issue(
+              'error',
+              'unknown-variable',
+              `${label(node)}: variable "${varName}" does not exist in this workspace`,
               node.id
             )
           )

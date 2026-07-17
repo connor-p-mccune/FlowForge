@@ -434,13 +434,18 @@ router.post('/workflows/:id/lint', auth, (req, res) => {
         .all(workflow.workspace_id)
         .map((r) => r.name)
     )
+    const variableNames = new Set(
+      db.prepare('SELECT name FROM workspace_variables WHERE workspace_id = ?')
+        .all(workflow.workspace_id)
+        .map((r) => r.name)
+    )
     const workflowTargets = new Map(
       db.prepare('SELECT id, name, status FROM workflows WHERE workspace_id = ?')
         .all(workflow.workspace_id)
         .map((r) => [r.id, { name: r.name, status: r.status }])
     )
 
-    const issues = lintGraph(graph, { secretNames, workflowTargets })
+    const issues = lintGraph(graph, { secretNames, variableNames, workflowTargets })
     res.json({
       issues,
       summary: {
