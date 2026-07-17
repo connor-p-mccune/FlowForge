@@ -186,6 +186,16 @@ configs a safe place for credentials, referenced as `{{secrets.NAME}}`:
 Tested in `__tests__/secretVault.test.js` and `__tests__/secrets.test.js`
 (including an end-to-end engine leak check).
 
+**Workspace variables are deliberately not secrets.** `{{vars.NAME}}` values
+(`routes/variables.js`) are plain configuration — readable through the API,
+stored in cleartext, and visible in run logs. The boundary is the design:
+giving non-sensitive config a first-class home keeps it *out* of secrets
+(where write-only values can't be reviewed or diffed) and the split keeps the
+secret guarantees sharp — everything in `workspace_secrets` gets encryption
+and redaction, everything in `workspace_variables` gets visibility, and
+nothing sits ambiguously between. The Variables UI and docs say explicitly
+that credentials belong in Secrets.
+
 ### Personal access tokens & public API (T10)
 
 The public `/api/v1` surface (`routes/publicApi.js`) authenticates with

@@ -115,6 +115,13 @@ order while streaming live progress back to every collaborator on the canvas.
 - **Encrypted secrets** — store API keys once per workspace (AES-256-GCM at
   rest), reference them as `{{secrets.NAME}}`, and they're masked in run logs.
   Values are write-only: rotate or delete, never read back.
+- **Workspace variables** — the plain-config counterpart to secrets: store
+  environment base URLs, channel names, and thresholds once per workspace and
+  reference them as `{{vars.NAME}}` in any node config. Values are **readable
+  and diffable** (that's the point — config you can see), so changing one
+  re-points every workflow that references it; the linter flags a `{{vars.*}}`
+  name that doesn't exist, and anything sensitive belongs in secrets instead,
+  which variables deliberately don't replace.
 - **Public REST API** — trigger workflows and poll runs from CI or scripts via
   `/api/v1`, authenticated with scoped, expiring personal access tokens
   (hash-only storage), with **Idempotency-Key** support so retried triggers
@@ -419,8 +426,10 @@ SMTP_USER=        SMTP_PASS=         EMAIL_FROM=flowforge@example.com
 7. **Webhooks:** open the Webhooks panel to mint a public trigger URL.
 8. **Collaborate:** share the workflow URL — edits, cursors, and runs sync live,
    and `Ctrl/⌘-Z` undo/redo keeps everyone converged.
-9. **Secrets:** store API keys under the workspace's Secrets page and reference
-   them anywhere as `{{secrets.NAME}}` — they stay encrypted and out of run logs.
+9. **Secrets & variables:** store API keys under the workspace's Secrets page
+   (`{{secrets.NAME}}` — encrypted, masked in run logs) and plain config like
+   base URLs under Variables (`{{vars.NAME}}` — readable, diffable, visible in
+   logs). One edit re-points every workflow that references the name.
 10. **Automate externally:** mint an API token in Settings and trigger runs from
     scripts via `POST /api/v1/workflows/:id/trigger` ([docs](./docs/API.md),
     [OpenAPI](./docs/API.md#machine-readable-spec)).

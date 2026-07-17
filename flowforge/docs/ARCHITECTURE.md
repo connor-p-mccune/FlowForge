@@ -140,10 +140,11 @@ would leave the outside world in an unknown state. A run cancelled while
 still queued is finalized by the route itself, and the worker drops the job
 when it sees the terminal status — so cancel wins the race against pickup.
 
-### Templates, secrets, and redaction
+### Templates, secrets, variables, and redaction
 
-Node configs reference upstream outputs as `{{node-id.field}}` and workspace
-secrets as `{{secrets.NAME}}`. Three properties matter:
+Node configs reference upstream outputs as `{{node-id.field}}`, workspace
+secrets as `{{secrets.NAME}}`, and workspace variables as `{{vars.NAME}}`.
+Three properties matter:
 
 1. **No evaluation.** Template resolution is a pure lookup — there is no
    `eval`, `new Function`, or `vm` anywhere in the server.
@@ -155,6 +156,19 @@ secrets as `{{secrets.NAME}}`. Three properties matter:
    secret values (including their JSON-escaped forms) scrubs step
    inputs/outputs, published events, and error messages — so a secret echoed
    back by a third-party API still never lands in the database or the UI.
+
+**Variables are the deliberate opposite of secrets.** `{{vars.NAME}}` values
+resolve through the same scope (they ride beside `secrets` and `callbacks`,
+never through node outputs), but they are plain configuration: readable
+through the API, editable in a UI page beside Secrets, and *not* redacted —
+a run log that showed `••••••` where the base URL should be would hide
+exactly the data you're debugging with. The split keeps both guarantees
+sharp: everything in secrets is encrypted and scrubbed, everything in
+variables is visible and diffable, and the linter checks `{{vars.*}}` names
+against the workspace just like `{{secrets.*}}`. Because the step cache
+hashes the *resolved* config, editing a variable naturally invalidates any
+cached step that used it — the same argument that makes secret rotation
+safe.
 
 ### Human-in-the-loop approvals
 
