@@ -9,6 +9,7 @@ const { validate } = require('../middleware/validate')
 const scheduler = require('../services/scheduler')
 const activityService = require('../services/activityService')
 const { lintGraph } = require('../services/workflowLinter')
+const stepCache = require('../services/stepCache')
 const {
   getRunner,
   loadWorkspaceSecrets,
@@ -345,6 +346,46 @@ router.post('/workflows/:id/archive', auth, (req, res) => {
 
     const updated = db.prepare('SELECT * FROM workflows WHERE id = ?').get(req.params.id)
     res.json({ workflow: updated })
+  } catch (err) {
+    console.error(err)
+    res.status(500).json({ error: 'Internal server error' })
+  }
+})
+
+// GET /api/workflows/:id/cache — what the step cache currently holds for this
+// workflow: live entry count, total hits, and the next expiry. Enough for the
+// UI to say "3 entries, 12 hits" next to the clear button without exposing
+// cached payloads (which may embed upstream data the viewer shouldn't see
+// re-surfaced outside a run).
+router.get('/workflows/:id/cache', auth, (req, res) => {
+  try {
+    const workflow = db.prepare('SELECT * FROM workflows WHERE id = ?').get(req.params.id)
+    if (!workflow || !isMember(workflow.workspace_id, req.user.id)) {
+      return res.status(404).json({ error: 'Workflow not found' })
+    }
+    const stats = db.prepare(
+      `SELECT COUNT(*) AS entries, COALESCE(SUM(hits), 0) AS hits, MIN(expires_at) AS nextExpiry
+         FROM step_cache WHERE workflow_id = ? AND expires_at > ?`
+    ).get(req.params.id, new Date().toISOString())
+    res.json({ cache: stats })
+  } catch (err) {
+    console.error(err)
+    res.status(500).json({ error: 'Internal server error' })
+  }
+})
+
+// DELETE /api/workflows/:id/cache — drop every cached step result for the
+// workflow. The manual override for "the upstream data changed even though
+// the request looks identical": the next run re-executes everything and
+// repopulates the cache with fresh outputs.
+router.delete('/workflows/:id/cache', auth, (req, res) => {
+  try {
+    const workflow = db.prepare('SELECT * FROM workflows WHERE id = ?').get(req.params.id)
+    if (!workflow || !isMember(workflow.workspace_id, req.user.id)) {
+      return res.status(404).json({ error: 'Workflow not found' })
+    }
+    const cleared = stepCache.clearWorkflow(req.params.id)
+    res.json({ cleared })
   } catch (err) {
     console.error(err)
     res.status(500).json({ error: 'Internal server error' })
