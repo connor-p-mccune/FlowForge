@@ -5,6 +5,7 @@ import SummaryCards from './SummaryCards'
 import TimelineChart from './TimelineChart'
 import NodeUsageChart from './NodeUsageChart'
 import WorkflowsTable from './WorkflowsTable'
+import StatusPageSection from './StatusPageSection'
 
 const RANGES = [7, 30, 90]
 
@@ -82,6 +83,9 @@ export default function AnalyticsPage({ workspaceId }) {
           <WorkflowsTable workflows={data.workflows} />
         </>
       )}
+      {/* Sharing lives below the charts; it renders even while they load —
+          publishing a status page doesn't depend on analytics data. */}
+      <StatusPageSection workspaceId={workspaceId} />
     </div>
   )
 }

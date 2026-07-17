@@ -5113,6 +5113,203 @@ html, body, #root {
   color: #9ca3af;
 }
 
+/* ---------- Public status page (/status/:token) ---------- */
+
+.status-page {
+  max-width: 760px;
+  margin: 0 auto;
+  padding: 48px 24px 32px;
+  font-family: inherit;
+  color: #1a1a1a;
+}
+
+.status-page--message {
+  text-align: center;
+  padding-top: 120px;
+  color: #6b7280;
+}
+
+.status-page__header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 24px;
+}
+
+.status-page__title {
+  font-size: 26px;
+  font-weight: 800;
+  margin: 0;
+}
+
+.status-page__overall {
+  font-size: 13px;
+  font-weight: 700;
+  padding: 6px 14px;
+  border-radius: 16px;
+}
+
+.status-page__overall--up { background: #dcfce7; color: #15803d; }
+.status-page__overall--down { background: #fee2e2; color: #b91c1c; }
+.status-page__overall--idle { background: #f3f4f6; color: #6b7280; }
+
+.status-page__list {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.status-page__row {
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+  padding: 14px 16px;
+  background: #fff;
+}
+
+.status-page__row-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.status-page__wf-name {
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.status-page__health {
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.status-page__health--up { color: #15803d; }
+.status-page__health--down { color: #b91c1c; }
+.status-page__health--idle { color: #6b7280; }
+
+/* The uptime strip: one slim bar per run, oldest → newest. */
+.status-page__bars {
+  display: flex;
+  align-items: stretch;
+  gap: 3px;
+  height: 28px;
+  margin-bottom: 10px;
+}
+
+.status-page__bar {
+  flex: 1 1 0;
+  max-width: 12px;
+  border-radius: 2px;
+  background: #d1d5db;
+}
+
+.status-page__bar--completed { background: #22c55e; }
+.status-page__bar--failed { background: #ef4444; }
+.status-page__bar--cancelled { background: #c4b5fd; }
+.status-page__bar--running,
+.status-page__bar--pending { background: #93c5fd; }
+
+.status-page__no-runs {
+  font-size: 12px;
+  color: #9ca3af;
+  align-self: center;
+}
+
+.status-page__stats {
+  display: flex;
+  gap: 18px;
+  font-size: 12px;
+  color: #6b7280;
+}
+
+.status-page__footer {
+  margin-top: 28px;
+  text-align: center;
+  font-size: 11px;
+  color: #9ca3af;
+}
+
+/* ---------- Status page sharing card (workspace analytics) ---------- */
+
+.status-share {
+  margin-top: 24px;
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+  background: #fff;
+  padding: 16px 18px;
+}
+
+.status-share__title {
+  font-size: 15px;
+  font-weight: 700;
+  margin: 0 0 6px;
+}
+
+.status-share__hint {
+  font-size: 12.5px;
+  color: #6b7280;
+  margin: 0 0 12px;
+  max-width: 640px;
+}
+
+.status-share__url-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.status-share__url {
+  flex: 1;
+  font-size: 12px;
+  background: #f9fafb;
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+  padding: 7px 10px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.status-share__actions {
+  display: flex;
+  gap: 8px;
+}
+
+.status-share__btn {
+  font-size: 12.5px;
+  font-weight: 600;
+  padding: 7px 12px;
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+  background: #fff;
+  color: #374151;
+  cursor: pointer;
+  text-decoration: none;
+  display: inline-block;
+}
+
+.status-share__btn:hover { background: #f9fafb; }
+.status-share__btn:disabled { opacity: 0.6; cursor: default; }
+
+.status-share__btn--primary {
+  background: #4f46e5;
+  border-color: #4f46e5;
+  color: #fff;
+}
+
+.status-share__btn--primary:hover { background: #4338ca; }
+
+.status-share__btn--danger {
+  color: #b91c1c;
+  border-color: #fecaca;
+}
+
+.status-share__btn--danger:hover { background: #fef2f2; }
+
 .comment-msg__text {
   margin: 0;
   font-size: 13px;

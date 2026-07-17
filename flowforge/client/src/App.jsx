@@ -9,6 +9,7 @@ import SecretsPage from './components/secrets/SecretsPage'
 import WebhooksPage from './components/webhooks/WebhooksPage'
 import SettingsPage from './components/settings/SettingsPage'
 import WorkflowCanvas from './components/canvas/WorkflowCanvas'
+import StatusPage from './components/status/StatusPage'
 import AppShell from './components/layout/AppShell'
 import ErrorBoundary from './components/ErrorBoundary'
 import { ToastProvider } from './hooks/useToast'
@@ -66,6 +67,8 @@ export default function App() {
           <Routes>
             <Route path="/login" element={<LoginPage />} />
             <Route path="/register" element={<RegisterPage />} />
+            {/* Public: the token in the URL is the whole credential. */}
+            <Route path="/status/:token" element={<StatusPage />} />
             <Route element={<ProtectedRoute />}>
               <Route path="/" element={<DashboardPage />} />
               <Route path="/workflow/:id" element={<WorkflowPage />} />
