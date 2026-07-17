@@ -206,6 +206,26 @@ CREATE TABLE IF NOT EXISTS workspace_secrets (
   UNIQUE (workspace_id, name)
 );
 
+-- Workspace variables: named, non-secret configuration values referenced from
+-- node configs as {{vars.NAME}} — environment base URLs, channel names,
+-- thresholds. The plain-config counterpart to workspace_secrets: values are
+-- stored and returned in cleartext (anyone who can read the workspace can read
+-- them), which is exactly the trade — config you can see and diff, for data
+-- that was never a credential. Anything sensitive belongs in secrets, where it
+-- is encrypted and redacted from run logs; variables get neither. Writes are
+-- workspace-owner-only, mirroring secrets; created_by is kept for the audit
+-- trail (LEFT JOINed for display so a deleted user doesn't drop the row).
+CREATE TABLE IF NOT EXISTS workspace_variables (
+  id           TEXT PRIMARY KEY,
+  workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+  name         TEXT NOT NULL,
+  value        TEXT NOT NULL,
+  created_by   TEXT REFERENCES users(id),
+  created_at   TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at   TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE (workspace_id, name)
+);
+
 -- Workspace activity feed: an append-only, chronological log of significant
 -- actions in a workspace (workflow created/deployed/deleted/restored, execution
 -- completed/failed, member invited/removed, comment added/resolved). Written by
