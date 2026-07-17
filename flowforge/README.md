@@ -156,6 +156,12 @@ order while streaming live progress back to every collaborator on the canvas.
   its latest run status (passing / failing / running) in a README or dashboard,
   just like a CI badge — hand-rendered, cached, and revocable by rotating the
   token.
+- **Public status pages** — statuspage.io for your workflows: a workspace
+  owner publishes a shareable, read-only page at `/status/<token>` showing
+  every deployed workflow's recent runs as **uptime bars** with success
+  rate, typical duration, and last-run age. Deliberately unactionable — no
+  ids, no error text, no drafts, no dry runs — so it's safe for an on-call
+  channel or a client; rotate the link and every shared copy dies.
 - **Command palette** — `Ctrl/⌘-K` fuzzy-jumps to any workflow, page, or action
   across every workspace.
 - **Full-text search** — "which workflow calls the Stripe API?" is a query,

@@ -708,6 +708,26 @@ The endpoint is rate-limited like the public webhook trigger (it's an
 unauthenticated, oft-fetched asset) and served with a short `max-age` so an
 embedded badge refreshes within a minute while a CDN still absorbs bursts.
 
+## Public status pages
+
+The badge's big sibling (`services/statusPage.js`): a workspace owner mints
+a token and `/status/:token` renders a read-only health rollup of the
+workspace's **deployed** workflows — recent run outcomes as uptime bars,
+success rate over settled runs, median duration, last-run age — for people
+who shouldn't get accounts: the on-call channel, a client, a wall display.
+
+What the payload *omits* is most of the design. No workflow or execution
+ids (nothing on the page can be turned into an API call), no error messages
+or step data (failure **rates** are shareable; failure **details** often
+embed payloads), no drafts (unfinished work isn't status), no dry runs
+(tests aren't service health), and cancelled runs count toward neither
+success nor failure. Management is **owner-only** — publishing run health is
+a workspace decision, not any member's — while the page itself needs no
+account at all: the token is the whole credential, minted at 48 hex chars,
+and rotating it severs every previously shared link. Unknown, malformed, and
+disabled tokens all read as the same 404, and the endpoint shares the public
+rate-limit profile with badges and webhook triggers.
+
 ## Schedule preview
 
 `services/cronExpression.js` computes the next fire times of a cron expression.
