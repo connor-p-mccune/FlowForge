@@ -111,6 +111,13 @@ ensureColumn('workflows', 'sla_min_success_rate', 'REAL')
 // quietly clears the reference instead of blocking the delete.
 ensureColumn('workflows', 'error_workflow_id', 'TEXT REFERENCES workflows(id) ON DELETE SET NULL')
 
+// Public status pages (services/statusPage.js): an opt-in per-workspace token
+// that makes GET /api/status/:token return a read-only health rollup of the
+// workspace's deployed workflows (and /status/:token render it in the app).
+// NULL = no status page. The token is the whole credential — rotating it
+// severs every previously shared link.
+ensureColumn('workspaces', 'status_page_token', 'TEXT')
+
 // Run priority lanes (services/runPriority.js): default_priority is the lane
 // this workflow's runs take unless a trigger overrides it per run
 // ('high' | 'normal' | 'low'); executions.priority records the lane each run
