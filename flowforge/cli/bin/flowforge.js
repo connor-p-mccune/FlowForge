@@ -39,7 +39,7 @@ Usage:
   flowforge workspaces                             List workspaces (import targets)
   flowforge export <workflow-id>                   Print the portable workflow JSON (pipe to a file)
   flowforge import <workspace-id> <file> [--name]  Create a draft workflow from an exported file
-  flowforge trigger <workflow-id> [--data <json>] [--key <idempotency-key>] [--watch]
+  flowforge trigger <workflow-id> [--data <json>] [--key <idempotency-key>] [--priority high|normal|low] [--watch]
   flowforge runs <workflow-id> [--limit N]         Recent runs for a workflow
   flowforge insights <workflow-id> [--limit N]     Duration percentiles, success rate, anomalies
   flowforge forecast <workflow-id>                 Predicted next-run duration and bottleneck

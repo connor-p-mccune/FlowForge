@@ -81,6 +81,27 @@ test('trigger rejects malformed --data without calling the API', async () => {
   assert.equal(stub.requests.length, 0)
 })
 
+test('trigger --priority rides the query string and validates the lane', async () => {
+  const stub = await startStub(() => ({
+    status: 202,
+    json: {
+      execution: { id: 'exec-p', workflowId: 'wf-1', status: 'pending' },
+      statusUrl: '/api/v1/executions/exec-p',
+    },
+  }))
+  const ctx = makeCtx(stub.api)
+  const code = await trigger({ positionals: ['wf-1'], flags: { priority: 'high' } }, ctx)
+
+  assert.equal(code, 0)
+  assert.equal(stub.requests[0].path, '/api/v1/workflows/wf-1/trigger?priority=high')
+
+  // A typo'd lane fails before a run starts.
+  const bad = await trigger({ positionals: ['wf-1'], flags: { priority: 'urgent' } }, ctx)
+  await stub.close()
+  assert.equal(bad, 1)
+  assert.equal(stub.requests.length, 1)
+})
+
 test('trigger --watch follows the run and exits 0 on completion', async () => {
   let polls = 0
   const stub = await startStub((method, url) => {
