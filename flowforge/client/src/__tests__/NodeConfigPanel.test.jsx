@@ -235,6 +235,46 @@ describe('NodeConfigPanel interactions', () => {
     })
   })
 
+  describe('cache field', () => {
+    it('renders for cacheable types and merges the toggle into config', () => {
+      const { onChange } = setup(mk('transform', { config: { template: '{}' } }))
+      const checkbox = screen.getByText(/cache this node/i).parentElement.querySelector('input')
+      fireEvent.click(checkbox)
+      expect(onChange).toHaveBeenCalledWith('n1', {
+        config: { template: '{}', cache: { enabled: true } },
+      })
+    })
+
+    it('shows the TTL input only once caching is enabled, and stores it as a number', () => {
+      const { onChange, rerender } = setup(mk('ai-prompt'))
+      expect(screen.queryByText(/cache for \(seconds\)/i)).not.toBeInTheDocument()
+
+      rerender(
+        <NodeConfigPanel
+          node={mk('ai-prompt', { config: { cache: { enabled: true } } })}
+          onChange={onChange}
+          onClose={vi.fn()}
+          onDelete={vi.fn()}
+        />
+      )
+      const ttl = screen.getByText(/cache for \(seconds\)/i).parentElement.querySelector('input')
+      fireEvent.change(ttl, { target: { value: '600' } })
+      expect(onChange).toHaveBeenCalledWith('n1', {
+        config: { cache: { enabled: true, ttlSeconds: 600 } },
+      })
+    })
+
+    it('does not render for side-effect or control-flow types', () => {
+      for (const type of ['action-email', 'action-slack', 'condition', 'sub-workflow', 'output-log']) {
+        const { unmount } = render(
+          <NodeConfigPanel node={mk(type)} onChange={vi.fn()} onClose={vi.fn()} onDelete={vi.fn()} />
+        )
+        expect(screen.queryByText(/cache this node/i)).not.toBeInTheDocument()
+        unmount()
+      }
+    })
+  })
+
   describe('switch case editor', () => {
     const switchNode = (cases) => mk('switch', { config: { cases } })
 

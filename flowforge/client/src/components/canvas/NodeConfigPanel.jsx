@@ -263,6 +263,68 @@ function OnErrorField({ config, setConfig }) {
   )
 }
 
+// Node types whose output the engine will memoise (services/stepCache.js on
+// the server): pure input→output computations plus calls the author can
+// declare idempotent. Side-effect actions (email/Slack), branching/waiting
+// nodes, and sub-workflows are excluded — the engine ignores cache config on
+// them and the linter says so.
+const CACHEABLE_NODE_TYPES = new Set([
+  'action-http',
+  'transform', 'filter', 'map', 'aggregate',
+  'ai-prompt', 'ai-classify', 'ai-extract',
+])
+
+// Step caching: when enabled, a run whose node would do byte-for-byte the
+// same work (same config after templates resolve, same input) adopts the
+// recorded output instead of re-executing — the step shows as "cached".
+// Any upstream change produces a different cache key, so invalidation is
+// automatic; the TTL bounds how long a repeat can coast.
+function CacheField({ config, setConfig, nodeType }) {
+  const cache = config.cache || {}
+  const enabled = cache.enabled === true
+  const update = (patch) => setConfig('cache', { ...cache, ...patch })
+  return (
+    <>
+      <label className="config-panel__checkbox">
+        <input
+          type="checkbox"
+          checked={enabled}
+          onChange={(e) => update({ enabled: e.target.checked })}
+        />
+        <span>Cache this node’s output</span>
+      </label>
+      {enabled && (
+        <>
+          <label className="config-panel__field">
+            <span>Cache for (seconds)</span>
+            <input
+              type="number"
+              min="1"
+              placeholder="300"
+              value={cache.ttlSeconds ?? ''}
+              onChange={(e) =>
+                update({ ttlSeconds: e.target.value === '' ? undefined : Number(e.target.value) })
+              }
+            />
+          </label>
+          <p className="config-panel__hint">
+            A repeat run whose config and input are identical reuses the recorded
+            output and skips this node (step status <strong>cached</strong>).
+            Any change upstream — data, config, a rotated secret — is a new cache
+            key, so nothing goes stale silently.
+            {nodeType === 'ai-prompt' || nodeType === 'ai-classify' || nodeType === 'ai-extract'
+              ? ' Handy for AI nodes: identical prompts stop costing tokens.'
+              : ''}
+            {nodeType === 'action-http'
+              ? ' Cache GET lookups; a cached POST would skip the request entirely (the linter flags this).'
+              : ''}
+          </p>
+        </>
+      )}
+    </>
+  )
+}
+
 // Shared help for FXL-powered fields (condition expression, filter predicate).
 // FXL reads live values from the node's data rather than substituting {{...}}
 // templates — a distinction worth calling out where the two styles meet.
@@ -977,6 +1039,9 @@ export default function NodeConfigPanel({
           />
         </label>
         {renderFields()}
+        {CACHEABLE_NODE_TYPES.has(node.type) && (
+          <CacheField config={config} setConfig={setConfig} nodeType={node.type} />
+        )}
         {CATCHABLE_TYPES.has(node.type) && <OnErrorField config={config} setConfig={setConfig} />}
         {/* Notes are annotations — no upstream data to explore, nothing to bench. */}
         {node.type !== 'note' && <VariableExplorer node={node} nodes={nodes} edges={edges} />}

@@ -37,6 +37,12 @@ beforeEach(() => {
     if (path === '/api/workflows/wf1' && opts?.method === 'PUT') {
       return Promise.resolve({ workflow: { ...WORKFLOW, ...opts.body } })
     }
+    if (path === '/api/workflows/wf1/cache' && !opts) {
+      return Promise.resolve({ cache: { entries: 2, hits: 5, nextExpiry: null } })
+    }
+    if (path === '/api/workflows/wf1/cache' && opts?.method === 'DELETE') {
+      return Promise.resolve({ cleared: 2 })
+    }
     return Promise.reject(new Error(`unexpected request: ${path}`))
   })
 })
@@ -196,6 +202,33 @@ describe('RunSettingsPanel', () => {
     expect(select).toHaveValue('wf-gone')
     expect(screen.getByText('Unavailable workflow')).toBeInTheDocument()
     expect(screen.getByText(/failures are not being escalated/i)).toBeInTheDocument()
+  })
+
+  it('shows live step-cache stats and clears them on demand', async () => {
+    setup()
+    expect(await screen.findByText(/2 live cached results, reused 5 times/i)).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: /clear cached results/i }))
+    await waitFor(() =>
+      expect(apiFetch).toHaveBeenCalledWith('/api/workflows/wf1/cache', { method: 'DELETE' })
+    )
+    expect(await screen.findByText(/no live cached results/i)).toBeInTheDocument()
+    expect(toast.success).toHaveBeenCalledWith('Cleared 2 cached step results')
+    // Nothing left to clear — the button disables rather than firing no-ops.
+    expect(screen.getByRole('button', { name: /clear cached results/i })).toBeDisabled()
+  })
+
+  it('still renders settings when the cache stats fetch fails', async () => {
+    apiFetch.mockImplementation((path, opts) => {
+      if (path === '/api/workflows/wf1' && !opts) return Promise.resolve({ workflow: WORKFLOW })
+      if (path === '/api/workspaces/ws1/workflows') {
+        return Promise.resolve({ workflows: WORKSPACE_WORKFLOWS })
+      }
+      return Promise.reject(new Error('cache stats unavailable'))
+    })
+    setup()
+    expect(await screen.findByLabelText(/max concurrent runs/i)).toBeInTheDocument()
+    expect(screen.queryByText(/live cached/i)).not.toBeInTheDocument()
   })
 
   it('surfaces a server error and stays open', async () => {

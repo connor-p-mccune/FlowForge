@@ -19,6 +19,10 @@ export default function RunSettingsPanel({ workflowId, open, onClose }) {
   // refuses self-handling).
   const [handlerId, setHandlerId] = useState('')
   const [handlerOptions, setHandlerOptions] = useState([])
+  // Step cache: { entries, hits } for the section below. null while loading;
+  // a fetch failure just hides the numbers — the panel's main job is settings.
+  const [cacheStats, setCacheStats] = useState(null)
+  const [clearing, setClearing] = useState(false)
   const [error, setError] = useState(null)
   const [saving, setSaving] = useState(false)
   const toast = useToast()
@@ -28,6 +32,13 @@ export default function RunSettingsPanel({ workflowId, open, onClose }) {
     let cancelled = false
     setError(null)
     setWorkflow(null)
+    apiFetch(`/api/workflows/${workflowId}/cache`)
+      .then(({ cache }) => {
+        if (!cancelled) setCacheStats(cache)
+      })
+      .catch(() => {
+        /* stats are a nicety — the settings form still works without them */
+      })
     apiFetch(`/api/workflows/${workflowId}`)
       .then(({ workflow: wf }) => {
         if (cancelled) return
@@ -58,6 +69,23 @@ export default function RunSettingsPanel({ workflowId, open, onClose }) {
   }, [open, workflowId])
 
   if (!open) return null
+
+  async function handleClearCache() {
+    setClearing(true)
+    try {
+      const { cleared } = await apiFetch(`/api/workflows/${workflowId}/cache`, {
+        method: 'DELETE',
+      })
+      setCacheStats({ entries: 0, hits: 0 })
+      toast.success(
+        cleared === 1 ? 'Cleared 1 cached step result' : `Cleared ${cleared} cached step results`
+      )
+    } catch (err) {
+      toast.error(err.message)
+    } finally {
+      setClearing(false)
+    }
+  }
 
   async function handleSave() {
     const trimmed = limitInput.trim()
@@ -212,6 +240,31 @@ export default function RunSettingsPanel({ workflowId, open, onClose }) {
 
               <button className="webhook-panel__create" onClick={handleSave} disabled={saving}>
                 {saving ? 'Saving…' : 'Save settings'}
+              </button>
+
+              <div className="run-settings__section">Step cache</div>
+              <p className="webhook-panel__hint">
+                Nodes with caching enabled reuse a recorded output while its TTL
+                lasts. Invalidation is automatic — any change to a node’s config
+                or input is a new cache key — but if the upstream <em>data</em>{' '}
+                changed behind an identical request, clear the cache to force the
+                next run to re-execute everything.
+              </p>
+              {cacheStats && (
+                <p className="webhook-panel__hint">
+                  {cacheStats.entries === 0
+                    ? 'No live cached results.'
+                    : `${cacheStats.entries} live cached ${
+                        cacheStats.entries === 1 ? 'result' : 'results'
+                      }, reused ${cacheStats.hits} ${cacheStats.hits === 1 ? 'time' : 'times'}.`}
+                </p>
+              )}
+              <button
+                className="webhook-panel__create"
+                onClick={handleClearCache}
+                disabled={clearing || (cacheStats && cacheStats.entries === 0)}
+              >
+                {clearing ? 'Clearing…' : 'Clear cached results'}
               </button>
               <StatusBadgeSection workflowId={workflowId} initialToken={workflow.badge_token} />
             </>

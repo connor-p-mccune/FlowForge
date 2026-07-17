@@ -1658,6 +1658,8 @@ html, body, #root {
 .exec-timeline__bar--caught { background: #f97316; }
 /* Reused (resumed runs): adopted from the source run, zero-ish duration. */
 .exec-timeline__bar--reused { background: #06b6d4; }
+/* Cached: adopted from the step cache — the node's exact work was already done. */
+.exec-timeline__bar--cached { background: #8b5cf6; }
 
 /* Critical path: the steps that set the run's duration. The bar keeps its
    status colour but gains an indigo ring, and its row's label is emphasised, so
@@ -2565,6 +2567,8 @@ html, body, #root {
 .status-badge--reused { background: #cffafe; color: #0e7490; }
 /* Caught: the node failed but its on-error policy handled it — the run went on. */
 .status-badge--caught { background: #ffedd5; color: #c2410c; }
+/* Cached: the step adopted a memoised output instead of re-executing. */
+.status-badge--cached { background: #ede9fe; color: #6d28d9; }
 
 /* Step list */
 .step-list {
