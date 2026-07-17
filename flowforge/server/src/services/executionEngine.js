@@ -159,6 +159,18 @@ function loadWorkspaceSecrets(workspaceId) {
   return secrets
 }
 
+// A workspace's variables as a plain { NAME: value } map for template
+// resolution ({{vars.NAME}}). The non-secret sibling of the map above:
+// values are cleartext configuration, resolved through the same scope but
+// never redacted from persisted steps — a variable is exactly the kind of
+// data a run log should show. Anything sensitive belongs in secrets.
+function loadWorkspaceVariables(workspaceId) {
+  const rows = db.prepare(
+    'SELECT name, value FROM workspace_variables WHERE workspace_id = ?'
+  ).all(workspaceId)
+  return Object.fromEntries(rows.map((r) => [r.name, r.value]))
+}
+
 const REDACTED = '••••••'
 
 // Build a scrubber that masks every secret value inside a string. Applied to
@@ -257,6 +269,9 @@ async function runExecution(
   // as {{secrets.NAME}}; the map lives only in engine memory, and the redactor
   // scrubs the plaintext from everything persisted or published below.
   const secrets = loadWorkspaceSecrets(workflow.workspace_id)
+  // Workspace variables ride the same template scope ({{vars.NAME}}) but are
+  // plain config: no redaction, and they may appear in persisted steps.
+  const vars = loadWorkspaceVariables(workflow.workspace_id)
   const redact = buildRedactor(Object.values(secrets))
   const graph = JSON.parse(workflow.graph_json)
   // Sticky notes are canvas annotations, not steps: they never execute, get
@@ -551,6 +566,7 @@ async function runExecution(
         const config = resolveTemplates(node.data?.config || {}, {
           ...context,
           secrets,
+          vars,
           callbacks: callbackUrls,
         })
         cacheKey = stepCache.cacheKey(workflowId, node.type, config, input)
@@ -579,12 +595,14 @@ async function runExecution(
     const task = (async () => {
       try {
         // Config templates resolve against upstream outputs plus the decrypted
-        // secrets map ({{secrets.NAME}}) and the run's callback URLs
+        // secrets map ({{secrets.NAME}}), the workspace's variables
+        // ({{vars.NAME}}), and the run's callback URLs
         // ({{callbacks.<node-id>}}). Secrets ride only through this scope —
         // never through context — so they can't leak into a later node's input.
         const config = resolveTemplates(node.data?.config || {}, {
           ...context,
           secrets,
+          vars,
           callbacks: callbackUrls,
         })
         // Engine context for runners that need to reach back into the engine (only
@@ -765,6 +783,7 @@ module.exports = {
   // the two paths drift.
   getRunner,
   loadWorkspaceSecrets,
+  loadWorkspaceVariables,
   buildRedactor,
   redactDeep,
 }

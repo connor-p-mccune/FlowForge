@@ -14,6 +14,7 @@ const { isValidPriority } = require('../services/runPriority')
 const {
   getRunner,
   loadWorkspaceSecrets,
+  loadWorkspaceVariables,
   buildRedactor,
   redactDeep,
   resolveTemplates,
@@ -520,8 +521,9 @@ router.post('/workflows/:id/test-node', auth, async (req, res) => {
       context && typeof context === 'object' && !Array.isArray(context) ? context : {}
 
     const secrets = loadWorkspaceSecrets(workflow.workspace_id)
+    const vars = loadWorkspaceVariables(workflow.workspace_id)
     const redact = buildRedactor(Object.values(secrets))
-    const config = resolveTemplates(node.data?.config || {}, { ...benchContext, secrets })
+    const config = resolveTemplates(node.data?.config || {}, { ...benchContext, secrets, vars })
 
     const dryRun = live !== true
     const startedAt = Date.now()
