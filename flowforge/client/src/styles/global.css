@@ -1451,6 +1451,45 @@ html, body, #root {
   margin-top: 2px;
 }
 
+/* Gate expression: the create form's optional filter and each row's editor. */
+.webhook-panel__filter-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+  color: #555;
+  margin: 8px 0 4px;
+}
+
+.webhook-panel__filter-field input,
+.webhook-item__filter-edit input {
+  font-family: ui-monospace, monospace;
+  font-size: 12px;
+  padding: 6px 8px;
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+}
+
+.webhook-item__filter-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 6px;
+}
+
+.webhook-item__filter-edit {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.webhook-item__filter-edit input {
+  flex: 1;
+  min-width: 0;
+}
+
 .webhook-secret {
   margin: 10px 0;
   padding: 10px;

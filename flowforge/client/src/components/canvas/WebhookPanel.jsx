@@ -18,6 +18,10 @@ export default function WebhookPanel({ workflowId, open, onClose }) {
   const [signNew, setSignNew] = useState(false)
   const [newSecret, setNewSecret] = useState(null)
   const [secretCopied, setSecretCopied] = useState(false)
+  // Gate expression for the next webhook, and the per-row inline editor
+  // ({ id, value }) for existing ones.
+  const [filterNew, setFilterNew] = useState('')
+  const [filterEdit, setFilterEdit] = useState(null)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -44,9 +48,14 @@ export default function WebhookPanel({ workflowId, open, onClose }) {
     try {
       const { webhook, signingSecret } = await apiFetch(`/api/workflows/${workflowId}/webhooks`, {
         method: 'POST',
-        body: { name: `Webhook ${webhooks.length + 1}`, signed: signNew },
+        body: {
+          name: `Webhook ${webhooks.length + 1}`,
+          signed: signNew,
+          ...(filterNew.trim() ? { filterExpression: filterNew } : {}),
+        },
       })
       setWebhooks((prev) => [webhook, ...prev])
+      setFilterNew('')
       if (signingSecret) setNewSecret({ webhookId: webhook.id, secret: signingSecret })
     } catch (err) {
       setError(err.message)
@@ -70,6 +79,23 @@ export default function WebhookPanel({ workflowId, open, onClose }) {
     try {
       await apiFetch(`/api/webhooks/${id}`, { method: 'DELETE' })
       setWebhooks((prev) => prev.filter((w) => w.id !== id))
+    } catch (err) {
+      setError(err.message)
+    }
+  }
+
+  // Save (or clear, with an empty value) a row's gate expression. A dedicated
+  // PUT — editing the filter must not rotate the URL senders hold.
+  async function handleSaveFilter() {
+    if (!filterEdit) return
+    setError(null)
+    try {
+      const { webhook } = await apiFetch(`/api/webhooks/${filterEdit.id}`, {
+        method: 'PUT',
+        body: { filterExpression: filterEdit.value.trim() || null },
+      })
+      setWebhooks((prev) => prev.map((w) => (w.id === webhook.id ? webhook : w)))
+      setFilterEdit(null)
     } catch (err) {
       setError(err.message)
     }
@@ -109,6 +135,19 @@ export default function WebhookPanel({ workflowId, open, onClose }) {
             HMAC-SHA256 signature
           </span>
         </label>
+        <label className="webhook-panel__filter-field">
+          <span>Only fire when (optional)</span>
+          <input
+            value={filterNew}
+            placeholder={'event == "push" && ref == "main"'}
+            onChange={(e) => setFilterNew(e.target.value)}
+          />
+        </label>
+        <p className="webhook-panel__hint">
+          An FXL rule over the delivery body — non-matching deliveries are
+          acknowledged but start no run, so “only fire on pushes to main”
+          happens at the door instead of as a condition node.
+        </p>
         <button className="webhook-panel__create" onClick={handleCreate} disabled={creating}>
           {creating ? 'Creating…' : '+ New webhook URL'}
         </button>
@@ -159,6 +198,38 @@ export default function WebhookPanel({ workflowId, open, onClose }) {
                 <button className="webhook-item__copy" onClick={() => handleCopy(w)}>
                   {copiedId === w.id ? 'Copied!' : 'Copy URL'}
                 </button>
+                {filterEdit?.id === w.id ? (
+                  <div className="webhook-item__filter-edit">
+                    <input
+                      value={filterEdit.value}
+                      placeholder={'event == "push"'}
+                      onChange={(e) => setFilterEdit({ id: w.id, value: e.target.value })}
+                      aria-label="Gate expression"
+                    />
+                    <button className="webhook-item__copy" onClick={handleSaveFilter}>
+                      Save
+                    </button>
+                    <button className="webhook-item__copy" onClick={() => setFilterEdit(null)}>
+                      Cancel
+                    </button>
+                  </div>
+                ) : (
+                  <div className="webhook-item__filter-row">
+                    {w.filter_expression ? (
+                      <span className="webhook-item__meta" title="Only matching deliveries fire">
+                        ⏳ Fires when <code>{w.filter_expression}</code>
+                      </span>
+                    ) : (
+                      <span className="webhook-item__meta">Fires on every delivery</span>
+                    )}
+                    <button
+                      className="webhook-item__copy"
+                      onClick={() => setFilterEdit({ id: w.id, value: w.filter_expression || '' })}
+                    >
+                      Edit filter
+                    </button>
+                  </div>
+                )}
                 {w.last_triggered_at && (
                   <span className="webhook-item__meta">
                     Last fired: {new Date(w.last_triggered_at).toLocaleString()}
