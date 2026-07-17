@@ -65,6 +65,13 @@ ensureColumn('executions', 'trigger_type', 'TEXT')
 // delivery must carry a valid timestamped HMAC (services/webhookSignature.js).
 ensureColumn('webhooks', 'signing_secret', 'TEXT')
 
+// Webhook gate expressions: an optional FXL predicate evaluated against each
+// delivery's JSON body. A non-matching delivery is acknowledged (202,
+// accepted: false) without starting a run — "only fire on event == 'push'"
+// happens at the door instead of as a condition node every graph repeats.
+// NULL = every delivery fires (unchanged behavior).
+ensureColumn('webhooks', 'filter_expression', 'TEXT')
+
 // Run cancellation: cancel_requested is the cooperative stop flag. The cancel
 // routes set it; the engine polls it between node settlements and winds the run
 // down ('cancelled' status) at the next scheduling round. A run cancelled while
