@@ -81,6 +81,7 @@ app.use('/api', require('./routes/tokens'))
 app.use('/api', require('./routes/approvals'))
 app.use('/api', require('./routes/subscriptions'))
 app.use('/api', require('./routes/expressions'))
+app.use('/api', require('./routes/search'))
 // Public, token-authenticated REST API for external integrations. Mounted
 // before the /api 404 catch-all below like everything else.
 app.use('/api/v1', require('./routes/publicApi'))

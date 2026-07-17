@@ -404,3 +404,25 @@ CREATE TABLE IF NOT EXISTS step_cache (
 -- Clear-by-workflow (the manual invalidation route) and the expiry prune.
 CREATE INDEX IF NOT EXISTS idx_step_cache_workflow ON step_cache (workflow_id);
 CREATE INDEX IF NOT EXISTS idx_step_cache_expires ON step_cache (expires_at);
+
+-- Full-text workflow search (services/workflowSearch.js). One FTS5 document
+-- per workflow: its name, description, and node_text — every node label,
+-- type, and string config value (sticky-note text included), flattened. The
+-- index is maintained lazily at *read* time rather than hooking every write
+-- path: workflow_search_state records the updated_at each document was built
+-- from, and a search pass re-indexes exactly the workspace rows whose
+-- updated_at moved (or that were never indexed). Deletes need no hook either
+-- — results join back to workflows, so a row for a deleted workflow simply
+-- stops matching anything and is swept opportunistically.
+CREATE VIRTUAL TABLE IF NOT EXISTS workflow_fts USING fts5(
+  workflow_id UNINDEXED,
+  name,
+  description,
+  node_text,
+  tokenize = 'porter unicode61'
+);
+
+CREATE TABLE IF NOT EXISTS workflow_search_state (
+  workflow_id        TEXT PRIMARY KEY REFERENCES workflows(id) ON DELETE CASCADE,
+  indexed_updated_at TEXT NOT NULL
+);
