@@ -486,6 +486,67 @@ const spec = {
         },
       },
     },
+    '/workflows/{workflowId}/diff': {
+      post: {
+        tags: ['workflows'],
+        summary: 'Diff the live workflow against a portable document (drift detection)',
+        description:
+          'Compares the workflow as deployed against an exported document ' +
+          '(the same { graph_data } shape export produces), answering "is ' +
+          'the live workflow still what the file in git says it is?". The ' +
+          'diff reads from the document’s perspective: addedNodes exist ' +
+          'live but not in the document. Nodes match by id (canvas position ' +
+          'is ignored — moving a node is not drift), edges by their ' +
+          '(source, target, sourceHandle) triple. Read-only; requires the ' +
+          '`read` scope. `flowforge diff <id> <file>` wraps this and exits ' +
+          'non-zero on drift.',
+        operationId: 'diffWorkflow',
+        parameters: [{ $ref: '#/components/parameters/WorkflowId' }],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                required: ['graph_data'],
+                properties: {
+                  graph_data: {
+                    type: 'object',
+                    required: ['nodes', 'edges'],
+                    properties: {
+                      nodes: { type: 'array', items: { type: 'object' } },
+                      edges: { type: 'array', items: { type: 'object' } },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          200: {
+            description: 'The drift report (`identical` is the gate).',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/DriftReport' },
+              },
+            },
+          },
+          400: {
+            description: 'Malformed graph_data.',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } },
+          },
+          401: { $ref: '#/components/responses/Unauthorized' },
+          403: { $ref: '#/components/responses/Forbidden' },
+          404: { $ref: '#/components/responses/NotFound' },
+          413: {
+            description: 'The graph exceeds the 500KB cap.',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } },
+          },
+          429: { $ref: '#/components/responses/RateLimited' },
+        },
+      },
+    },
     '/workflows/{workflowId}/tests/run': {
       post: {
         tags: ['workflows'],
@@ -1172,6 +1233,82 @@ const spec = {
             type: 'array',
             items: { type: 'string', format: 'date-time' },
             description: 'Upcoming fire times, UTC ISO-8601, oldest first.',
+          },
+        },
+      },
+      DriftReport: {
+        type: 'object',
+        properties: {
+          workflowId: { type: 'string' },
+          identical: {
+            type: 'boolean',
+            description: 'True when the live workflow matches the document — the CI gate.',
+          },
+          addedNodes: {
+            type: 'array',
+            description: 'Nodes present live but not in the document.',
+            items: { $ref: '#/components/schemas/DriftNode' },
+          },
+          removedNodes: {
+            type: 'array',
+            description: 'Nodes in the document that no longer exist live.',
+            items: { $ref: '#/components/schemas/DriftNode' },
+          },
+          changedNodes: {
+            type: 'array',
+            items: {
+              allOf: [
+                { $ref: '#/components/schemas/DriftNode' },
+                {
+                  type: 'object',
+                  properties: {
+                    changes: {
+                      type: 'array',
+                      items: { type: 'string' },
+                      description: 'Dotted paths of what differs: label, type, config.url, …',
+                    },
+                  },
+                },
+              ],
+            },
+          },
+          addedEdges: {
+            type: 'array',
+            items: { $ref: '#/components/schemas/DriftEdge' },
+          },
+          removedEdges: {
+            type: 'array',
+            items: { $ref: '#/components/schemas/DriftEdge' },
+          },
+          summary: {
+            type: 'object',
+            properties: {
+              addedNodes: { type: 'integer' },
+              removedNodes: { type: 'integer' },
+              changedNodes: { type: 'integer' },
+              addedEdges: { type: 'integer' },
+              removedEdges: { type: 'integer' },
+            },
+          },
+        },
+      },
+      DriftNode: {
+        type: 'object',
+        properties: {
+          id: { type: 'string' },
+          type: { type: 'string' },
+          label: { type: 'string' },
+        },
+      },
+      DriftEdge: {
+        type: 'object',
+        properties: {
+          source: { type: 'string' },
+          target: { type: 'string' },
+          sourceHandle: { type: 'string', nullable: true },
+          description: {
+            type: 'string',
+            example: 'Fetch orders → Notify (true branch)',
           },
         },
       },

@@ -25,6 +25,7 @@ const { scheduleExpressionOf, previewFor, parseCount } = require('./schedule')
 const { runSuite } = require('../services/workflowTester')
 const { compareRuns } = require('../services/runComparison')
 const { searchWorkflows } = require('../services/workflowSearch')
+const { diffGraphs, presentDiff } = require('../services/graphDiff')
 
 const router = express.Router()
 
@@ -378,6 +379,47 @@ router.get('/workflows/:id/export', tokenAuth('read'), (req, res) => {
       graph_data: graphData,
       exportedAt: new Date().toISOString(),
     })
+  } catch (err) {
+    console.error(err)
+    res.status(500).json({ error: 'Internal server error' })
+  }
+})
+
+// POST /api/v1/workflows/:id/diff — drift detection: diff the live workflow
+// against a portable export document (the same { graph_data } shape export
+// produces and import accepts). The response reads from the document's
+// perspective — addedNodes exist live but not in the document — so
+// "identical: false" means the deployed workflow is no longer what git says
+// it is. Read-only (`read` scope): it changes nothing, it just answers
+// whether a promotion is pending or someone edited production by hand.
+router.post('/workflows/:id/diff', tokenAuth('read'), (req, res) => {
+  try {
+    const workflow = getWorkflowForMember(req.params.id, req.user.id)
+    if (!workflow) return res.status(404).json({ error: 'Workflow not found' })
+
+    const graphData = req.body?.graph_data
+    if (!graphData || !Array.isArray(graphData.nodes) || !Array.isArray(graphData.edges)) {
+      return res.status(400).json({ error: 'graph_data must include nodes and edges arrays' })
+    }
+    // Same cap as import: a diff request carries a whole graph too.
+    if (Buffer.byteLength(JSON.stringify(graphData), 'utf8') > MAX_IMPORT_GRAPH_BYTES) {
+      return res.status(413).json({ error: 'Workflow graph is too large (max 500KB)' })
+    }
+
+    let live = { nodes: [], edges: [] }
+    try {
+      const parsed = JSON.parse(workflow.graph_json)
+      live = {
+        nodes: Array.isArray(parsed.nodes) ? parsed.nodes : [],
+        edges: Array.isArray(parsed.edges) ? parsed.edges : [],
+      }
+    } catch {
+      /* unparseable stored graph — diff against the empty shape */
+    }
+
+    const document = { nodes: graphData.nodes, edges: graphData.edges }
+    const diff = diffGraphs(document, live)
+    res.json({ workflowId: workflow.id, ...presentDiff(diff, document, live) })
   } catch (err) {
     console.error(err)
     res.status(500).json({ error: 'Internal server error' })
