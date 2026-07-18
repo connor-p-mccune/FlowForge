@@ -26,6 +26,7 @@ const { runSuite } = require('../services/workflowTester')
 const { compareRuns } = require('../services/runComparison')
 const { searchWorkflows } = require('../services/workflowSearch')
 const { diffGraphs, presentDiff } = require('../services/graphDiff')
+const { lintGraph } = require('../services/workflowLinter')
 
 const router = express.Router()
 
@@ -420,6 +421,75 @@ router.post('/workflows/:id/diff', tokenAuth('read'), (req, res) => {
     const document = { nodes: graphData.nodes, edges: graphData.edges }
     const diff = diffGraphs(document, live)
     res.json({ workflowId: workflow.id, ...presentDiff(diff, document, live) })
+  } catch (err) {
+    console.error(err)
+    res.status(500).json({ error: 'Internal server error' })
+  }
+})
+
+// POST /api/v1/workflows/:id/lint — static analysis as a CI gate. With an
+// empty body, lints the workflow as stored; with { graph_data }, lints that
+// document instead — so a pipeline can vet an exported file against the
+// *target* workspace's real context (secret names, variable names,
+// sub-workflow targets) before importing it there. Same rules and severity
+// contract as the canvas's 🔎 Issues panel, because it *is* the same linter.
+// `ok` (no errors) is the gate; warnings ride along for --strict consumers.
+// Read scope: analysis changes nothing.
+router.post('/workflows/:id/lint', tokenAuth('read'), (req, res) => {
+  try {
+    const workflow = getWorkflowForMember(req.params.id, req.user.id)
+    if (!workflow) return res.status(404).json({ error: 'Workflow not found' })
+
+    let graph
+    const graphData = req.body?.graph_data
+    if (graphData !== undefined) {
+      if (!graphData || !Array.isArray(graphData.nodes) || !Array.isArray(graphData.edges)) {
+        return res.status(400).json({ error: 'graph_data must include nodes and edges arrays' })
+      }
+      if (graphData.nodes.length > 2000 || graphData.edges.length > 5000) {
+        return res.status(400).json({ error: 'Graph too large to lint' })
+      }
+      graph = { nodes: graphData.nodes, edges: graphData.edges }
+    } else {
+      graph = { nodes: [], edges: [] }
+      try {
+        const parsed = JSON.parse(workflow.graph_json)
+        graph = {
+          nodes: Array.isArray(parsed.nodes) ? parsed.nodes : [],
+          edges: Array.isArray(parsed.edges) ? parsed.edges : [],
+        }
+      } catch {
+        /* unparseable stored graph — lint the empty shape */
+      }
+    }
+
+    // The same live workspace context the session lint route builds, so
+    // {{secrets.*}} / {{vars.*}} references and call targets check for real.
+    const secretNames = new Set(
+      db.prepare('SELECT name FROM workspace_secrets WHERE workspace_id = ?')
+        .all(workflow.workspace_id)
+        .map((r) => r.name)
+    )
+    const variableNames = new Set(
+      db.prepare('SELECT name FROM workspace_variables WHERE workspace_id = ?')
+        .all(workflow.workspace_id)
+        .map((r) => r.name)
+    )
+    const workflowTargets = new Map(
+      db.prepare('SELECT id, name, status FROM workflows WHERE workspace_id = ?')
+        .all(workflow.workspace_id)
+        .map((r) => [r.id, { name: r.name, status: r.status }])
+    )
+
+    const issues = lintGraph(graph, { secretNames, variableNames, workflowTargets })
+    const errors = issues.filter((i) => i.severity === 'error').length
+    const warnings = issues.filter((i) => i.severity === 'warning').length
+    res.json({
+      workflowId: workflow.id,
+      ok: errors === 0,
+      issues,
+      summary: { errors, warnings },
+    })
   } catch (err) {
     console.error(err)
     res.status(500).json({ error: 'Internal server error' })

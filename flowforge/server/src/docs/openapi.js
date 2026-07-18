@@ -547,6 +547,63 @@ const spec = {
         },
       },
     },
+    '/workflows/{workflowId}/lint': {
+      post: {
+        tags: ['workflows'],
+        summary: 'Lint a workflow (CI gate)',
+        description:
+          'Static analysis with the same rules and severity contract as the ' +
+          'app’s Issues panel: cycles, dangling edges, missing required ' +
+          'config, broken FXL expressions, references to unknown ' +
+          '`{{secrets.*}}` / `{{vars.*}}` names, undeployed sub-workflow ' +
+          'targets. With an empty body the stored graph is linted; with ' +
+          '`{ graph_data }` that document is linted instead — against the ' +
+          'workspace’s *real* context, so a pipeline can vet an exported ' +
+          'file before importing it. `ok` (no errors) is the gate; ' +
+          'warnings ride along. Requires the `read` scope. ' +
+          '`flowforge lint <id> [file]` wraps this.',
+        operationId: 'lintWorkflow',
+        parameters: [{ $ref: '#/components/parameters/WorkflowId' }],
+        requestBody: {
+          required: false,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                properties: {
+                  graph_data: {
+                    type: 'object',
+                    required: ['nodes', 'edges'],
+                    properties: {
+                      nodes: { type: 'array', items: { type: 'object' } },
+                      edges: { type: 'array', items: { type: 'object' } },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          200: {
+            description: 'The lint report (`ok` is the gate).',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/LintReport' },
+              },
+            },
+          },
+          400: {
+            description: 'Malformed or oversized graph_data.',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } },
+          },
+          401: { $ref: '#/components/responses/Unauthorized' },
+          403: { $ref: '#/components/responses/Forbidden' },
+          404: { $ref: '#/components/responses/NotFound' },
+          429: { $ref: '#/components/responses/RateLimited' },
+        },
+      },
+    },
     '/workflows/{workflowId}/tests/run': {
       post: {
         tags: ['workflows'],
@@ -1233,6 +1290,40 @@ const spec = {
             type: 'array',
             items: { type: 'string', format: 'date-time' },
             description: 'Upcoming fire times, UTC ISO-8601, oldest first.',
+          },
+        },
+      },
+      LintReport: {
+        type: 'object',
+        properties: {
+          workflowId: { type: 'string' },
+          ok: {
+            type: 'boolean',
+            description: 'True when the graph has no error-severity issues — the CI gate.',
+          },
+          issues: {
+            type: 'array',
+            description: 'Errors first, then warnings.',
+            items: {
+              type: 'object',
+              properties: {
+                severity: { type: 'string', enum: ['error', 'warning'] },
+                code: { type: 'string', example: 'unknown-secret' },
+                message: { type: 'string' },
+                nodeId: {
+                  type: 'string',
+                  nullable: true,
+                  description: 'Null for graph-level problems (cycles, dangling edges).',
+                },
+              },
+            },
+          },
+          summary: {
+            type: 'object',
+            properties: {
+              errors: { type: 'integer' },
+              warnings: { type: 'integer' },
+            },
           },
         },
       },
