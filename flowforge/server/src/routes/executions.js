@@ -9,6 +9,7 @@ const { computeCriticalPath } = require('../services/criticalPath')
 const { compareRuns } = require('../services/runComparison')
 const { isValidPriority, resolvePriority, enqueueOpts } = require('../services/runPriority')
 const { forbidViewer } = require('../services/workspaceRoles')
+const { isPaused, PAUSED_ERROR } = require('../services/workflowPause')
 
 const router = express.Router()
 
@@ -61,6 +62,10 @@ router.post('/workflows/:id/execute', auth, async (req, res) => {
     if (requested != null && !isValidPriority(requested)) {
       return res.status(400).json({ error: 'priority must be "high", "normal", or "low"' })
     }
+
+    // The kill switch beats capacity: a paused workflow refuses the run
+    // before the concurrency gate is even consulted.
+    if (isPaused(workflow)) return res.status(409).json({ error: PAUSED_ERROR })
 
     // 'reject' concurrency policy: refuse the submission at the cap so the
     // caller finds out now rather than watching a run sit queued.
@@ -284,8 +289,10 @@ router.post('/executions/:id/replay', auth, async (req, res) => {
     // fires real actions; any other run replays for real as 'replay'.
     const isDryRun = original.trigger_type === 'dry-run'
 
-    // Real replays count toward the workflow's concurrency cap like any run.
+    // Real replays start real runs, so the pause switch and the concurrency
+    // cap both apply; a dry-run replay stays exempt from both, like any dry run.
     if (!isDryRun) {
+      if (isPaused(workflow)) return res.status(409).json({ error: PAUSED_ERROR })
       const admission = admitRun(workflow)
       if (!admission.ok) return res.status(409).json({ error: admission.error })
     }
@@ -360,8 +367,10 @@ router.post('/executions/:id/resume', auth, async (req, res) => {
     // must never fire real actions.
     const isDryRun = original.trigger_type === 'dry-run'
 
-    // A resume starts a run; it counts toward the concurrency cap like any run.
+    // A resume starts a run; the pause switch and the concurrency cap both
+    // apply like they do to any real run.
     if (!isDryRun) {
+      if (isPaused(workflow)) return res.status(409).json({ error: PAUSED_ERROR })
       const admission = admitRun(workflow)
       if (!admission.ok) return res.status(409).json({ error: admission.error })
     }

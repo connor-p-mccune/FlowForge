@@ -11,6 +11,8 @@ const { admitRun } = require('../services/concurrencyGate')
 const { resolvePriority, enqueueOpts } = require('../services/runPriority')
 const { analyze, evaluateBoolean, ExpressionError } = require('../services/expression')
 const { forbidViewer } = require('../services/workspaceRoles')
+const { isPaused } = require('../services/workflowPause')
+const { recordPausedSkip } = require('../services/metrics')
 
 const router = express.Router()
 
@@ -177,6 +179,16 @@ router.post('/webhooks/:key', webhookLimiter, async (req, res) => {
     // record persisted on the execution row, so the run can later be replayed
     // with identical input.
     const triggerData = req.body && typeof req.body === 'object' ? req.body : {}
+
+    // Paused workflow: acknowledge without firing — from the sender's side
+    // the delivery succeeded, and a 4xx would make well-behaved senders
+    // retry a door that is deliberately closed. Checked after signature
+    // verification (a forgery must not learn the workflow's state) and
+    // before the filter (the kill switch shouldn't run user expressions).
+    if (isPaused(workflow)) {
+      recordPausedSkip('webhook')
+      return res.status(202).json({ accepted: false, reason: 'paused' })
+    }
 
     // Gate expression: an FXL predicate over the delivery body decides
     // whether this delivery fires at all. Checked after signature

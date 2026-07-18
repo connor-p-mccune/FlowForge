@@ -21,6 +21,8 @@ const db = require('../config/database')
 const { getExecutionQueue } = require('../config/queue')
 const { admitRun } = require('./concurrencyGate')
 const { resolvePriority, enqueueOpts } = require('./runPriority')
+const { isPaused } = require('./workflowPause')
+const { recordPausedSkip } = require('./metrics')
 
 // The failure context handed to the handler as its trigger payload. The run's
 // error lives on its failed step (the engine persists no run-level error
@@ -68,6 +70,13 @@ async function triggerErrorHandler(executionId) {
       console.error(
         `Error handler for "${workflow.name}" skipped: target workflow is not deployed`
       )
+      return null
+    }
+    // A paused handler doesn't launch — the pause switch closes every entry
+    // point, and escalation is an entry point like any other.
+    if (isPaused(handler)) {
+      recordPausedSkip('error-handler')
+      console.error(`Error handler for "${workflow.name}" skipped: handler workflow is paused`)
       return null
     }
     const { nodes } = JSON.parse(handler.graph_json)

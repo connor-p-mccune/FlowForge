@@ -20,6 +20,8 @@ const redis = require('../config/redis')
 const { getExecutionQueue } = require('../config/queue')
 const { admitRun } = require('../services/concurrencyGate')
 const { resolvePriority, enqueueOpts } = require('./runPriority')
+const { isPaused } = require('./workflowPause')
+const { recordPausedSkip } = require('./metrics')
 
 // workflowId -> { task, cron } for every currently-registered schedule.
 const activeTasks = new Map()
@@ -50,6 +52,14 @@ async function runScheduledExecution(workflowId) {
   try {
     const workflow = db.prepare('SELECT * FROM workflows WHERE id = ?').get(workflowId)
     if (!workflow || workflow.status !== 'deployed') return
+
+    // Paused workflow: drop the tick. The cron job stays registered — pause
+    // is a temporary switch, not an undeploy — so the next tick after resume
+    // fires normally, and nothing skipped is retroactively run.
+    if (isPaused(workflow)) {
+      recordPausedSkip('schedule')
+      return
+    }
 
     let nodes = []
     try {

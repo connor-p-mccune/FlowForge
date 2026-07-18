@@ -28,6 +28,7 @@ const { searchWorkflows } = require('../services/workflowSearch')
 const { diffGraphs, presentDiff } = require('../services/graphDiff')
 const { lintGraph } = require('../services/workflowLinter')
 const { forbidViewer } = require('../services/workspaceRoles')
+const { isPaused, PAUSED_ERROR } = require('../services/workflowPause')
 
 const router = express.Router()
 
@@ -228,9 +229,12 @@ router.post('/workflows/:id/trigger', tokenAuth('trigger'), async (req, res) => 
       }
     }
 
+    // The kill switch, then the cap — both checked after the idempotency
+    // replay above on purpose: a retried request whose original landed before
+    // the pause must still get its original run back, never a spurious 409.
+    if (isPaused(workflow)) return res.status(409).json({ error: PAUSED_ERROR })
+
     // 'reject' concurrency policy: refuse at the cap so the caller learns now.
-    // Checked after the idempotency replay above on purpose — a retried request
-    // whose original landed must still get its original run back.
     const admission = admitRun(workflow)
     if (!admission.ok) return res.status(409).json({ error: admission.error })
 
@@ -727,8 +731,10 @@ router.post('/executions/:id/resume', tokenAuth('trigger'), async (req, res) => 
     }
     const isDryRun = original.trigger_type === 'dry-run'
 
-    // A resume starts a run; it counts toward the concurrency cap like any run.
+    // A resume starts a run; the pause switch and the concurrency cap both
+    // apply like they do to any real run.
     if (!isDryRun) {
+      if (isPaused(workflow)) return res.status(409).json({ error: PAUSED_ERROR })
       const admission = admitRun(workflow)
       if (!admission.ok) return res.status(409).json({ error: admission.error })
     }

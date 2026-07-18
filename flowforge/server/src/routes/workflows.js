@@ -12,6 +12,7 @@ const { lintGraph } = require('../services/workflowLinter')
 const stepCache = require('../services/stepCache')
 const { isValidPriority } = require('../services/runPriority')
 const { forbidViewer } = require('../services/workspaceRoles')
+const { pauseWorkflow, resumeWorkflow } = require('../services/workflowPause')
 const {
   getRunner,
   loadWorkspaceSecrets,
@@ -393,6 +394,44 @@ router.post('/workflows/:id/archive', auth, (req, res) => {
 
     const updated = db.prepare('SELECT * FROM workflows WHERE id = ?').get(req.params.id)
     res.json({ workflow: updated })
+  } catch (err) {
+    console.error(err)
+    res.status(500).json({ error: 'Internal server error' })
+  }
+})
+
+// POST /api/workflows/:id/pause — the operational kill switch: while paused,
+// no new real run starts anywhere (manual, public API, webhook, schedule,
+// error-handler escalation). In-flight runs settle normally — interrupting
+// half-done work is cancellation's job — and dry runs stay allowed, because
+// whoever paused the workflow is usually the person debugging it. Idempotent:
+// pausing twice is safe and keeps the first pause's audit trail.
+router.post('/workflows/:id/pause', auth, (req, res) => {
+  try {
+    const workflow = db.prepare('SELECT * FROM workflows WHERE id = ?').get(req.params.id)
+    if (!workflow || !isMember(workflow.workspace_id, req.user.id)) {
+      return res.status(404).json({ error: 'Workflow not found' })
+    }
+    if (forbidViewer(res, workflow.workspace_id, req.user.id)) return
+    res.json({ workflow: pauseWorkflow(workflow, req.user.id) })
+  } catch (err) {
+    console.error(err)
+    res.status(500).json({ error: 'Internal server error' })
+  }
+})
+
+// POST /api/workflows/:id/resume — release the kill switch. Idempotent, like
+// pause. Queued runs that were admitted before the pause proceed unchanged;
+// nothing skipped while paused is retroactively fired (a schedule's next tick
+// and a webhook's next delivery just work again).
+router.post('/workflows/:id/resume', auth, (req, res) => {
+  try {
+    const workflow = db.prepare('SELECT * FROM workflows WHERE id = ?').get(req.params.id)
+    if (!workflow || !isMember(workflow.workspace_id, req.user.id)) {
+      return res.status(404).json({ error: 'Workflow not found' })
+    }
+    if (forbidViewer(res, workflow.workspace_id, req.user.id)) return
+    res.json({ workflow: resumeWorkflow(workflow, req.user.id) })
   } catch (err) {
     console.error(err)
     res.status(500).json({ error: 'Internal server error' })

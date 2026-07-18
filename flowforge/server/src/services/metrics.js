@@ -211,6 +211,19 @@ const stepCacheEvents = counter(
   ['event']
 )
 
+// Workflow pause (services/workflowPause.js). Counts run starts skipped on
+// the *unattended* entry points while a workflow was paused — webhook
+// deliveries acknowledged without firing, schedule ticks dropped,
+// error-handler escalations not launched. Interactive refusals (manual/API
+// 409s) aren't counted: the caller was told directly; here the counter is
+// the only witness, and a climbing rate means a paused workflow is still
+// receiving traffic someone should redirect or resume.
+const pausedSkips = counter(
+  'flowforge_paused_skips_total',
+  'Run starts skipped because the workflow was paused, by entry point.',
+  ['source']
+)
+
 const processUptime = gauge('process_uptime_seconds', 'Process uptime in seconds.')
 const processMemory = gauge(
   'process_resident_memory_bytes',
@@ -268,6 +281,12 @@ function recordStepCache(event) {
   stepCacheEvents.inc({ event })
 }
 
+// Called by the silent entry points (webhook, schedule, error-handler) when a
+// paused workflow made them skip a run start.
+function recordPausedSkip(source) {
+  pausedSkips.inc({ source })
+}
+
 module.exports = {
   counter,
   gauge,
@@ -281,6 +300,7 @@ module.exports = {
   recordSlaBreach,
   recordHeartbeatMissed,
   recordStepCache,
+  recordPausedSkip,
   queueJobs,
   webhookPending,
 }

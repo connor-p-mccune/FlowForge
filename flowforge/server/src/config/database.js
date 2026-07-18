@@ -143,6 +143,14 @@ ensureColumn('executions', 'priority', 'TEXT')
 ensureColumn('workflows', 'heartbeat_interval_minutes', 'INTEGER')
 ensureColumn('workflows', 'heartbeat_alerted_at', 'TEXT')
 
+// Workflow pause (services/workflowPause.js): paused_at is the operational
+// kill switch — while set, no new real run starts anywhere (manual, public
+// API, webhook, schedule, error-handler escalation); in-flight runs settle
+// normally and dry runs stay allowed. paused_by keeps who pulled the switch
+// for the audit trail. NULL = active.
+ensureColumn('workflows', 'paused_at', 'TEXT')
+ensureColumn('workflows', 'paused_by', 'TEXT REFERENCES users(id)')
+
 // Two-factor authentication (TOTP). Optional, opt-in per user. totp_enabled stays
 // 0 until the user verifies a code from their authenticator, so a half-finished
 // setup never locks them out of login. totp_backup_codes is a JSON array of
