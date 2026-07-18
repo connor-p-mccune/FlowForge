@@ -168,6 +168,50 @@ flowforge export 6f0c… > workflows/sync.json      # on staging
 flowforge import $PROD_WS workflows/sync.json     # on prod
 ```
 
+### Detect drift against an exported document
+
+The check the export/import loop leaves open: is the deployed workflow still
+what the file in git says it is?
+
+```bash
+curl -s -X POST https://your-flowforge-host/api/v1/workflows/6f0c…/diff \
+  -H "Authorization: Bearer $FLOWFORGE_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d @workflows/nightly-sync.json
+```
+
+The body is an export document (only `graph_data` is read). The report reads
+from the **document's perspective** — `addedNodes` exist live but not in the
+file — and `identical` is the gate. Nodes match by id with canvas position
+ignored (moving a node is not drift); edges match by their
+(source, target, sourceHandle) triple, so a re-created but equivalent
+connection isn't churn.
+
+Response `200`:
+
+```json
+{
+  "workflowId": "6f0c…",
+  "identical": false,
+  "addedNodes": [],
+  "removedNodes": [{ "id": "o1", "type": "output-log", "label": "Log result" }],
+  "changedNodes": [
+    { "id": "h1", "type": "action-http", "label": "Fetch", "changes": ["config.url"] }
+  ],
+  "addedEdges": [],
+  "removedEdges": [
+    { "source": "h1", "target": "o1", "sourceHandle": null, "description": "Fetch → Log result" }
+  ],
+  "summary": { "addedNodes": 0, "removedNodes": 1, "changedNodes": 1, "addedEdges": 0, "removedEdges": 1 }
+}
+```
+
+Returns `400` for a body without `graph_data.nodes/edges`, `413` past the
+500KB cap. Requires the `read` scope — the diff changes nothing. From the
+CLI, `flowforge diff <id> <file>` wraps this and exits non-zero on drift, so
+CI can fail a pipeline that's about to run against a workflow nobody
+re-exported.
+
 ### Trigger a workflow
 
 ```bash

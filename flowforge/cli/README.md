@@ -45,6 +45,7 @@ export FLOWFORGE_TOKEN=ffp_…
 | `flowforge export <id>` | Print the workflow's portable JSON to stdout — `flowforge export <id> > workflows/sync.json` checks it into git |
 | `flowforge workspaces` | List workspaces visible to the token (the ID column is what `import` takes) |
 | `flowforge import <ws-id> <file> [--name "…"]` | Create a draft workflow from an exported file — promote definitions between environments (needs the `manage` scope) |
+| `flowforge diff <id> <file>` | Compare the **live** workflow against an exported file — exits non-zero on drift, so CI catches the promotion someone forgot (or the hand-edit someone made) |
 | `flowforge search <query> [--limit N]` | Find workflows by name **or by what's inside them** — node labels, config strings, sticky notes ([docs](../docs/API.md#search-workflows)) |
 | `flowforge trigger <id> [--data <json>] [--key <k>] [--priority high\|normal\|low] [--watch]` | Start a run; `--key` sets an [`Idempotency-Key`](../docs/API.md#trigger-a-workflow) so retries are safe; `--priority` picks the queue lane |
 | `flowforge runs <id> [--limit N]` | A workflow's recent runs |
@@ -75,6 +76,25 @@ each step transition once. `NO_COLOR=1` (or piping stdout) disables colors.
 
 Using the CI run id as the idempotency key means a re-run of the job can
 never double-trigger the workflow.
+
+## Gate a deploy on definition drift
+
+If workflow definitions live in git (`flowforge export` → code review →
+`flowforge import`), `diff` is the check that the loop actually closed: it
+compares the live workflow against the file and exits non-zero when they
+differ — a promotion that never ran, or a hand-edit made in the app that
+nobody exported back.
+
+```yaml
+- run: npx --prefix cli flowforge diff $WORKFLOW_ID workflows/sync.json
+  env:
+    FLOWFORGE_URL: ${{ vars.FLOWFORGE_URL }}
+    FLOWFORGE_TOKEN: ${{ secrets.FLOWFORGE_TOKEN }}
+```
+
+The report reads from the file's perspective (`+` exists live only, `-` is in
+the file but gone live, `~` changed), and moving nodes around the canvas is
+not drift — only meaningful changes count.
 
 ## Gate a deploy on workflow health
 

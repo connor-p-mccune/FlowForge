@@ -158,7 +158,12 @@ order while streaming live progress back to every collaborator on the canvas.
   and `flowforge import <ws-id> sync.json` close the GitOps loop: definitions
   live in git, get diffs and code review, and CI **promotes them between
   environments** under a dedicated `manage` token scope (imports land as
-  drafts — deploying stays a deliberate act).
+  drafts — deploying stays a deliberate act). And because a loop can silently
+  come apart, **drift detection** closes the check: `flowforge diff <id>
+  sync.json` (or `POST /api/v1/workflows/:id/diff`) compares the live
+  workflow against the file and exits non-zero when they differ — the
+  promotion someone forgot, or the hand-edit someone made in production —
+  with node moves ignored, so only meaningful changes count.
 - **Status badges** — mint a per-workflow badge token and embed a live SVG of
   its latest run status (passing / failing / running) in a README or dashboard,
   just like a CI badge — hand-rendered, cached, and revocable by rotating the
