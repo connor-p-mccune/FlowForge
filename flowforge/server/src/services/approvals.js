@@ -5,9 +5,11 @@
 
 const db = require('../config/database')
 const { logEvent } = require('./activityService')
+const { canEdit } = require('./workspaceRoles')
 
 // Settle a pending approval as `userId`. Returns one of:
 //   { outcome: 'not-found' }                       unknown id or not a member
+//   { outcome: 'forbidden' }                       member, but a viewer
 //   { outcome: 'conflict', status }                already settled
 //   { outcome: 'responded', approval }             row incl. responded_by_name
 function respondToApproval(approvalId, userId, { decision, note } = {}) {
@@ -17,6 +19,10 @@ function respondToApproval(approvalId, userId, { decision, note } = {}) {
     'SELECT 1 FROM workspace_members WHERE workspace_id = ? AND user_id = ?'
   ).get(approval.workspace_id, userId)
   if (!member) return { outcome: 'not-found' }
+  // Settling a gate routes a production run — a state change, so viewers may
+  // see the inbox but not decide it. Checked here (not per route) so the
+  // session API and the public API can't drift.
+  if (!canEdit(approval.workspace_id, userId)) return { outcome: 'forbidden' }
 
   const status = decision === 'approve' ? 'approved' : 'rejected'
   const trimmedNote = typeof note === 'string' && note.trim() ? note.trim().slice(0, 500) : null

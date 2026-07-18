@@ -3,6 +3,7 @@ const { v4: uuidv4 } = require('uuid')
 const db = require('../config/database')
 const auth = require('../middleware/auth')
 const { validate } = require('../middleware/validate')
+const { forbidViewer } = require('../services/workspaceRoles')
 
 const router = express.Router()
 
@@ -66,6 +67,7 @@ router.post(
       if (!isMember(req.params.wsId, req.user.id)) {
         return res.status(404).json({ error: 'Workspace not found' })
       }
+      if (forbidViewer(res, req.params.wsId, req.user.id)) return
       const { templateId, name } = req.body
 
       const template = db.prepare('SELECT * FROM templates WHERE id = ?').get(templateId)

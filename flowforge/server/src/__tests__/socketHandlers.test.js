@@ -6,9 +6,11 @@ const { v4: uuidv4 } = require('uuid')
 const db = require('../config/database')
 const registerHandlers = require('../socket/handlers')
 
-// A workspace with one member, an outsider who is NOT a member, and one workflow
-// in that workspace — enough to prove join/relay are gated on membership.
+// A workspace with one member, one viewer, an outsider who is NOT a member,
+// and one workflow in that workspace — enough to prove join/relay are gated
+// on membership and that viewers relay nothing.
 const memberId = uuidv4()
+const viewerId = uuidv4()
 const outsiderId = uuidv4()
 const workspaceId = uuidv4()
 const workflowId = uuidv4()
@@ -20,13 +22,16 @@ beforeAll(() => {
     'INSERT INTO users (id, email, password_hash, display_name, created_at) VALUES (?, ?, ?, ?, ?)'
   )
   user.run(memberId, 'member@example.com', 'x', 'Member', now)
+  user.run(viewerId, 'viewer@example.com', 'x', 'Viewer', now)
   user.run(outsiderId, 'outsider@example.com', 'x', 'Outsider', now)
   db.prepare(
     'INSERT INTO workspaces (id, name, created_by, created_at, updated_at) VALUES (?, ?, ?, ?, ?)'
   ).run(workspaceId, 'WS', memberId, now, now)
-  db.prepare(
+  const membership = db.prepare(
     'INSERT INTO workspace_members (workspace_id, user_id, role, joined_at) VALUES (?, ?, ?, ?)'
-  ).run(workspaceId, memberId, 'owner', now)
+  )
+  membership.run(workspaceId, memberId, 'owner', now)
+  membership.run(workspaceId, viewerId, 'viewer', now)
   db.prepare(
     'INSERT INTO workflows (id, workspace_id, name, created_by, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)'
   ).run(workflowId, workspaceId, 'WF', memberId, now, now)
@@ -117,6 +122,25 @@ describe('socket relay events require room membership', () => {
     handlers['join-workflow']({ workflowId })
     handlers['node-change']({ workflowId, action: 'update', node: { id: 'n1' }, ts: 2 })
     expect(roomEmits).toContainEqual(expect.objectContaining({ room, event: 'remote-node' }))
+  })
+
+  it('a viewer joins and is seen, but their graph edits are dropped', () => {
+    const { socket, handlers, roomEmits } = makeSocket(viewerId)
+    registerHandlers(socket, makeIo())
+
+    handlers['join-workflow']({ workflowId })
+    expect(socket.rooms.has(room)).toBe(true)
+    expect(roomEmits).toContainEqual(expect.objectContaining({ room, event: 'user-joined' }))
+
+    // Read-only holds at the socket layer too: node/edge events vanish…
+    handlers['node-change']({ workflowId, action: 'update', node: { id: 'n1' }, ts: 1 })
+    handlers['edge-change']({ workflowId, action: 'add', edge: { id: 'e1' }, ts: 1 })
+    expect(roomEmits.some((e) => e.event === 'remote-node')).toBe(false)
+    expect(roomEmits.some((e) => e.event === 'remote-edge')).toBe(false)
+
+    // …while presence (cursor) still relays — watching is the role.
+    handlers['cursor-move']({ workflowId, x: 3, y: 4 })
+    expect(roomEmits).toContainEqual(expect.objectContaining({ room, event: 'remote-cursor' }))
   })
 
   it('drops cursor/edge events from a socket that never joined', () => {

@@ -11,6 +11,7 @@ const activityService = require('../services/activityService')
 const { lintGraph } = require('../services/workflowLinter')
 const stepCache = require('../services/stepCache')
 const { isValidPriority } = require('../services/runPriority')
+const { forbidViewer } = require('../services/workspaceRoles')
 const {
   getRunner,
   loadWorkspaceSecrets,
@@ -101,6 +102,7 @@ router.post('/workspaces/:wsId/workflows', auth, validate(workflowRule), (req, r
     if (!isMember(req.params.wsId, req.user.id)) {
       return res.status(404).json({ error: 'Workspace not found' })
     }
+    if (forbidViewer(res, req.params.wsId, req.user.id)) return
     const { name, description } = req.body
 
     const id = uuidv4()
@@ -129,6 +131,7 @@ router.post('/workspaces/:wsId/workflows/import', auth, validate(importRule), (r
     if (!isMember(req.params.wsId, req.user.id)) {
       return res.status(404).json({ error: 'Workspace not found' })
     }
+    if (forbidViewer(res, req.params.wsId, req.user.id)) return
     const { name, graph_data } = req.body
     if (!Array.isArray(graph_data.nodes) || !Array.isArray(graph_data.edges)) {
       return res.status(400).json({ error: 'graph_data must include nodes and edges arrays' })
@@ -277,6 +280,7 @@ router.put('/workflows/:id', auth, validate(workflowRule), (req, res) => {
     if (!workflow || !isMember(workflow.workspace_id, req.user.id)) {
       return res.status(404).json({ error: 'Workflow not found' })
     }
+    if (forbidViewer(res, workflow.workspace_id, req.user.id)) return
     const { name, description } = req.body
 
     const concurrencyError = validateConcurrency(req.body)
@@ -334,6 +338,7 @@ router.put('/workflows/:id/graph', auth, validate(graphRule), (req, res) => {
     if (!workflow || !isMember(workflow.workspace_id, req.user.id)) {
       return res.status(404).json({ error: 'Workflow not found' })
     }
+    if (forbidViewer(res, workflow.workspace_id, req.user.id)) return
     const { nodes, edges } = req.body
 
     const graphJson = JSON.stringify({ nodes, edges })
@@ -358,6 +363,7 @@ router.delete('/workflows/:id', auth, (req, res) => {
     if (!workflow || !isMember(workflow.workspace_id, req.user.id)) {
       return res.status(404).json({ error: 'Workflow not found' })
     }
+    if (forbidViewer(res, workflow.workspace_id, req.user.id)) return
     db.prepare('DELETE FROM workflows WHERE id = ?').run(req.params.id)
     // Stop any active cron schedule for this (now-gone) workflow.
     scheduler.unregisterSchedule(req.params.id)
@@ -379,6 +385,7 @@ router.post('/workflows/:id/archive', auth, (req, res) => {
     if (!workflow || !isMember(workflow.workspace_id, req.user.id)) {
       return res.status(404).json({ error: 'Workflow not found' })
     }
+    if (forbidViewer(res, workflow.workspace_id, req.user.id)) return
     const now = new Date().toISOString()
     db.prepare("UPDATE workflows SET status = 'archived', updated_at = ? WHERE id = ?")
       .run(now, req.params.id)
@@ -424,6 +431,7 @@ router.delete('/workflows/:id/cache', auth, (req, res) => {
     if (!workflow || !isMember(workflow.workspace_id, req.user.id)) {
       return res.status(404).json({ error: 'Workflow not found' })
     }
+    if (forbidViewer(res, workflow.workspace_id, req.user.id)) return
     const cleared = stepCache.clearWorkflow(req.params.id)
     res.json({ cleared })
   } catch (err) {
@@ -531,6 +539,7 @@ router.post('/workflows/:id/test-node', auth, async (req, res) => {
     if (!workflow || !isMember(workflow.workspace_id, req.user.id)) {
       return res.status(404).json({ error: 'Workflow not found' })
     }
+    if (forbidViewer(res, workflow.workspace_id, req.user.id)) return
 
     const { node, input, context, live } = req.body || {}
     if (!node || typeof node !== 'object' || typeof node.type !== 'string') {
@@ -651,6 +660,7 @@ router.post('/workflows/:id/badge-token', auth, (req, res) => {
     if (!workflow || !isMember(workflow.workspace_id, req.user.id)) {
       return res.status(404).json({ error: 'Workflow not found' })
     }
+    if (forbidViewer(res, workflow.workspace_id, req.user.id)) return
     const token = crypto.randomBytes(24).toString('base64url')
     db.prepare('UPDATE workflows SET badge_token = ? WHERE id = ?').run(token, workflow.id)
     res.status(201).json({ badgeToken: token })
@@ -668,6 +678,7 @@ router.delete('/workflows/:id/badge-token', auth, (req, res) => {
     if (!workflow || !isMember(workflow.workspace_id, req.user.id)) {
       return res.status(404).json({ error: 'Workflow not found' })
     }
+    if (forbidViewer(res, workflow.workspace_id, req.user.id)) return
     db.prepare('UPDATE workflows SET badge_token = NULL WHERE id = ?').run(workflow.id)
     res.status(204).end()
   } catch (err) {
@@ -715,6 +726,7 @@ router.post('/workflows/:id/deploy', auth, (req, res) => {
     if (!workflow || !isMember(workflow.workspace_id, req.user.id)) {
       return res.status(404).json({ error: 'Workflow not found' })
     }
+    if (forbidViewer(res, workflow.workspace_id, req.user.id)) return
 
     // Validate the schedule's cron up front so deploy fails cleanly instead of
     // leaving a deployed-but-unschedulable workflow.
@@ -798,6 +810,7 @@ router.post('/workflows/:id/versions/:versionId/restore', auth, (req, res) => {
     if (!workflow || !isMember(workflow.workspace_id, req.user.id)) {
       return res.status(404).json({ error: 'Workflow not found' })
     }
+    if (forbidViewer(res, workflow.workspace_id, req.user.id)) return
     const target = db.prepare(
       'SELECT * FROM workflow_versions WHERE id = ? AND workflow_id = ?'
     ).get(req.params.versionId, req.params.id)

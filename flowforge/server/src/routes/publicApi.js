@@ -27,6 +27,7 @@ const { compareRuns } = require('../services/runComparison')
 const { searchWorkflows } = require('../services/workflowSearch')
 const { diffGraphs, presentDiff } = require('../services/graphDiff')
 const { lintGraph } = require('../services/workflowLinter')
+const { forbidViewer } = require('../services/workspaceRoles')
 
 const router = express.Router()
 
@@ -126,6 +127,10 @@ router.post('/workspaces/:id/workflows/import', tokenAuth('manage'), (req, res) 
       'SELECT 1 FROM workspace_members WHERE workspace_id = ? AND user_id = ?'
     ).get(req.params.id, req.user.id)
     if (!member) return res.status(404).json({ error: 'Workspace not found' })
+    // A token acts as its owner, so an owner who is only a viewer here stays
+    // read-only through the API too — scopes bound what a token may try,
+    // roles bound what its owner may do.
+    if (forbidViewer(res, req.params.id, req.user.id)) return
 
     const { name, graph_data: graphData } = req.body || {}
     if (typeof name !== 'string' || name.trim() === '' || name.length > 200) {
@@ -173,6 +178,7 @@ router.post('/workflows/:id/trigger', tokenAuth('trigger'), async (req, res) => 
   try {
     const workflow = getWorkflowForMember(req.params.id, req.user.id)
     if (!workflow) return res.status(404).json({ error: 'Workflow not found' })
+    if (forbidViewer(res, workflow.workspace_id, req.user.id)) return
 
     const { nodes } = JSON.parse(workflow.graph_json)
     if (!nodes || nodes.length === 0) {
@@ -505,6 +511,7 @@ router.post('/workflows/:id/tests/run', tokenAuth('trigger'), async (req, res) =
   try {
     const workflow = getWorkflowForMember(req.params.id, req.user.id)
     if (!workflow) return res.status(404).json({ error: 'Workflow not found' })
+    if (forbidViewer(res, workflow.workspace_id, req.user.id)) return
     const summary = await runSuite(workflow, { triggeredBy: req.user.id })
     res.json(summary)
   } catch (err) {
@@ -637,6 +644,9 @@ router.post('/approvals/:id/respond', tokenAuth('approve'), (req, res) => {
     if (result.outcome === 'not-found') {
       return res.status(404).json({ error: 'Approval not found' })
     }
+    if (result.outcome === 'forbidden') {
+      return res.status(403).json({ error: 'Viewers have read-only access' })
+    }
     if (result.outcome === 'conflict') {
       return res.status(409).json({ error: `Approval already ${result.status}` })
     }
@@ -662,9 +672,11 @@ router.post('/executions/:id/cancel', tokenAuth('trigger'), (req, res) => {
   try {
     const execution = db.prepare('SELECT * FROM executions WHERE id = ?').get(req.params.id)
     if (!execution) return res.status(404).json({ error: 'Execution not found' })
-    if (!getWorkflowForMember(execution.workflow_id, req.user.id)) {
+    const cancelWorkflow = getWorkflowForMember(execution.workflow_id, req.user.id)
+    if (!cancelWorkflow) {
       return res.status(404).json({ error: 'Execution not found' })
     }
+    if (forbidViewer(res, cancelWorkflow.workspace_id, req.user.id)) return
 
     const { outcome } = requestCancel(execution)
     if (outcome === 'finished') {
@@ -691,6 +703,7 @@ router.post('/executions/:id/resume', tokenAuth('trigger'), async (req, res) => 
     if (!original) return res.status(404).json({ error: 'Execution not found' })
     const workflow = getWorkflowForMember(original.workflow_id, req.user.id)
     if (!workflow) return res.status(404).json({ error: 'Execution not found' })
+    if (forbidViewer(res, workflow.workspace_id, req.user.id)) return
 
     if (original.status !== 'failed' && original.status !== 'cancelled') {
       return res.status(409).json({

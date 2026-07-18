@@ -14,18 +14,18 @@
 // events into a workflow it has no access to.
 
 const db = require('../config/database')
+const { memberRole } = require('../services/workspaceRoles')
 
-// Is `userId` a member of the workspace that owns `workflowId`? Mirrors the
-// isMember / getWorkflowForMember checks in the REST routes. Synchronous
-// (better-sqlite3), so it runs inline in the event handlers.
-function canAccessWorkflow(workflowId, userId) {
-  if (!workflowId || typeof workflowId !== 'string' || !userId) return false
+// The user's role in the workspace that owns `workflowId`, or null for a
+// non-member (or unknown workflow). Mirrors the isMember /
+// getWorkflowForMember checks in the REST routes, with the role riding along
+// so the relay can distinguish viewers. Synchronous (better-sqlite3), so it
+// runs inline in the event handlers.
+function workflowRole(workflowId, userId) {
+  if (!workflowId || typeof workflowId !== 'string' || !userId) return null
   const workflow = db.prepare('SELECT workspace_id FROM workflows WHERE id = ?').get(workflowId)
-  if (!workflow) return false
-  const member = db
-    .prepare('SELECT 1 FROM workspace_members WHERE workspace_id = ? AND user_id = ?')
-    .get(workflow.workspace_id, userId)
-  return !!member
+  if (!workflow) return null
+  return memberRole(workflow.workspace_id, userId)
 }
 
 // A socket may only relay to a room it has actually joined. Because join-workflow
@@ -64,10 +64,18 @@ module.exports = function registerHandlers(socket, io) {
     // Refuse rooms the socket's user isn't a member of. Mirrors the REST
     // 404-for-non-members: the client learns access was denied, not whether the
     // workflow exists.
-    if (!canAccessWorkflow(workflowId, socket.userId)) {
+    const role = workflowRole(workflowId, socket.userId)
+    if (!role) {
       socket.emit('workflow-access-denied', { workflowId })
       return
     }
+    // Remembered per room for the relay guards below: a viewer may watch
+    // everything the room carries, but their node/edge events are dropped —
+    // the socket layer enforces read-only exactly like the REST layer does.
+    // Captured at join (like membership itself); a role change takes effect
+    // on the next join, mirroring how a REST session sees it per request.
+    socket.workflowRoles = socket.workflowRoles || {}
+    socket.workflowRoles[workflowId] = role
     socket.join(`workflow:${workflowId}`)
     socket.emit('presence', { users: getActiveUsers(io, workflowId) })
     socket.to(`workflow:${workflowId}`).emit('user-joined', {
@@ -104,6 +112,7 @@ module.exports = function registerHandlers(socket, io) {
   // Each relay first confirms the sender is actually in the room (see inRoom).
   socket.on('node-change', ({ workflowId, action, node, ts }) => {
     if (!inRoom(socket, workflowId)) return
+    if (socket.workflowRoles?.[workflowId] === 'viewer') return
     socket.to(`workflow:${workflowId}`).emit('remote-node', {
       userId: socket.userId,
       action,
@@ -114,6 +123,7 @@ module.exports = function registerHandlers(socket, io) {
 
   socket.on('edge-change', ({ workflowId, action, edge, ts }) => {
     if (!inRoom(socket, workflowId)) return
+    if (socket.workflowRoles?.[workflowId] === 'viewer') return
     socket.to(`workflow:${workflowId}`).emit('remote-edge', {
       userId: socket.userId,
       action,

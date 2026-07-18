@@ -5,6 +5,7 @@ const auth = require('../middleware/auth')
 const { validate, EMAIL_PATTERN } = require('../middleware/validate')
 const { createNotification } = require('../services/notificationService')
 const activityService = require('../services/activityService')
+const { forbidViewer } = require('../services/workspaceRoles')
 
 const router = express.Router()
 
@@ -69,6 +70,7 @@ router.put('/workspaces/:id', auth, validate(nameRule), (req, res) => {
       'SELECT * FROM workspace_members WHERE workspace_id = ? AND user_id = ?'
     ).get(req.params.id, req.user.id)
     if (!member) return res.status(404).json({ error: 'Workspace not found' })
+    if (forbidViewer(res, req.params.id, req.user.id)) return
 
     const { name } = req.body
 
@@ -83,8 +85,44 @@ router.put('/workspaces/:id', auth, validate(nameRule), (req, res) => {
   }
 })
 
+// GET /api/workspaces/:id/members — who is in the workspace and with what
+// role. Any member (viewers included) may look: knowing who can edit is part
+// of understanding what you're looking at.
+router.get('/workspaces/:id/members', auth, (req, res) => {
+  try {
+    const requester = db.prepare(
+      'SELECT 1 FROM workspace_members WHERE workspace_id = ? AND user_id = ?'
+    ).get(req.params.id, req.user.id)
+    if (!requester) return res.status(404).json({ error: 'Workspace not found' })
+
+    const members = db.prepare(
+      `SELECT m.user_id, m.role, m.joined_at, u.display_name, u.email
+         FROM workspace_members m
+         JOIN users u ON u.id = m.user_id
+        WHERE m.workspace_id = ?
+        ORDER BY m.joined_at`
+    ).all(req.params.id)
+    res.json({
+      members: members.map((m) => ({
+        userId: m.user_id,
+        displayName: m.display_name,
+        email: m.email,
+        role: m.role,
+        joinedAt: m.joined_at,
+      })),
+    })
+  } catch (err) {
+    console.error(err)
+    res.status(500).json({ error: 'Internal server error' })
+  }
+})
+
 // POST /api/workspaces/:id/members — invite an existing user (by email) into the
-// workspace and send them an in-app notification. Any current member can invite.
+// workspace and send them an in-app notification. Any current editor can
+// invite (viewers can't grow the workspace). `role` picks what the invitee
+// may do: 'member' (default) edits, 'viewer' observes. Ownership is never
+// granted by invitation — promote via PUT .../members/:userId afterwards, so
+// handing over the keys is always its own deliberate act.
 router.post(
   '/workspaces/:id/members',
   auth,
@@ -101,6 +139,12 @@ router.post(
       ).get(req.params.id, req.user.id)
       // Same as elsewhere: don't reveal a workspace the caller can't see.
       if (!inviter) return res.status(404).json({ error: 'Workspace not found' })
+      if (forbidViewer(res, req.params.id, req.user.id)) return
+
+      const role = req.body.role === undefined ? 'member' : req.body.role
+      if (role !== 'member' && role !== 'viewer') {
+        return res.status(400).json({ error: 'role must be "member" or "viewer"' })
+      }
 
       const workspace = db.prepare('SELECT * FROM workspaces WHERE id = ?').get(req.params.id)
 
@@ -114,7 +158,7 @@ router.post(
 
       db.prepare(
         'INSERT INTO workspace_members (workspace_id, user_id, role, joined_at) VALUES (?, ?, ?, ?)'
-      ).run(req.params.id, invitee.id, 'member', new Date().toISOString())
+      ).run(req.params.id, invitee.id, role, new Date().toISOString())
 
       createNotification(invitee.id, {
         type: 'workspace-invite',
@@ -125,15 +169,66 @@ router.post(
 
       activityService.logEvent(req.params.id, req.user.id, 'member.invited', {
         type: 'member', id: invitee.id, name: invitee.display_name,
+        metadata: { role },
       })
 
-      res.status(201).json({ member: { userId: invitee.id, role: 'member' } })
+      res.status(201).json({ member: { userId: invitee.id, role } })
     } catch (err) {
       console.error(err)
       res.status(500).json({ error: 'Internal server error' })
     }
   }
 )
+
+// PUT /api/workspaces/:id/members/:userId { role } — change a member's role.
+// Owner-only, with the same last-owner guard removal has: a workspace must
+// always keep at least one owner, so demoting the last one is refused. This
+// route is also the only way to mint a new owner — invitations top out at
+// 'member' on purpose.
+router.put('/workspaces/:id/members/:userId', auth, (req, res) => {
+  try {
+    const requester = db.prepare(
+      "SELECT 1 FROM workspace_members WHERE workspace_id = ? AND user_id = ? AND role = 'owner'"
+    ).get(req.params.id, req.user.id)
+    if (!requester) return res.status(403).json({ error: 'Not authorized' })
+
+    const role = req.body?.role
+    if (!['owner', 'member', 'viewer'].includes(role)) {
+      return res.status(400).json({ error: 'role must be "owner", "member", or "viewer"' })
+    }
+
+    const target = db.prepare(
+      `SELECT m.role, u.id AS user_id, u.display_name
+         FROM workspace_members m
+         JOIN users u ON u.id = m.user_id
+        WHERE m.workspace_id = ? AND m.user_id = ?`
+    ).get(req.params.id, req.params.userId)
+    if (!target) return res.status(404).json({ error: 'Member not found' })
+
+    if (target.role === 'owner' && role !== 'owner') {
+      const { owners } = db.prepare(
+        "SELECT COUNT(*) AS owners FROM workspace_members WHERE workspace_id = ? AND role = 'owner'"
+      ).get(req.params.id)
+      if (owners <= 1) {
+        return res.status(400).json({ error: 'Cannot demote the last owner' })
+      }
+    }
+
+    db.prepare(
+      'UPDATE workspace_members SET role = ? WHERE workspace_id = ? AND user_id = ?'
+    ).run(role, req.params.id, req.params.userId)
+
+    activityService.logEvent(req.params.id, req.user.id, 'member.role_changed', {
+      type: 'member', id: target.user_id, name: target.display_name,
+      metadata: { from: target.role, to: role },
+    })
+
+    res.json({ member: { userId: target.user_id, role } })
+  } catch (err) {
+    console.error(err)
+    res.status(500).json({ error: 'Internal server error' })
+  }
+})
 
 // DELETE /api/workspaces/:id/members/:userId — remove a member. Owner-only, and
 // the workspace must keep at least one owner (you can't remove the last owner).

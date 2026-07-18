@@ -10,6 +10,7 @@ const { generateSigningSecret, verifyWebhookSignature } = require('../services/w
 const { admitRun } = require('../services/concurrencyGate')
 const { resolvePriority, enqueueOpts } = require('../services/runPriority')
 const { analyze, evaluateBoolean, ExpressionError } = require('../services/expression')
+const { forbidViewer } = require('../services/workspaceRoles')
 
 const router = express.Router()
 
@@ -70,6 +71,7 @@ router.post('/workflows/:id/webhooks', auth, validate({ name: { type: 'string', 
   try {
     const workflow = getWorkflowForMember(req.params.id, req.user.id)
     if (!workflow) return res.status(404).json({ error: 'Workflow not found' })
+    if (forbidViewer(res, workflow.workspace_id, req.user.id)) return
 
     const filter = normalizeFilter(req.body?.filterExpression)
     if (filter.error) return res.status(400).json({ error: filter.error })
@@ -100,9 +102,11 @@ router.post('/workflows/:id/webhooks', auth, validate({ name: { type: 'string', 
 router.put('/webhooks/:webhookId', auth, validate({ name: { type: 'string', maxLength: 200 } }), (req, res) => {
   try {
     const webhook = db.prepare('SELECT * FROM webhooks WHERE id = ?').get(req.params.webhookId)
-    if (!webhook || !getWorkflowForMember(webhook.workflow_id, req.user.id)) {
+    const editWorkflow = webhook && getWorkflowForMember(webhook.workflow_id, req.user.id)
+    if (!editWorkflow) {
       return res.status(404).json({ error: 'Webhook not found' })
     }
+    if (forbidViewer(res, editWorkflow.workspace_id, req.user.id)) return
 
     const name = 'name' in (req.body || {}) ? (req.body.name || null) : webhook.name
     let filterValue = webhook.filter_expression
@@ -127,9 +131,11 @@ router.delete('/webhooks/:webhookId', auth, (req, res) => {
   try {
     const webhook = db.prepare('SELECT * FROM webhooks WHERE id = ?').get(req.params.webhookId)
     if (!webhook) return res.status(404).json({ error: 'Webhook not found' })
-    if (!getWorkflowForMember(webhook.workflow_id, req.user.id)) {
+    const deleteWorkflow = getWorkflowForMember(webhook.workflow_id, req.user.id)
+    if (!deleteWorkflow) {
       return res.status(404).json({ error: 'Webhook not found' })
     }
+    if (forbidViewer(res, deleteWorkflow.workspace_id, req.user.id)) return
     db.prepare('DELETE FROM webhooks WHERE id = ?').run(req.params.webhookId)
     res.status(204).end()
   } catch (err) {

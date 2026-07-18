@@ -8,6 +8,7 @@ const { admitRun } = require('../services/concurrencyGate')
 const { computeCriticalPath } = require('../services/criticalPath')
 const { compareRuns } = require('../services/runComparison')
 const { isValidPriority, resolvePriority, enqueueOpts } = require('../services/runPriority')
+const { forbidViewer } = require('../services/workspaceRoles')
 
 const router = express.Router()
 
@@ -49,6 +50,7 @@ router.post('/workflows/:id/execute', auth, async (req, res) => {
   try {
     const workflow = getWorkflowForMember(req.params.id, req.user.id)
     if (!workflow) return res.status(404).json({ error: 'Workflow not found' })
+    if (forbidViewer(res, workflow.workspace_id, req.user.id)) return
 
     const { nodes } = JSON.parse(workflow.graph_json)
     if (!nodes || nodes.length === 0) {
@@ -92,6 +94,7 @@ router.post('/workflows/:id/test', auth, async (req, res) => {
   try {
     const workflow = getWorkflowForMember(req.params.id, req.user.id)
     if (!workflow) return res.status(404).json({ error: 'Workflow not found' })
+    if (forbidViewer(res, workflow.workspace_id, req.user.id)) return
 
     const { nodes } = JSON.parse(workflow.graph_json)
     if (!nodes || nodes.length === 0) {
@@ -227,9 +230,11 @@ router.post('/executions/:id/cancel', auth, (req, res) => {
   try {
     const execution = db.prepare('SELECT * FROM executions WHERE id = ?').get(req.params.id)
     if (!execution) return res.status(404).json({ error: 'Execution not found' })
-    if (!getWorkflowForMember(execution.workflow_id, req.user.id)) {
+    const cancelWorkflow = getWorkflowForMember(execution.workflow_id, req.user.id)
+    if (!cancelWorkflow) {
       return res.status(404).json({ error: 'Execution not found' })
     }
+    if (forbidViewer(res, cancelWorkflow.workspace_id, req.user.id)) return
 
     const { outcome } = requestCancel(execution)
     if (outcome === 'finished') {
@@ -255,6 +260,7 @@ router.post('/executions/:id/replay', auth, async (req, res) => {
     // Reuse the same membership gate as the detail route — non-members get 404.
     const workflow = getWorkflowForMember(original.workflow_id, req.user.id)
     if (!workflow) return res.status(404).json({ error: 'Execution not found' })
+    if (forbidViewer(res, workflow.workspace_id, req.user.id)) return
 
     const { nodes } = JSON.parse(workflow.graph_json)
     if (!nodes || nodes.length === 0) {
@@ -325,6 +331,7 @@ router.post('/executions/:id/resume', auth, async (req, res) => {
 
     const workflow = getWorkflowForMember(original.workflow_id, req.user.id)
     if (!workflow) return res.status(404).json({ error: 'Execution not found' })
+    if (forbidViewer(res, workflow.workspace_id, req.user.id)) return
 
     if (original.status !== 'failed' && original.status !== 'cancelled') {
       return res.status(409).json({

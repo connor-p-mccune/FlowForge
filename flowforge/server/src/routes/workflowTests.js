@@ -10,6 +10,7 @@ const db = require('../config/database')
 const auth = require('../middleware/auth')
 const { check } = require('../services/expression')
 const { runScenario, runSuite } = require('../services/workflowTester')
+const { forbidViewer } = require('../services/workspaceRoles')
 
 const router = express.Router()
 
@@ -105,6 +106,7 @@ router.post('/workflows/:id/tests', auth, (req, res) => {
   try {
     const workflow = getVisibleWorkflow(req.params.id, req.user.id)
     if (!workflow) return res.status(404).json({ error: 'Workflow not found' })
+    if (forbidViewer(res, workflow.workspace_id, req.user.id)) return
     const parsed = validateBody(req.body)
     if (parsed.error) return res.status(400).json({ error: parsed.error })
 
@@ -127,6 +129,7 @@ router.put('/workflows/:id/tests/:testId', auth, (req, res) => {
   try {
     const workflow = getVisibleWorkflow(req.params.id, req.user.id)
     if (!workflow) return res.status(404).json({ error: 'Workflow not found' })
+    if (forbidViewer(res, workflow.workspace_id, req.user.id)) return
     const existing = db.prepare(
       'SELECT * FROM workflow_tests WHERE id = ? AND workflow_id = ?'
     ).get(req.params.testId, workflow.id)
@@ -151,6 +154,7 @@ router.delete('/workflows/:id/tests/:testId', auth, (req, res) => {
   try {
     const workflow = getVisibleWorkflow(req.params.id, req.user.id)
     if (!workflow) return res.status(404).json({ error: 'Workflow not found' })
+    if (forbidViewer(res, workflow.workspace_id, req.user.id)) return
     const result = db.prepare(
       'DELETE FROM workflow_tests WHERE id = ? AND workflow_id = ?'
     ).run(req.params.testId, workflow.id)
@@ -167,6 +171,7 @@ router.post('/workflows/:id/tests/:testId/run', auth, async (req, res) => {
   try {
     const workflow = getVisibleWorkflow(req.params.id, req.user.id)
     if (!workflow) return res.status(404).json({ error: 'Workflow not found' })
+    if (forbidViewer(res, workflow.workspace_id, req.user.id)) return
     const scenario = db.prepare(
       'SELECT * FROM workflow_tests WHERE id = ? AND workflow_id = ?'
     ).get(req.params.testId, workflow.id)
@@ -185,6 +190,7 @@ router.post('/workflows/:id/tests/run', auth, async (req, res) => {
   try {
     const workflow = getVisibleWorkflow(req.params.id, req.user.id)
     if (!workflow) return res.status(404).json({ error: 'Workflow not found' })
+    if (forbidViewer(res, workflow.workspace_id, req.user.id)) return
     const summary = await runSuite(workflow, { triggeredBy: req.user.id })
     res.json(summary)
   } catch (err) {
