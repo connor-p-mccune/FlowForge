@@ -46,6 +46,7 @@ export FLOWFORGE_TOKEN=ffp_…
 | `flowforge workspaces` | List workspaces visible to the token (the ID column is what `import` takes) |
 | `flowforge import <ws-id> <file> [--name "…"]` | Create a draft workflow from an exported file — promote definitions between environments (needs the `manage` scope) |
 | `flowforge diff <id> <file>` | Compare the **live** workflow against an exported file — exits non-zero on drift, so CI catches the promotion someone forgot (or the hand-edit someone made) |
+| `flowforge lint <id> [file] [--strict]` | Run the app's linter as a CI gate — over the live workflow, or over an exported file against its target workspace (real secret/variable names, sub-workflow targets); exits non-zero on errors, `--strict` fails warnings too |
 | `flowforge search <query> [--limit N]` | Find workflows by name **or by what's inside them** — node labels, config strings, sticky notes ([docs](../docs/API.md#search-workflows)) |
 | `flowforge trigger <id> [--data <json>] [--key <k>] [--priority high\|normal\|low] [--watch]` | Start a run; `--key` sets an [`Idempotency-Key`](../docs/API.md#trigger-a-workflow) so retries are safe; `--priority` picks the queue lane |
 | `flowforge runs <id> [--limit N]` | A workflow's recent runs |
@@ -76,6 +77,24 @@ each step transition once. `NO_COLOR=1` (or piping stdout) disables colors.
 
 Using the CI run id as the idempotency key means a re-run of the job can
 never double-trigger the workflow.
+
+## Vet a definition before importing it
+
+`lint` runs the app's own workflow linter from the terminal. Pointed at a
+file, it checks an exported definition against the **target** workflow's
+workspace — do the `{{secrets.*}}` and `{{vars.*}}` names it references
+exist there? are its sub-workflow targets deployed? — so a broken promotion
+is caught before the import, not at the first 3am run:
+
+```yaml
+- run: npx --prefix cli flowforge lint $WORKFLOW_ID workflows/sync.json --strict
+  env:
+    FLOWFORGE_URL: ${{ vars.FLOWFORGE_URL }}
+    FLOWFORGE_TOKEN: ${{ secrets.FLOWFORGE_TOKEN }}
+```
+
+Without a file it lints the live workflow. Errors always fail the job;
+`--strict` fails warnings (unreachable nodes, half-wired branches) too.
 
 ## Gate a deploy on definition drift
 

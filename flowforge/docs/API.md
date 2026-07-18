@@ -212,6 +212,44 @@ CLI, `flowforge diff <id> <file>` wraps this and exits non-zero on drift, so
 CI can fail a pipeline that's about to run against a workflow nobody
 re-exported.
 
+### Lint a workflow
+
+The app's 🔎 Issues linter as a CI gate — same rules, same severity contract,
+with the workspace's **real context** (secret names, variable names,
+sub-workflow targets):
+
+```bash
+# Lint the workflow as deployed
+curl -s -X POST https://your-flowforge-host/api/v1/workflows/6f0c…/lint \
+  -H "Authorization: Bearer $FLOWFORGE_TOKEN"
+
+# Lint an exported file against this workflow's workspace (pre-import vetting)
+curl -s -X POST https://your-flowforge-host/api/v1/workflows/6f0c…/lint \
+  -H "Authorization: Bearer $FLOWFORGE_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d @workflows/nightly-sync.json
+```
+
+Response `200` — **`ok` is the gate** (no error-severity issues); warnings
+ride along for `--strict` consumers:
+
+```json
+{
+  "workflowId": "6f0c…",
+  "ok": false,
+  "issues": [
+    { "severity": "error", "code": "unknown-secret",
+      "message": "Fetch: secret \"STRIPE_KEY\" does not exist in this workspace", "nodeId": "h1" },
+    { "severity": "warning", "code": "unreachable-node",
+      "message": "Log result is not connected to any trigger", "nodeId": "o1" }
+  ],
+  "summary": { "errors": 1, "warnings": 1 }
+}
+```
+
+Requires the `read` scope — analysis changes nothing. From the CLI:
+`flowforge lint <id> [file] [--strict]`.
+
 ### Trigger a workflow
 
 ```bash

@@ -146,8 +146,11 @@ order while streaming live progress back to every collaborator on the canvas.
   discipline the codebase applies to itself, pointed at the workflows you build.
 - **Workflow linter** — one click checks the canvas before you run it: cycles,
   dead branches, missing config, references to nodes that aren't upstream,
-  unknown `{{secrets.*}}` names, undeployed sub-workflow targets. Click an
-  issue to jump to the offending node.
+  unknown `{{secrets.*}}` / `{{vars.*}}` names, undeployed sub-workflow
+  targets. Click an issue to jump to the offending node — or run the same
+  linter from CI: `flowforge lint <id>` gates on the live graph, and
+  `flowforge lint <id> file.json` vets an exported definition against its
+  target workspace **before** importing it.
 - **Version diffs** — every deploy snapshots the graph; the history drawer can
   preview any version, restore it (reversibly), or **diff it against the live
   canvas** — nodes added/removed, changed config fields, and rewired
