@@ -26,8 +26,12 @@ Tokens carry **scopes** chosen at creation:
 | `manage`  | Importing workflow definitions (creating draft workflows) |
 
 A token acts as its owning user: it can only see workflows in workspaces the
-owner belongs to. Tokens can be revoked at any time from Settings, and can be
-created with an expiry (1–365 days).
+owner belongs to, and it inherits the owner's **workspace role** — a token
+belonging to a workspace *viewer* is read-only there regardless of its
+scopes (a `trigger`-scoped token still gets `403` on mutating endpoints).
+Scopes bound what a token may try; roles bound what its owner may do. Tokens
+can be revoked at any time from Settings, and can be created with an expiry
+(1–365 days).
 
 Session JWTs are **not** accepted on `/api/v1`, and API tokens are not
 accepted on the session API — a leaked automation token never grants access to

@@ -260,7 +260,16 @@ order while streaming live progress back to every collaborator on the canvas.
   [docs/API.md](./docs/API.md#receiving-events-outbound-webhooks).
 - **AI suggestions** — ask the assistant for sensible next nodes based on the
   current graph.
-- **Workspaces & auth** — JWT auth, per-user workspaces, and workflow CRUD.
+- **Workspaces & auth** — JWT auth, per-user workspaces, and workflow CRUD,
+  with **three membership roles**: owners manage the workspace (members,
+  secrets, variables, deletion), members build and run workflows, and
+  **viewers observe** — they see everything, including live runs, and can
+  comment, but every state-changing operation is refused across the app, the
+  public API (a token acts as its owner, so a viewer's token is read-only
+  regardless of scopes), and the real-time collaboration layer (a viewer's
+  graph edits are dropped at the socket). Invite with
+  `role: "viewer"`; promote later — ownership is only ever granted
+  explicitly, never by invitation.
 - **Observability** — a zero-dependency Prometheus exporter at `/metrics`
   (request rates/latency by route, run outcomes and durations, queue depth,
   process stats) plus a deep readiness probe at `/api/health/ready` that

@@ -73,6 +73,31 @@ inert).
   the JWT is verified before any event handler is registered; missing/invalid
   tokens are rejected.
 
+### Workspace authorization (roles)
+
+Authorization inside a workspace is role-based (`services/workspaceRoles.js`):
+**owner** manages the workspace itself (members, secrets, variables,
+subscriptions, status pages, deletion), **member** builds and runs workflows,
+and **viewer** is read-only — full visibility (including live execution
+streams) plus commenting, with every state-changing operation refused.
+
+- **Two-layered responses, deliberately.** Non-members still get `404` on
+  everything (a workspace's existence is never disclosed), while a member
+  whose role is insufficient gets `403` — they can see the resource; the
+  *operation* is what's forbidden.
+- **Uniform across surfaces.** The same check guards the session API, the
+  public API (a token acts as its owner, so scopes bound what a token may
+  *try* and roles bound what its owner may *do* — a viewer's `trigger`-scoped
+  token cannot start runs), and the Socket.io relay (a viewer's node/edge
+  events are dropped server-side; presence still streams).
+- **Ownership is never granted by invitation.** Invites top out at `member`;
+  minting an owner is a separate owner-only role-change route with a
+  last-owner guard, and every role change lands in the activity feed.
+- Approval-gate authorization lives in the shared `services/approvals.js`, so
+  the session and public respond endpoints cannot drift.
+
+Tested in `__tests__/workspaceRoles.test.js` and the socket suite.
+
 ### Rate limiting (T2, T3)
 
 IP-based limits via `express-rate-limit` (`middleware/rateLimit.js`). On exceed:
