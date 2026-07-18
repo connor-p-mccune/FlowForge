@@ -43,6 +43,17 @@ describe('formatEvent', () => {
       .toBe('resolved a comment on My Flow')
   })
 
+  it('phrases membership role events', () => {
+    expect(formatEvent({ ...base, event_type: 'member.invited', entity_name: 'Vic', metadata: { role: 'viewer' } }))
+      .toBe('added Vic to the workspace as a viewer')
+    expect(formatEvent({ ...base, event_type: 'member.role_changed', entity_name: 'Vic', metadata: { from: 'viewer', to: 'member' } }))
+      .toBe('made Vic a member')
+    expect(formatEvent({ ...base, event_type: 'member.role_changed', entity_name: 'Vic', metadata: { from: 'member', to: 'owner' } }))
+      .toBe('made Vic a workspace owner')
+    expect(formatEvent({ ...base, event_type: 'member.role_changed', entity_name: 'Vic' }))
+      .toBe("changed Vic's role")
+  })
+
   it('phrases variable and monitor events', () => {
     expect(formatEvent({ ...base, event_type: 'variable.created', entity_name: 'API_BASE_URL' }))
       .toBe('added variable API_BASE_URL')

@@ -75,8 +75,13 @@ export function formatEvent(event) {
     case 'execution.completed': return `ran ${name}`
     case 'execution.failed': return `ran ${name} — failed`
     case 'execution.cancelled': return `stopped a run of ${name}`
-    case 'member.invited': return `added ${name} to the workspace`
+    case 'member.invited':
+      return meta.role === 'viewer'
+        ? `added ${name} to the workspace as a viewer`
+        : `added ${name} to the workspace`
     case 'member.removed': return `removed ${name} from the workspace`
+    case 'member.role_changed':
+      return meta.to ? `made ${name} a ${meta.to === 'owner' ? 'workspace owner' : meta.to}` : `changed ${name}'s role`
     case 'comment.added': return `commented on ${name}`
     case 'comment.resolved': return `resolved a comment on ${name}`
     case 'approval.approved': return `approved a run of ${name}`
