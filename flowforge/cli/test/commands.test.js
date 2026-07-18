@@ -965,3 +965,76 @@ test('diff rejects a missing or non-export file without calling the API', async 
   await stub.close()
   assert.equal(stub.requests.length, 0)
 })
+
+test('lint with no file posts an empty body and passes on a clean graph', async () => {
+  const lintCmd = require('../src/commands/lint')
+  const stub = await startStub((method, url) => {
+    assert.equal(method, 'POST')
+    assert.equal(url, '/api/v1/workflows/wf-1/lint')
+    return {
+      json: { workflowId: 'wf-1', ok: true, issues: [], summary: { errors: 0, warnings: 0 } },
+    }
+  })
+  const ctx = makeCtx(stub.api)
+  const code = await lintCmd({ positionals: ['wf-1'], flags: {} }, ctx)
+  await stub.close()
+
+  assert.equal(code, 0)
+  assert.deepEqual(stub.requests[0].body, {})
+  assert.match(ctx.output(), /lints clean/)
+})
+
+test('lint sends a file and exits 1 on errors, printing each issue', async () => {
+  const lintCmd = require('../src/commands/lint')
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'flowforge-lint-'))
+  const file = path.join(dir, 'sync.json')
+  const doc = { graph_data: { nodes: [{ id: 'h1', type: 'action-http' }], edges: [] } }
+  fs.writeFileSync(file, JSON.stringify(doc))
+
+  const stub = await startStub(() => ({
+    json: {
+      workflowId: 'wf-1',
+      ok: false,
+      issues: [
+        { severity: 'error', code: 'unknown-secret', message: 'h1: secret "NOPE" does not exist in this workspace', nodeId: 'h1' },
+        { severity: 'warning', code: 'no-trigger', message: 'The workflow has no trigger node — webhooks and schedules can never start it', nodeId: null },
+      ],
+      summary: { errors: 1, warnings: 1 },
+    },
+  }))
+  const ctx = makeCtx(stub.api)
+  try {
+    const code = await lintCmd({ positionals: ['wf-1', file], flags: {} }, ctx)
+    await stub.close()
+
+    assert.equal(code, 1)
+    assert.deepEqual(stub.requests[0].body, { graph_data: doc.graph_data })
+    assert.match(ctx.output(), /unknown|NOPE/)
+    assert.match(ctx.output(), /no trigger node/)
+    assert.match(ctx.output(), /1 error, 1 warning/)
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('lint --strict fails on warnings; without it warnings pass', async () => {
+  const lintCmd = require('../src/commands/lint')
+  const report = {
+    json: {
+      workflowId: 'wf-1',
+      ok: true,
+      issues: [{ severity: 'warning', code: 'unreachable-node', message: 'island is not connected to any trigger', nodeId: 'island' }],
+      summary: { errors: 0, warnings: 1 },
+    },
+  }
+  const stub = await startStub(() => report)
+  const ctx = makeCtx(stub.api)
+
+  const lax = await lintCmd({ positionals: ['wf-1'], flags: {} }, ctx)
+  assert.equal(lax, 0)
+
+  const strict = await lintCmd({ positionals: ['wf-1'], flags: { strict: true } }, ctx)
+  await stub.close()
+  assert.equal(strict, 1)
+  assert.match(ctx.output(), /--strict/)
+})

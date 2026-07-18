@@ -17,6 +17,7 @@ const COMMANDS = {
   export: require('../src/commands/export'),
   import: require('../src/commands/import'),
   diff: require('../src/commands/diff'),
+  lint: require('../src/commands/lint'),
   trigger: require('../src/commands/trigger'),
   runs: require('../src/commands/runs'),
   insights: require('../src/commands/insights'),
@@ -43,6 +44,7 @@ Usage:
   flowforge export <workflow-id>                   Print the portable workflow JSON (pipe to a file)
   flowforge import <workspace-id> <file> [--name]  Create a draft workflow from an exported file
   flowforge diff <workflow-id> <file>              Compare the live workflow against an exported file (exits non-zero on drift)
+  flowforge lint <workflow-id> [file] [--strict]   Lint the live workflow — or an exported file against its workspace (exits non-zero on errors)
   flowforge trigger <workflow-id> [--data <json>] [--key <idempotency-key>] [--priority high|normal|low] [--watch]
   flowforge runs <workflow-id> [--limit N]         Recent runs for a workflow
   flowforge insights <workflow-id> [--limit N]     Duration percentiles, success rate, anomalies
