@@ -19,6 +19,7 @@ const resume = require('../src/commands/resume')
 const compare = require('../src/commands/compare')
 const exportCmd = require('../src/commands/export')
 const importCmd = require('../src/commands/import')
+const diffCmd = require('../src/commands/diff')
 const workspacesCmd = require('../src/commands/workspaces')
 const login = require('../src/commands/login')
 const { ApiError } = require('../src/api')
@@ -867,6 +868,96 @@ test('import rejects a missing or malformed file without calling the API', async
   fs.writeFileSync(file, JSON.stringify({ hello: 'world' }))
   try {
     const malformed = await importCmd({ positionals: ['ws-1', file], flags: {} }, ctx)
+    assert.equal(malformed, 1)
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true })
+  }
+  await stub.close()
+  assert.equal(stub.requests.length, 0)
+})
+
+test('diff exits 0 and says so when the live workflow matches the file', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'flowforge-diff-'))
+  const file = path.join(dir, 'sync.json')
+  const doc = {
+    exportVersion: '1.0',
+    name: 'Nightly sync',
+    graph_data: { nodes: [{ id: 't1', type: 'trigger-manual' }], edges: [] },
+  }
+  fs.writeFileSync(file, JSON.stringify(doc))
+
+  const stub = await startStub((method, url) => {
+    assert.equal(method, 'POST')
+    assert.equal(url, '/api/v1/workflows/wf-1/diff')
+    return {
+      json: {
+        workflowId: 'wf-1',
+        identical: true,
+        addedNodes: [], removedNodes: [], changedNodes: [],
+        addedEdges: [], removedEdges: [],
+        summary: { addedNodes: 0, removedNodes: 0, changedNodes: 0, addedEdges: 0, removedEdges: 0 },
+      },
+    }
+  })
+  const ctx = makeCtx(stub.api)
+  try {
+    const code = await diffCmd({ positionals: ['wf-1', file], flags: {} }, ctx)
+    await stub.close()
+
+    assert.equal(code, 0)
+    assert.deepEqual(stub.requests[0].body, { graph_data: doc.graph_data })
+    assert.match(ctx.output(), /No drift/)
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('diff exits 1 on drift and itemizes what changed', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'flowforge-diff-'))
+  const file = path.join(dir, 'sync.json')
+  fs.writeFileSync(file, JSON.stringify({ graph_data: { nodes: [], edges: [] } }))
+
+  const stub = await startStub(() => ({
+    json: {
+      workflowId: 'wf-1',
+      identical: false,
+      addedNodes: [{ id: 'n2', type: 'output-log', label: 'Log it' }],
+      removedNodes: [{ id: 'h1', type: 'action-http', label: 'Fetch' }],
+      changedNodes: [{ id: 'c1', type: 'condition', label: 'Gate', changes: ['config.expression'] }],
+      addedEdges: [{ source: 't1', target: 'n2', sourceHandle: null, description: 'Start → Log it' }],
+      removedEdges: [],
+      summary: { addedNodes: 1, removedNodes: 1, changedNodes: 1, addedEdges: 1, removedEdges: 0 },
+    },
+  }))
+  const ctx = makeCtx(stub.api)
+  try {
+    const code = await diffCmd({ positionals: ['wf-1', file], flags: {} }, ctx)
+    await stub.close()
+
+    assert.equal(code, 1)
+    assert.match(ctx.output(), /Drift detected/)
+    assert.match(ctx.output(), /Log it/)
+    assert.match(ctx.output(), /Fetch/)
+    assert.match(ctx.output(), /config\.expression/)
+    assert.match(ctx.output(), /Start → Log it/)
+    assert.match(ctx.output(), /4 differences/)
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('diff rejects a missing or non-export file without calling the API', async () => {
+  const stub = await startStub(() => ({ json: {} }))
+  const ctx = makeCtx(stub.api)
+
+  const missing = await diffCmd({ positionals: ['wf-1', 'no-such-file.json'], flags: {} }, ctx)
+  assert.equal(missing, 1)
+
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'flowforge-diff-'))
+  const file = path.join(dir, 'not-a-workflow.json')
+  fs.writeFileSync(file, JSON.stringify({ hello: 'world' }))
+  try {
+    const malformed = await diffCmd({ positionals: ['wf-1', file], flags: {} }, ctx)
     assert.equal(malformed, 1)
   } finally {
     fs.rmSync(dir, { recursive: true, force: true })

@@ -16,6 +16,7 @@ const COMMANDS = {
   search: require('../src/commands/search'),
   export: require('../src/commands/export'),
   import: require('../src/commands/import'),
+  diff: require('../src/commands/diff'),
   trigger: require('../src/commands/trigger'),
   runs: require('../src/commands/runs'),
   insights: require('../src/commands/insights'),
@@ -41,6 +42,7 @@ Usage:
   flowforge search <query> [--limit N]             Find workflows by name or by what's inside them
   flowforge export <workflow-id>                   Print the portable workflow JSON (pipe to a file)
   flowforge import <workspace-id> <file> [--name]  Create a draft workflow from an exported file
+  flowforge diff <workflow-id> <file>              Compare the live workflow against an exported file (exits non-zero on drift)
   flowforge trigger <workflow-id> [--data <json>] [--key <idempotency-key>] [--priority high|normal|low] [--watch]
   flowforge runs <workflow-id> [--limit N]         Recent runs for a workflow
   flowforge insights <workflow-id> [--limit N]     Duration percentiles, success rate, anomalies
@@ -61,8 +63,9 @@ Configuration:
   as CI secrets and skip login entirely. NO_COLOR disables colors.
 
 Exit codes:
-  0 success · 1 error, a watched run that failed/was cancelled, or a
-  'check' whose workflow breached its health thresholds`
+  0 success · 1 error, a watched run that failed/was cancelled, a
+  'check' whose workflow breached its health thresholds, or a 'diff'
+  that found drift`
 
 async function main() {
   const argv = process.argv.slice(2)
