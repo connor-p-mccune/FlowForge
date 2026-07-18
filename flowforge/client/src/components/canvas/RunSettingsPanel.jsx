@@ -15,6 +15,7 @@ export default function RunSettingsPanel({ workflowId, open, onClose }) {
   const [priority, setPriority] = useState('normal') // default queue lane
   const [slaDurationInput, setSlaDurationInput] = useState('') // seconds, '' = no target
   const [slaSuccessInput, setSlaSuccessInput] = useState('') // percent, '' = no target
+  const [heartbeatInput, setHeartbeatInput] = useState('') // minutes, '' = no expectation
   // Error-handler workflow: '' = none. Options are the workspace's *deployed*
   // workflows (the runtime requirement), excluding this one (the route
   // refuses self-handling).
@@ -51,6 +52,9 @@ export default function RunSettingsPanel({ workflowId, open, onClose }) {
         setSlaDurationInput(wf.sla_max_duration_ms ? String(wf.sla_max_duration_ms / 1000) : '')
         setSlaSuccessInput(
           wf.sla_min_success_rate != null ? String(Math.round(wf.sla_min_success_rate * 100)) : ''
+        )
+        setHeartbeatInput(
+          wf.heartbeat_interval_minutes ? String(wf.heartbeat_interval_minutes) : ''
         )
         setHandlerId(wf.error_workflow_id || '')
         return apiFetch(`/api/workspaces/${wf.workspace_id}/workflows`).then(
@@ -110,6 +114,15 @@ export default function RunSettingsPanel({ workflowId, open, onClose }) {
       setError('Min success rate must be a percentage from 0 to 100, or empty for no target')
       return
     }
+    const heartbeatTrim = heartbeatInput.trim()
+    const heartbeatMinutes = heartbeatTrim === '' ? null : Number(heartbeatTrim)
+    if (
+      heartbeatMinutes !== null &&
+      (!Number.isInteger(heartbeatMinutes) || heartbeatMinutes < 1 || heartbeatMinutes > 10080)
+    ) {
+      setError('Heartbeat must be a whole number of minutes from 1 to 10080, or empty for none')
+      return
+    }
 
     setSaving(true)
     setError(null)
@@ -123,6 +136,7 @@ export default function RunSettingsPanel({ workflowId, open, onClose }) {
           concurrency_policy: policy,
           sla_max_duration_ms: durSeconds === null ? null : Math.round(durSeconds * 1000),
           sla_min_success_rate: successPct === null ? null : successPct / 100,
+          heartbeat_interval_minutes: heartbeatMinutes,
           error_workflow_id: handlerId || null,
           default_priority: priority,
         },
@@ -222,6 +236,26 @@ export default function RunSettingsPanel({ workflowId, open, onClose }) {
                   placeholder="No target"
                   value={slaSuccessInput}
                   onChange={(e) => setSlaSuccessInput(e.target.value)}
+                />
+              </label>
+
+              <div className="run-settings__section">Heartbeat</div>
+              <p className="webhook-panel__hint">
+                Optional dead-man’s switch: expect a successful run at least this
+                often. If the workflow goes quiet — a schedule that stopped
+                firing, a webhook sender that went away — the owner is notified
+                once and the miss streams to the activity feed and outbound
+                webhooks; the first success after that emits a recovery.
+              </p>
+              <label className="run-settings__field">
+                <span className="run-settings__label">Expect a success every (minutes)</span>
+                <input
+                  type="number"
+                  min="1"
+                  max="10080"
+                  placeholder="No expectation"
+                  value={heartbeatInput}
+                  onChange={(e) => setHeartbeatInput(e.target.value)}
                 />
               </label>
 

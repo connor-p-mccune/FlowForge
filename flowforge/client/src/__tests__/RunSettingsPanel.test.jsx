@@ -167,6 +167,49 @@ describe('RunSettingsPanel', () => {
     expect(apiFetch).not.toHaveBeenCalledWith('/api/workflows/wf1', expect.objectContaining({ method: 'PUT' }))
   })
 
+  it('loads and saves the heartbeat expectation in minutes', async () => {
+    apiFetch.mockImplementation((path, opts) => {
+      if (path === '/api/workflows/wf1' && !opts) {
+        return Promise.resolve({ workflow: { ...WORKFLOW, heartbeat_interval_minutes: 60 } })
+      }
+      if (path === '/api/workspaces/ws1/workflows') {
+        return Promise.resolve({ workflows: WORKSPACE_WORKFLOWS })
+      }
+      if (path === '/api/workflows/wf1' && opts?.method === 'PUT') {
+        return Promise.resolve({ workflow: WORKFLOW })
+      }
+      return Promise.reject(new Error(`unexpected: ${path}`))
+    })
+    setup()
+    const input = await screen.findByLabelText(/expect a success every/i)
+    expect(input).toHaveValue(60)
+
+    fireEvent.change(input, { target: { value: '15' } })
+    fireEvent.click(screen.getByRole('button', { name: /save settings/i }))
+    await waitFor(() =>
+      expect(apiFetch).toHaveBeenCalledWith('/api/workflows/wf1', {
+        method: 'PUT',
+        body: expect.objectContaining({ heartbeat_interval_minutes: 15 }),
+      })
+    )
+  })
+
+  it('sends a null heartbeat when the field is empty, and rejects bad values', async () => {
+    setup()
+    const input = await screen.findByLabelText(/expect a success every/i)
+    fireEvent.click(screen.getByRole('button', { name: /save settings/i }))
+    await waitFor(() =>
+      expect(apiFetch).toHaveBeenCalledWith('/api/workflows/wf1', {
+        method: 'PUT',
+        body: expect.objectContaining({ heartbeat_interval_minutes: null }),
+      })
+    )
+
+    fireEvent.change(input, { target: { value: '2.5' } })
+    fireEvent.click(screen.getByRole('button', { name: /save settings/i }))
+    expect(await screen.findByText(/whole number of minutes/i)).toBeInTheDocument()
+  })
+
   it('offers only other deployed workflows as error handlers', async () => {
     setup()
     const select = await screen.findByLabelText(/on failure, run/i)
