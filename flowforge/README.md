@@ -207,6 +207,18 @@ order while streaming live progress back to every collaborator on the canvas.
   outage alerts once, not on every run. Available in the panel, via
   `flowforge insights`, and on the public API. See
   [docs/INSIGHTS.md](./docs/INSIGHTS.md).
+- **Heartbeat monitoring** — a dead-man's switch per workflow: declare "a
+  real run of me completes successfully every N minutes" in Run limits, and
+  FlowForge alerts when the workflow **goes quiet** — the failure mode SLA
+  checks can't see, because there's no run to check: a schedule silently
+  unregistered, a webhook sender decommissioned, an upstream cron box dead.
+  Alerts are edge-triggered (a weekend-long outage is one
+  `workflow.heartbeat_missed` event, fanned out through the activity feed,
+  outbound webhooks, and an owner notification — not one per minute), the
+  first success after an alert emits `workflow.heartbeat_recovered` so every
+  open gets a close, and a never-run workflow measures its silence from the
+  moment it was deployed. Dry runs don't count as heartbeats; misses land on
+  `/metrics`.
 - **Predictive run forecast** — *before* running a workflow, estimate how long
   it will take and which step is the bottleneck. It reuses the critical-path
   method — the same longest-path-over-a-DAG that analyses a finished run — run
@@ -385,6 +397,7 @@ Copy `.env.example` to `.env` before running. **Never commit `.env`.**
 | `SLA_SUCCESS_RATE_WINDOW` | no | Runs in the rolling success-rate window for SLA monitoring (default 20) |
 | `SLA_SUCCESS_RATE_MIN_RUNS` | no | Minimum settled runs before the success-rate floor check fires (default 5) |
 | `SLA_ANOMALY_MIN_RUNS` | no | Minimum completed-run baseline before an anomaly alert fires (default 20) |
+| `HEARTBEAT_CHECK_INTERVAL_MS` | no | How often the heartbeat monitor sweeps for overdue workflows (default 60000) |
 | `WEBHOOK_DELIVERY_RETENTION_DAYS` | no | Prune settled delivery-log rows after this many days (default 30; 0 = keep) |
 
 \* The app runs without it, but any AI node or the Suggest button will error

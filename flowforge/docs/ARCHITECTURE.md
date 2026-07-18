@@ -551,6 +551,41 @@ converts that into a fast, honest failure.
   Critical-path analysis is retrospective; the forecast is the same math pointed
   the other way.
 
+### Heartbeat monitoring
+
+`services/heartbeatMonitor.js` covers the failure mode everything above is
+blind to: **runs that stop happening at all**. The SLA monitor hooks a run
+settling — but a schedule that was silently unregistered, a webhook sender
+that was decommissioned, or a dead upstream cron box produces no run to hook.
+A workflow that declares `heartbeat_interval_minutes` promises "a real run of
+me completes successfully at least this often", and the monitor alerts when
+the promise is broken. Three decisions:
+
+- **Absence can't hook a run, so this is the one monitor that sweeps.** A
+  background timer (default every minute) walks the deployed workflows with
+  an expectation set and compares last-success age against the interval —
+  one indexed query per workflow, all best-effort.
+
+- **Edge-triggered through a single column.** `heartbeat_alerted_at` records
+  the outstanding alert; while set, sweeps stay silent — a weekend outage is
+  one `workflow.heartbeat_missed` event, not one per minute. A success newer
+  than the alert clears it and emits `workflow.heartbeat_recovered`, so a
+  consumer (typically a Slack channel via outbound webhooks) sees a close
+  for every open. There is no separate alert store to reconcile: the column
+  *is* the state, it survives restarts, and changing the interval resets it
+  — the old alert answered the old promise.
+
+- **A never-run workflow measures silence from its latest deploy** — the
+  moment its schedule went live is the moment the promise started, and
+  `workflow_versions` already records it. Drafts have made no promise and
+  are skipped; dry runs and failed runs don't count as heartbeats (a test
+  is not production behaviour, and a failing workflow that runs on time is
+  the *SLA monitor's* case, not this one's).
+
+Alerts reuse the existing fan-out — activity feed (which outbound webhooks
+relay) plus an owner notification — and `flowforge_heartbeats_missed_total`
+counts crossings on `/metrics`.
+
 ## The expression language
 
 `services/expression/` is FXL — a small language the engine evaluates against a
