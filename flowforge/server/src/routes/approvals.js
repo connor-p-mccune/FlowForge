@@ -54,6 +54,9 @@ router.post('/approvals/:id/respond', auth, (req, res) => {
     if (result.outcome === 'not-found') {
       return res.status(404).json({ error: 'Approval not found' })
     }
+    if (result.outcome === 'forbidden') {
+      return res.status(403).json({ error: 'Viewers have read-only access' })
+    }
     if (result.outcome === 'conflict') {
       return res.status(409).json({ error: `Approval already ${result.status}` })
     }
