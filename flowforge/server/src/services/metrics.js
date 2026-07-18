@@ -192,6 +192,14 @@ const slaBreaches = counter(
   ['type']
 )
 
+// Heartbeat monitoring (services/heartbeatMonitor.js). Each increment is a
+// workflow crossing from healthy to overdue — edge-triggered, so a long
+// outage counts once, not once per sweep.
+const heartbeatsMissed = counter(
+  'flowforge_heartbeats_missed_total',
+  'Workflows detected overdue on their expected-success heartbeat.'
+)
+
 // Step-level result cache (services/stepCache.js). event: 'hit' (output
 // adopted, runner skipped) | 'miss' (key absent or expired) | 'store'
 // (fresh output memoised). hit/(hit+miss) is the cache's effectiveness — a
@@ -250,6 +258,11 @@ function recordSlaBreach(type) {
   slaBreaches.inc({ type })
 }
 
+// Called by the heartbeat monitor when a workflow first goes overdue.
+function recordHeartbeatMissed() {
+  heartbeatsMissed.inc({})
+}
+
 // Called by the engine on every cache decision for a caching node.
 function recordStepCache(event) {
   stepCacheEvents.inc({ event })
@@ -266,6 +279,7 @@ module.exports = {
   recordWebhookDelivery,
   recordRunDeferred,
   recordSlaBreach,
+  recordHeartbeatMissed,
   recordStepCache,
   queueJobs,
   webhookPending,

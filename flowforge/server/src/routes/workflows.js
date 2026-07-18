@@ -227,6 +227,20 @@ function validateSla(body) {
   return null
 }
 
+// Optional heartbeat expectation (services/heartbeatMonitor.js). Nullable
+// (null clears it — and clears any outstanding alert with it, so a retired
+// expectation can't leave a stale "missed" state behind). Bounded to a week:
+// anything longer is better served by looking at the dashboard.
+function validateHeartbeat(body) {
+  if ('heartbeat_interval_minutes' in body && body.heartbeat_interval_minutes !== null) {
+    const n = body.heartbeat_interval_minutes
+    if (!Number.isInteger(n) || n < 1 || n > 10080) {
+      return 'heartbeat_interval_minutes must be an integer between 1 and 10080 (one week), or null to clear it'
+    }
+  }
+  return null
+}
+
 // Optional error-handler workflow (services/errorHandler.js). Nullable (null
 // clears the handler); a non-null id must name another workflow in the same
 // workspace — self-handling is refused here because it's almost certainly a
@@ -269,6 +283,8 @@ router.put('/workflows/:id', auth, validate(workflowRule), (req, res) => {
     if (concurrencyError) return res.status(400).json({ error: concurrencyError })
     const slaError = validateSla(req.body)
     if (slaError) return res.status(400).json({ error: slaError })
+    const heartbeatError = validateHeartbeat(req.body)
+    if (heartbeatError) return res.status(400).json({ error: heartbeatError })
     const handlerError = validateErrorHandler(req.body, workflow)
     if (handlerError) return res.status(400).json({ error: handlerError })
     const priorityError = validatePriority(req.body)
@@ -281,6 +297,14 @@ router.put('/workflows/:id', auth, validate(workflowRule), (req, res) => {
       'sla_max_duration_ms' in req.body ? req.body.sla_max_duration_ms : workflow.sla_max_duration_ms
     const slaMinSuccess =
       'sla_min_success_rate' in req.body ? req.body.sla_min_success_rate : workflow.sla_min_success_rate
+    const heartbeatInterval =
+      'heartbeat_interval_minutes' in req.body
+        ? req.body.heartbeat_interval_minutes
+        : workflow.heartbeat_interval_minutes
+    // Changing (or clearing) the expectation resets the edge-trigger state:
+    // the old alert answered the old promise.
+    const heartbeatAlertedAt =
+      heartbeatInterval === workflow.heartbeat_interval_minutes ? workflow.heartbeat_alerted_at : null
     const errorWorkflowId =
       'error_workflow_id' in req.body ? req.body.error_workflow_id : workflow.error_workflow_id
     const defaultPriority =
@@ -289,8 +313,9 @@ router.put('/workflows/:id', auth, validate(workflowRule), (req, res) => {
     const now = new Date().toISOString()
     db.prepare(
       `UPDATE workflows SET name = ?, description = ?, max_concurrent_runs = ?, concurrency_policy = ?,
-         sla_max_duration_ms = ?, sla_min_success_rate = ?, error_workflow_id = ?, default_priority = ?, updated_at = ? WHERE id = ?`
-    ).run(name, description ?? workflow.description, maxConcurrent, policy, slaMaxDuration, slaMinSuccess, errorWorkflowId, defaultPriority, now, req.params.id)
+         sla_max_duration_ms = ?, sla_min_success_rate = ?, heartbeat_interval_minutes = ?, heartbeat_alerted_at = ?,
+         error_workflow_id = ?, default_priority = ?, updated_at = ? WHERE id = ?`
+    ).run(name, description ?? workflow.description, maxConcurrent, policy, slaMaxDuration, slaMinSuccess, heartbeatInterval, heartbeatAlertedAt, errorWorkflowId, defaultPriority, now, req.params.id)
 
     const updated = db.prepare('SELECT * FROM workflows WHERE id = ?').get(req.params.id)
     activityService.logEvent(workflow.workspace_id, req.user.id, 'workflow.updated', {

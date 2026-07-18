@@ -109,6 +109,10 @@ if (process.env.NODE_ENV !== 'test') {
   // Age-based cleanup: settled webhook deliveries (default 30d) and — only
   // when EXECUTION_RETENTION_DAYS is set — old terminal runs.
   require('./services/retention').startRetention()
+  // Dead-man's switch: alert when a workflow that promises a success every N
+  // minutes goes quiet. Absence of runs can't hook a run settling, so this is
+  // the one monitor that has to sweep.
+  require('./services/heartbeatMonitor').startHeartbeatMonitor()
 
   // Graceful shutdown (services/shutdown.js): on SIGTERM/SIGINT, drain in
   // dependency order instead of dying mid-run. Sources of new work stop first
@@ -131,6 +135,7 @@ if (process.env.NODE_ENV !== 'test') {
   })
   onShutdown('event-dispatcher', () => require('./services/eventDispatcher').stopDispatcher())
   onShutdown('retention', () => require('./services/retention').stopRetention())
+  onShutdown('heartbeat-monitor', () => require('./services/heartbeatMonitor').stopHeartbeatMonitor())
   onShutdown('socket-io', () => new Promise((resolve) => io.close(() => resolve())))
   onShutdown('redis', () => require('./config/redis').quit().catch(() => {}))
   onShutdown('database', () => require('./config/database').close())

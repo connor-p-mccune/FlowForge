@@ -133,6 +133,16 @@ ensureColumn('workspaces', 'status_page_token', 'TEXT')
 ensureColumn('workflows', 'default_priority', "TEXT NOT NULL DEFAULT 'normal'")
 ensureColumn('executions', 'priority', 'TEXT')
 
+// Heartbeat monitoring (services/heartbeatMonitor.js) — a dead-man's switch
+// per workflow: heartbeat_interval_minutes declares "a real run of this
+// workflow should complete successfully at least this often"; NULL = no
+// expectation. heartbeat_alerted_at is the edge-trigger state: set when the
+// monitor raises the missed-heartbeat alert, cleared when a fresh success
+// lands (which also emits a recovered event) — so a long silence alerts
+// once, not once per sweep.
+ensureColumn('workflows', 'heartbeat_interval_minutes', 'INTEGER')
+ensureColumn('workflows', 'heartbeat_alerted_at', 'TEXT')
+
 // Two-factor authentication (TOTP). Optional, opt-in per user. totp_enabled stays
 // 0 until the user verifies a code from their authenticator, so a half-finished
 // setup never locks them out of login. totp_backup_codes is a JSON array of
