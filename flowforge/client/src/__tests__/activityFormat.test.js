@@ -43,6 +43,28 @@ describe('formatEvent', () => {
       .toBe('resolved a comment on My Flow')
   })
 
+  it('phrases variable and monitor events', () => {
+    expect(formatEvent({ ...base, event_type: 'variable.created', entity_name: 'API_BASE_URL' }))
+      .toBe('added variable API_BASE_URL')
+    expect(formatEvent({ ...base, event_type: 'variable.updated', entity_name: 'API_BASE_URL' }))
+      .toBe('changed variable API_BASE_URL')
+    expect(formatEvent({ ...base, event_type: 'variable.deleted', entity_name: 'API_BASE_URL' }))
+      .toBe('deleted variable API_BASE_URL')
+    expect(formatEvent({ ...base, event_type: 'execution.sla_breached', entity_name: 'Sync' }))
+      .toBe('flagged a run of Sync — SLA breach')
+    expect(
+      formatEvent({
+        ...base,
+        event_type: 'workflow.heartbeat_missed',
+        metadata: { overdueMinutes: 15 },
+      })
+    ).toBe('flagged Webhook Alerter as overdue — no success for 15 min past its heartbeat')
+    expect(formatEvent({ ...base, event_type: 'workflow.heartbeat_missed' }))
+      .toBe('flagged Webhook Alerter as overdue on its heartbeat')
+    expect(formatEvent({ ...base, event_type: 'workflow.heartbeat_recovered' }))
+      .toBe('marked Webhook Alerter recovered — a successful run landed')
+  })
+
   it('degrades gracefully for an unknown event type', () => {
     expect(formatEvent({ ...base, event_type: 'widget.frobbed', entity_name: 'Thing' }))
       .toBe('widget frobbed Thing')
@@ -64,6 +86,12 @@ describe('actorLabel', () => {
     expect(actorLabel({ actor_display_name: null, metadata: { triggerType: 'schedule' } }))
       .toBe('A schedule')
     expect(actorLabel({ actor_display_name: null, metadata: {} })).toBe('Someone')
+  })
+  it('attributes monitor-raised events to the monitor, not "Someone"', () => {
+    expect(actorLabel({ actor_display_name: null, event_type: 'workflow.heartbeat_missed' }))
+      .toBe('The monitor')
+    expect(actorLabel({ actor_display_name: null, event_type: 'execution.sla_breached' }))
+      .toBe('The monitor')
   })
 })
 

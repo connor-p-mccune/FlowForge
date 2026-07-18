@@ -39,9 +39,14 @@ export function actorColor(key) {
 }
 
 // Display name for the actor. System/webhook/schedule runs have no actor — fall
-// back to a label derived from the run's trigger type.
+// back to a label derived from the run's trigger type; monitor-raised events
+// (SLA breaches, heartbeat transitions) have no human behind them at all.
 export function actorLabel(event) {
   if (event.actor_display_name) return event.actor_display_name
+  const type = String(event.event_type || '')
+  if (type.startsWith('workflow.heartbeat_') || type === 'execution.sla_breached') {
+    return 'The monitor'
+  }
   const t = event.metadata && event.metadata.triggerType
   if (t === 'webhook') return 'A webhook'
   if (t === 'schedule') return 'A schedule'
@@ -79,6 +84,16 @@ export function formatEvent(event) {
     case 'secret.created': return `added secret ${name}`
     case 'secret.updated': return `rotated secret ${name}`
     case 'secret.deleted': return `deleted secret ${name}`
+    case 'variable.created': return `added variable ${name}`
+    case 'variable.updated': return `changed variable ${name}`
+    case 'variable.deleted': return `deleted variable ${name}`
+    case 'execution.sla_breached': return `flagged a run of ${name} — SLA breach`
+    case 'workflow.heartbeat_missed':
+      return meta.overdueMinutes != null
+        ? `flagged ${name} as overdue — no success for ${meta.overdueMinutes} min past its heartbeat`
+        : `flagged ${name} as overdue on its heartbeat`
+    case 'workflow.heartbeat_recovered':
+      return `marked ${name} recovered — a successful run landed`
     default: {
       const verb = String(event.event_type || '').replace(/\./g, ' ')
       return event.entity_name ? `${verb} ${name}` : verb

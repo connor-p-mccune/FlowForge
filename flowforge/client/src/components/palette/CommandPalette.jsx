@@ -127,6 +127,14 @@ export default function CommandPalette({ open, onClose }) {
               run: () => navigate(`/workspace/${ws.id}/secrets`),
             },
             {
+              key: `variables:${ws.id}`,
+              icon: '🧩',
+              title: `Variables — ${ws.name}`,
+              detail: 'page',
+              keywords: `variables vars config ${ws.name}`,
+              run: () => navigate(`/workspace/${ws.id}/variables`),
+            },
+            {
               key: `new:${ws.id}`,
               icon: '＋',
               title: `New workflow — ${ws.name}`,
