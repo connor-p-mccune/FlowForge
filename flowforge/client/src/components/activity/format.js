@@ -72,6 +72,8 @@ export function formatEvent(event) {
     case 'workflow.deleted': return `deleted workflow ${name}`
     case 'workflow.restored':
       return meta.version ? `restored ${name} to v${meta.version}` : `restored ${name}`
+    case 'workflow.paused': return `paused workflow ${name}`
+    case 'workflow.resumed': return `resumed workflow ${name}`
     case 'execution.completed': return `ran ${name}`
     case 'execution.failed': return `ran ${name} — failed`
     case 'execution.cancelled': return `stopped a run of ${name}`
