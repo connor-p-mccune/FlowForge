@@ -418,6 +418,46 @@ inside their parent's engine loop, not through the queue, so limits apply to
 top-level runs — which also means a workflow calling itself through a gate
 can't deadlock.
 
+### The pause kill switch
+
+Concurrency limits shape *how many* runs overlap; pause
+(`services/workflowPause.js`) answers a blunter operational question — *stop
+everything now*. A `paused_at` column is the whole state: while it's set, no
+new real run starts at any entry point. The design leans on structure rather
+than a scatter of new checks:
+
+- **One predicate, every door.** `isPaused(workflow)` is checked at each entry
+  point right beside the concurrency admission it already runs — the manual and
+  public-API triggers (a 409, the kill switch beating the cap because "stop"
+  outranks "you're full"), replay and resume, the webhook trigger, the schedule
+  tick, and the error-handler escalation. The two silent, unattended paths
+  (webhook, schedule) additionally record `flowforge_paused_skips_total` by
+  source, because there the counter is the *only* witness that traffic hit a
+  closed door; the interactive paths told their caller directly.
+- **Two boundaries are deliberate, not incidental.** In-flight runs settle
+  normally — tearing down a half-sent HTTP call is exactly what pause is *not*
+  for; that's cancellation, and even that is cooperative and inter-node. And
+  dry runs stay allowed at every gate, because pause is what you hit *during*
+  an incident and the person who hit it needs to test the fix — blocking their
+  test runs would make the switch fight its own use case. Test scenarios
+  (which run dry) keep working for the same reason.
+- **Idempotent by construction.** Pause and resume are safe to slam twice: the
+  first pause wins the `paused_at`/`paused_by` audit trail (a repeat doesn't
+  rewrite it), and resuming an active workflow is a no-op. Nothing skipped
+  while paused is retroactively fired on resume — the next natural trigger just
+  works — so a weekend-long pause doesn't unleash a thundering herd of
+  backfilled runs when it lifts.
+- **Idempotent triggers still win the race.** The public trigger's
+  idempotency-replay lookup runs *before* the pause check, so a retried request
+  whose original landed a moment before the pause still gets its original run
+  back rather than a spurious "paused" 409 — the same ordering that protects
+  retries at the concurrency cap.
+
+The switch composes cleanly with the two limits already here: pause holds
+*all* runs, the concurrency cap bounds *simultaneous* runs, and priority lanes
+order *pickup* — three independent admission knobs that never have to know
+about each other.
+
 ### Priority lanes
 
 Every run enters the queue in one of three lanes — `high`, `normal`

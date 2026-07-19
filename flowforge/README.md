@@ -82,6 +82,16 @@ order while streaming live progress back to every collaborator on the canvas.
   **queue** parks the run until a slot frees, **reject** refuses it with a
   `409` at every entry point — and skips schedule ticks, so a cron workflow
   never overlaps itself.
+- **Pause (operational kill switch)** — hold a workflow with one click when
+  something downstream is on fire: while paused, **no new real run starts at
+  any entry point** — the Run button, the public API, webhook deliveries,
+  schedule ticks, and error-handler escalations are all held. Two boundaries
+  are deliberate: **in-flight runs settle normally** (stopping mid-run is what
+  cancellation is for) and **dry runs stay allowed**, because whoever paused it
+  is usually the person debugging it. Idempotent from the toolbar, the public
+  API (`manage` scope), or `flowforge pause <id>`; wrap a deploy window so no
+  cron tick fires into a half-migrated system, and the silent skips land on
+  `/metrics`.
 - **Resume from failure** — continue a failed (or cancelled) run from where it
   stopped: steps that already succeeded are **reused** rather than re-executed
   — an approval gate that was already granted is not asked twice — and only

@@ -23,7 +23,7 @@ Tokens carry **scopes** chosen at creation:
 | `trigger` | Starting workflow runs                          |
 | `read`    | Listing workflows and reading execution results |
 | `approve` | Settling approval gates (approve/reject a paused run) |
-| `manage`  | Importing workflow definitions (creating draft workflows) |
+| `manage`  | Importing workflow definitions and pausing/resuming workflows |
 
 A token acts as its owning user: it can only see workflows in workspaces the
 owner belongs to, and it inherits the owner's **workspace role** — a token
@@ -277,9 +277,10 @@ Response `202`:
 
 Requires the `trigger` scope. Returns `400` if the workflow has no nodes,
 `404` if it doesn't exist or the token's owner isn't a member of its
-workspace, and `409` if the workflow caps concurrent runs with the
-**reject** policy and is at its cap (back off and retry — or switch the
-workflow to the **queue** policy to have runs wait instead).
+workspace, and `409` if the workflow is **paused** (see below) or caps
+concurrent runs with the **reject** policy and is at its cap (back off and
+retry — or switch the workflow to the **queue** policy to have runs wait
+instead).
 
 **Idempotent retries.** Network timeouts make "did my trigger land?" a real
 question for CI scripts. Send an `Idempotency-Key` header (any unique string
@@ -316,6 +317,41 @@ Priority orders **pickup** — a high run is dequeued before waiting normal
 ones — and never preempts runs already executing; within one lane, runs
 still execute in submission order. An invalid value is a `400`. From the
 CLI: `flowforge trigger <id> --priority high`.
+
+### Pause or resume a workflow
+
+The operational kill switch. While a workflow is paused, **no new real run
+starts** at any entry point — this endpoint, the app's Run button, webhook
+deliveries, schedule ticks, and error-handler escalations are all held. Runs
+already in flight settle normally (stopping mid-run is what cancellation is
+for), and **dry runs stay allowed**, so an incident responder can keep testing
+a fix. Wrap a deploy or maintenance window: pause before, resume after, and no
+cron tick fires a run into a half-migrated system in between.
+
+```bash
+curl -s -X POST https://your-flowforge-host/api/v1/workflows/6f0c…/pause \
+  -H "Authorization: Bearer $FLOWFORGE_TOKEN"
+```
+
+Response `200`:
+
+```json
+{ "workflowId": "6f0c…", "paused": true, "pausedAt": "2026-07-18T12:00:00.000Z" }
+```
+
+Resume with the mirror endpoint:
+
+```bash
+curl -s -X POST https://your-flowforge-host/api/v1/workflows/6f0c…/resume \
+  -H "Authorization: Bearer $FLOWFORGE_TOKEN"
+```
+
+Both require the `manage` scope — pausing changes durable workflow state, like
+importing a definition, and deliberately not the `trigger` scope, so an
+automation token that fires runs can't also disable the workflow. Both are
+**idempotent**: pausing an already-paused workflow is a safe no-op that keeps
+the original pause, and nothing skipped while paused is retroactively fired on
+resume. From the CLI: `flowforge pause <id>` / `flowforge unpause <id>`.
 
 ### List a workflow's runs
 
