@@ -298,6 +298,77 @@ const spec = {
         },
       },
     },
+    '/workflows/{workflowId}/pause': {
+      post: {
+        tags: ['workflows'],
+        summary: 'Pause a workflow (operational kill switch)',
+        description:
+          'While paused, no new real run starts at any entry point — manual ' +
+          'and API triggers, webhook deliveries, schedule ticks, and ' +
+          'error-handler escalations are all held. In-flight runs settle ' +
+          'normally and dry runs stay allowed, so an incident responder can ' +
+          'still test a fix. Idempotent: pausing an already-paused workflow ' +
+          'is a safe no-op that keeps the original pause. Requires the ' +
+          '`manage` scope — pausing changes durable workflow state, like ' +
+          'importing, and is deliberately not the `trigger` scope.',
+        operationId: 'pauseWorkflow',
+        parameters: [{ $ref: '#/components/parameters/WorkflowId' }],
+        responses: {
+          200: {
+            description: 'The workflow is paused.',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    workflowId: { type: 'string' },
+                    paused: { type: 'boolean', example: true },
+                    pausedAt: { type: 'string', format: 'date-time' },
+                  },
+                },
+              },
+            },
+          },
+          401: { $ref: '#/components/responses/Unauthorized' },
+          403: { $ref: '#/components/responses/Forbidden' },
+          404: { $ref: '#/components/responses/NotFound' },
+          429: { $ref: '#/components/responses/RateLimited' },
+        },
+      },
+    },
+    '/workflows/{workflowId}/resume': {
+      post: {
+        tags: ['workflows'],
+        summary: 'Resume a paused workflow',
+        description:
+          'Releases the kill switch so new runs are accepted again. Nothing ' +
+          'skipped while paused is retroactively fired — the next natural ' +
+          'trigger just works. Idempotent, like pause. Requires the `manage` ' +
+          'scope.',
+        operationId: 'resumeWorkflow',
+        parameters: [{ $ref: '#/components/parameters/WorkflowId' }],
+        responses: {
+          200: {
+            description: 'The workflow is active.',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    workflowId: { type: 'string' },
+                    paused: { type: 'boolean', example: false },
+                  },
+                },
+              },
+            },
+          },
+          401: { $ref: '#/components/responses/Unauthorized' },
+          403: { $ref: '#/components/responses/Forbidden' },
+          404: { $ref: '#/components/responses/NotFound' },
+          429: { $ref: '#/components/responses/RateLimited' },
+        },
+      },
+    },
     '/workflows/{workflowId}/executions': {
       get: {
         tags: ['executions'],
@@ -953,6 +1024,12 @@ const spec = {
           status: { type: 'string', enum: ['draft', 'deployed', 'archived'] },
           workspace_id: { type: 'string' },
           updated_at: { type: 'string', format: 'date-time' },
+          paused_at: {
+            type: 'string',
+            format: 'date-time',
+            nullable: true,
+            description: 'When the workflow was paused, or null if it is active.',
+          },
         },
       },
       ExecutionRef: {

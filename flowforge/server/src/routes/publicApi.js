@@ -28,7 +28,7 @@ const { searchWorkflows } = require('../services/workflowSearch')
 const { diffGraphs, presentDiff } = require('../services/graphDiff')
 const { lintGraph } = require('../services/workflowLinter')
 const { forbidViewer } = require('../services/workspaceRoles')
-const { isPaused, PAUSED_ERROR } = require('../services/workflowPause')
+const { isPaused, PAUSED_ERROR, pauseWorkflow, resumeWorkflow } = require('../services/workflowPause')
 
 const router = express.Router()
 
@@ -58,7 +58,7 @@ function getWorkflowForMember(workflowId, userId) {
 router.get('/workflows', tokenAuth('read'), (req, res) => {
   try {
     const workflows = db.prepare(
-      `SELECT wf.id, wf.name, wf.description, wf.status, wf.workspace_id, wf.updated_at
+      `SELECT wf.id, wf.name, wf.description, wf.status, wf.workspace_id, wf.updated_at, wf.paused_at
          FROM workflows wf
          JOIN workspace_members wm ON wm.workspace_id = wf.workspace_id
         WHERE wm.user_id = ?
@@ -265,6 +265,42 @@ router.post('/workflows/:id/trigger', tokenAuth('trigger'), async (req, res) => 
       // Where to poll for the result.
       statusUrl: `/api/v1/executions/${executionId}`,
     })
+  } catch (err) {
+    console.error(err)
+    res.status(500).json({ error: 'Internal server error' })
+  }
+})
+
+// POST /api/v1/workflows/:id/pause — the operational kill switch from a
+// script or chat-ops bot: while paused, no new real run starts at any entry
+// point (in-flight runs settle normally, dry runs stay allowed). Requires the
+// dedicated `manage` scope — pausing changes durable workflow lifecycle state,
+// the same category as importing a definition, and deliberately not `trigger`,
+// so an automation token that fires runs can't also disable the workflow.
+// Idempotent, like the session route. `paused` reports the resulting state.
+router.post('/workflows/:id/pause', tokenAuth('manage'), (req, res) => {
+  try {
+    const workflow = getWorkflowForMember(req.params.id, req.user.id)
+    if (!workflow) return res.status(404).json({ error: 'Workflow not found' })
+    if (forbidViewer(res, workflow.workspace_id, req.user.id)) return
+    const updated = pauseWorkflow(workflow, req.user.id)
+    res.json({ workflowId: updated.id, paused: true, pausedAt: updated.paused_at })
+  } catch (err) {
+    console.error(err)
+    res.status(500).json({ error: 'Internal server error' })
+  }
+})
+
+// POST /api/v1/workflows/:id/resume — release the kill switch. `manage` scope,
+// idempotent, mirroring pause. Nothing skipped while paused is retroactively
+// fired; the next natural trigger just works again.
+router.post('/workflows/:id/resume', tokenAuth('manage'), (req, res) => {
+  try {
+    const workflow = getWorkflowForMember(req.params.id, req.user.id)
+    if (!workflow) return res.status(404).json({ error: 'Workflow not found' })
+    if (forbidViewer(res, workflow.workspace_id, req.user.id)) return
+    const updated = resumeWorkflow(workflow, req.user.id)
+    res.json({ workflowId: updated.id, paused: false })
   } catch (err) {
     console.error(err)
     res.status(500).json({ error: 'Internal server error' })
