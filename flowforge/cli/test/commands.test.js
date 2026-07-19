@@ -16,6 +16,8 @@ const check = require('../src/commands/check')
 const runCmd = require('../src/commands/run')
 const cancel = require('../src/commands/cancel')
 const resume = require('../src/commands/resume')
+const pause = require('../src/commands/pause')
+const unpause = require('../src/commands/resume-workflow')
 const compare = require('../src/commands/compare')
 const exportCmd = require('../src/commands/export')
 const importCmd = require('../src/commands/import')
@@ -629,6 +631,45 @@ test('cancel POSTs and reports the wind-down', async () => {
   assert.equal(code, 0)
   assert.equal(stub.requests[0].path, '/api/v1/executions/e1/cancel')
   assert.match(ctx.output(), /winding down/)
+})
+
+test('pause POSTs to the workflow pause route and reports the hold', async () => {
+  const stub = await startStub((method, url) => {
+    assert.equal(method, 'POST')
+    assert.equal(url, '/api/v1/workflows/wf-1/pause')
+    return { json: { workflowId: 'wf-1', paused: true, pausedAt: '2026-07-18T00:00:00Z' } }
+  })
+  const ctx = makeCtx(stub.api)
+  const code = await pause({ positionals: ['wf-1'], flags: {} }, ctx)
+  await stub.close()
+
+  assert.equal(code, 0)
+  assert.match(ctx.output(), /wf-1 paused/)
+  assert.match(ctx.output(), /held until you resume/)
+})
+
+test('pause without a workflow id prints usage and exits 1', async () => {
+  const stub = await startStub(() => ({ json: {} }))
+  const ctx = makeCtx(stub.api)
+  const code = await pause({ positionals: [], flags: {} }, ctx)
+  await stub.close()
+  assert.equal(code, 1)
+  assert.equal(stub.requests.length, 0)
+})
+
+test('unpause POSTs to the workflow resume route and reports it', async () => {
+  const stub = await startStub((method, url) => {
+    assert.equal(method, 'POST')
+    assert.equal(url, '/api/v1/workflows/wf-1/resume')
+    return { json: { workflowId: 'wf-1', paused: false } }
+  })
+  const ctx = makeCtx(stub.api)
+  const code = await unpause({ positionals: ['wf-1'], flags: {} }, ctx)
+  await stub.close()
+
+  assert.equal(code, 0)
+  assert.match(ctx.output(), /wf-1 resumed/)
+  assert.match(ctx.output(), /accepted again/)
 })
 
 test('resume POSTs and reports the continued run', async () => {

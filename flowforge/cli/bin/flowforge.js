@@ -19,6 +19,8 @@ const COMMANDS = {
   diff: require('../src/commands/diff'),
   lint: require('../src/commands/lint'),
   trigger: require('../src/commands/trigger'),
+  pause: require('../src/commands/pause'),
+  unpause: require('../src/commands/resume-workflow'),
   runs: require('../src/commands/runs'),
   insights: require('../src/commands/insights'),
   forecast: require('../src/commands/forecast'),
@@ -46,6 +48,8 @@ Usage:
   flowforge diff <workflow-id> <file>              Compare the live workflow against an exported file (exits non-zero on drift)
   flowforge lint <workflow-id> [file] [--strict]   Lint the live workflow — or an exported file against its workspace (exits non-zero on errors)
   flowforge trigger <workflow-id> [--data <json>] [--key <idempotency-key>] [--priority high|normal|low] [--watch]
+  flowforge pause <workflow-id>                    Hold all new runs (kill switch) — needs a manage token
+  flowforge unpause <workflow-id>                  Release the pause and accept runs again
   flowforge runs <workflow-id> [--limit N]         Recent runs for a workflow
   flowforge insights <workflow-id> [--limit N]     Duration percentiles, success rate, anomalies
   flowforge forecast <workflow-id>                 Predicted next-run duration and bottleneck
