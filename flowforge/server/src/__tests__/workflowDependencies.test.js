@@ -131,4 +131,16 @@ describe('GET /api/workflows/:id/dependencies', () => {
       .set('Authorization', `Bearer ${other.body.token}`)
     expect(res.status).toBe(404)
   })
+
+  it('is available on the public API under the read scope', async () => {
+    const token = (
+      await authed(request(app).post('/api/tokens')).send({ name: 'deps-read', scopes: ['read'] })
+    ).body.token
+    const res = await request(app)
+      .get(`/api/v1/workflows/${a}/dependencies`)
+      .set('Authorization', `Bearer ${token}`)
+    expect(res.status).toBe(200)
+    expect(res.body.workflowId).toBe(a)
+    expect(res.body.dependsOn.map((d) => d.name).sort()).toEqual(['Per item', 'Send alert'])
+  })
 })

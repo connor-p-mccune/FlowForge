@@ -29,6 +29,7 @@ const { diffGraphs, presentDiff } = require('../services/graphDiff')
 const { lintGraph } = require('../services/workflowLinter')
 const { forbidViewer } = require('../services/workspaceRoles')
 const { isPaused, PAUSED_ERROR, pauseWorkflow, resumeWorkflow } = require('../services/workflowPause')
+const { computeDependencies } = require('../services/workflowDependencies')
 
 const router = express.Router()
 
@@ -369,6 +370,22 @@ router.get('/workflows/:id/forecast', tokenAuth('read'), (req, res) => {
     const workflow = getWorkflowForMember(req.params.id, req.user.id)
     if (!workflow) return res.status(404).json({ error: 'Workflow not found' })
     res.json({ workflowId: workflow.id, ...forecastFor(workflow.id) })
+  } catch (err) {
+    console.error(err)
+    res.status(500).json({ error: 'Internal server error' })
+  }
+})
+
+// GET /api/v1/workflows/:id/dependencies — cross-workflow impact analysis:
+// what this workflow calls (sub-workflow / for-each nodes, error handler),
+// what calls it, and any stale cross-workflow reference cycle it sits on. So a
+// deploy pipeline can refuse to undeploy a workflow that others still call, or
+// map the blast radius of a change. Read-only; `read` scope.
+router.get('/workflows/:id/dependencies', tokenAuth('read'), (req, res) => {
+  try {
+    const workflow = getWorkflowForMember(req.params.id, req.user.id)
+    if (!workflow) return res.status(404).json({ error: 'Workflow not found' })
+    res.json({ workflowId: workflow.id, ...computeDependencies(workflow) })
   } catch (err) {
     console.error(err)
     res.status(500).json({ error: 'Internal server error' })

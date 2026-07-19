@@ -479,6 +479,35 @@ const spec = {
         },
       },
     },
+    '/workflows/{workflowId}/dependencies': {
+      get: {
+        tags: ['workflows'],
+        summary: 'Cross-workflow dependencies & impact analysis',
+        description:
+          'The workflows this one references (sub-workflow / for-each nodes and ' +
+          'its error handler) as `dependsOn`, the workflows that reference it as ' +
+          '`dependedOnBy`, and any stale cross-workflow reference cycle it sits ' +
+          'on as `cycle`. Lets a deploy pipeline refuse to undeploy a workflow ' +
+          'others still call, or map the blast radius of a change before making ' +
+          'it. Requires the `read` scope.',
+        operationId: 'getWorkflowDependencies',
+        parameters: [{ $ref: '#/components/parameters/WorkflowId' }],
+        responses: {
+          200: {
+            description: 'The dependency picture for the workflow.',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/Dependencies' },
+              },
+            },
+          },
+          401: { $ref: '#/components/responses/Unauthorized' },
+          403: { $ref: '#/components/responses/Forbidden' },
+          404: { $ref: '#/components/responses/NotFound' },
+          429: { $ref: '#/components/responses/RateLimited' },
+        },
+      },
+    },
     '/workflows/{workflowId}/schedule': {
       get: {
         tags: ['workflows'],
@@ -1344,6 +1373,43 @@ const spec = {
               workNodes: { type: 'integer' },
               ratio: { type: 'number' },
             },
+          },
+        },
+      },
+      Dependencies: {
+        type: 'object',
+        properties: {
+          workflowId: { type: 'string' },
+          dependsOn: {
+            type: 'array',
+            description: 'Workflows this one references.',
+            items: { $ref: '#/components/schemas/DependencyEdge' },
+          },
+          dependedOnBy: {
+            type: 'array',
+            description: 'Workflows that reference this one.',
+            items: { $ref: '#/components/schemas/DependencyEdge' },
+          },
+          cycle: {
+            type: 'array',
+            nullable: true,
+            items: { type: 'string' },
+            description:
+              'A stale cross-workflow reference cycle this workflow sits on ' +
+              '(workflow ids, start → … → start), or null if none.',
+          },
+        },
+      },
+      DependencyEdge: {
+        type: 'object',
+        properties: {
+          id: { type: 'string' },
+          name: { type: 'string' },
+          status: { type: 'string', enum: ['draft', 'deployed', 'archived'] },
+          via: {
+            type: 'array',
+            description: 'How the reference is made.',
+            items: { type: 'string', enum: ['sub-workflow', 'for-each', 'error-handler'] },
           },
         },
       },
