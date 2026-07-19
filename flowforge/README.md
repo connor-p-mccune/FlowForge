@@ -82,6 +82,15 @@ order while streaming live progress back to every collaborator on the canvas.
   **queue** parks the run until a slot frees, **reject** refuses it with a
   `409` at every entry point — and skips schedule ticks, so a cron workflow
   never overlaps itself.
+- **Rate limiting** — cap how many runs a workflow may **start** within a
+  rolling window (e.g. 100 per hour), independent of the concurrency cap:
+  concurrency bounds how many run *at once*, the rate limit bounds how *often*
+  they start — so a runaway schedule or a webhook sender firing in bursts can't
+  hammer a downstream API even when each run finishes instantly. Enforced at the
+  same admission gate as the concurrency cap, so every entry point is covered by
+  one check; the window slides by run-start time, dry runs are exempt, and
+  refusals surface as a `409` and land on `/metrics`
+  (`flowforge_runs_rate_limited_total`).
 - **Pause (operational kill switch)** — hold a workflow with one click when
   something downstream is on fire: while paused, **no new real run starts at
   any entry point** — the Run button, the public API, webhook deliveries,

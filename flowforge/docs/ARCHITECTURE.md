@@ -418,6 +418,41 @@ inside their parent's engine loop, not through the queue, so limits apply to
 top-level runs — which also means a workflow calling itself through a gate
 can't deadlock.
 
+### Rate limiting
+
+The concurrency cap answers "how many runs at once?"; the rate limit
+(`rate_limit_max` over `rate_limit_window_seconds`) answers a different
+question — "how often may runs *start*?" — and the two are genuinely
+independent: a workflow whose runs each finish in 50ms never trips a
+concurrency cap of 1, yet a schedule misconfigured to fire every second, or a
+webhook sender that batches, can still bury a downstream API in requests. Rate
+limiting is the knob for that.
+
+The implementation is deliberately small because it lives at the same chokepoint
+the concurrency reject already uses. `admitRun` now runs two checks in
+sequence — concurrency, then rate — so every entry point (manual, public API,
+webhook, schedule, replay, resume, error-handler escalation) is covered by one
+function call, with no per-route logic. Three properties make the count honest:
+
+- **The window slides by `created_at`.** The check counts a workflow's runs
+  created within the trailing window — no buckets to reset, no window-edge
+  spikes, just "how many in the last N seconds" evaluated continuously.
+- **It counts exactly what was admitted.** A refused submission inserts no
+  execution row, so the count reflects runs that actually started, never
+  attempts. Dry runs carry `trigger_type = 'dry-run'` and are excluded, like
+  they are from the concurrency count — an interactive test must not eat the
+  production allowance.
+- **The two fields travel together.** A max without a window (or vice versa) is
+  meaningless, so the route enforces both-or-neither after resolving the update
+  against the stored row, and the panel clears both when the max is emptied.
+
+An over-limit submission is a `409` at the door (a webhook sender reads it as
+"back off", exactly like the concurrency reject) and increments
+`flowforge_runs_rate_limited_total`, so a workflow that's constantly bumping its
+ceiling is visible on the dashboard rather than silently shedding load. A
+dedicated `(workflow_id, created_at)` index keeps the window count cheap on a
+busy instance.
+
 ### The pause kill switch
 
 Concurrency limits shape *how many* runs overlap; pause
@@ -453,10 +488,11 @@ than a scatter of new checks:
   back rather than a spurious "paused" 409 — the same ordering that protects
   retries at the concurrency cap.
 
-The switch composes cleanly with the two limits already here: pause holds
-*all* runs, the concurrency cap bounds *simultaneous* runs, and priority lanes
-order *pickup* — three independent admission knobs that never have to know
-about each other.
+The switch composes cleanly with the other admission controls, each answering a
+different question and none needing to know about the others: **pause** holds
+*all* runs, the **concurrency cap** bounds *simultaneous* runs, the **rate
+limit** bounds *how often* runs start, and **priority lanes** order *pickup*
+among the runs that are admitted.
 
 ### Priority lanes
 

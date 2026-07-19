@@ -289,9 +289,10 @@ const spec = {
           404: { $ref: '#/components/responses/NotFound' },
           409: {
             description:
-              'The Idempotency-Key was already used with a different request ' +
-              'body — or the workflow caps concurrent runs with the reject ' +
-              'policy and is at its cap.',
+              'The run could not be admitted — the Idempotency-Key was already ' +
+              'used with a different request body, the workflow is paused, it is ' +
+              'at its rate limit, or it caps concurrent runs with the reject ' +
+              'policy and is at its cap. The error message says which.',
             content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } },
           },
           429: { $ref: '#/components/responses/RateLimited' },
