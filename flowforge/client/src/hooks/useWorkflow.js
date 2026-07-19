@@ -151,5 +151,30 @@ export function useWorkflow(workflowId, setNodes, setEdges) {
     [workflowId]
   )
 
-  return { workflow, saveGraph, loading, deploy, applyWorkflow, comments, setComments, viewerIsOwner }
+  // Pause / resume the workflow (the operational kill switch). Hits the
+  // idempotent server routes and folds the returned row into local state so
+  // paused_at is reflected immediately without a reload. Returns the fresh row.
+  const setPaused = useCallback(
+    async (paused) => {
+      const action = paused ? 'pause' : 'resume'
+      const { workflow: wf } = await apiFetch(`/api/workflows/${workflowId}/${action}`, {
+        method: 'POST',
+      })
+      setWorkflow((prev) => (prev ? { ...prev, ...wf } : wf))
+      return wf
+    },
+    [workflowId]
+  )
+
+  return {
+    workflow,
+    saveGraph,
+    loading,
+    deploy,
+    setPaused,
+    applyWorkflow,
+    comments,
+    setComments,
+    viewerIsOwner,
+  }
 }

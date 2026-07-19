@@ -46,8 +46,17 @@ function CanvasInner({ workflowId }) {
   const wrapperRef = useRef(null)
   const [nodes, setNodes, onNodesChange] = useNodesState([])
   const [edges, setEdges, onEdgesChange] = useEdgesState([])
-  const { workflow, saveGraph, loading, deploy, applyWorkflow, comments, setComments, viewerIsOwner } =
-    useWorkflow(workflowId, setNodes, setEdges)
+  const {
+    workflow,
+    saveGraph,
+    loading,
+    deploy,
+    setPaused,
+    applyWorkflow,
+    comments,
+    setComments,
+    viewerIsOwner,
+  } = useWorkflow(workflowId, setNodes, setEdges)
   const { screenToFlowPosition, getNode, fitView, setCenter } = useReactFlow()
   const { user } = useAuth()
 
@@ -109,6 +118,11 @@ function CanvasInner({ workflowId }) {
     setDeployed(workflow?.status === 'deployed')
   }, [workflow])
   const hasSchedule = useMemo(() => nodes.some((n) => n.type === 'trigger-schedule'), [nodes])
+
+  // Operational kill switch. paused derives from the loaded workflow row and
+  // updates when the toggle below folds the server's response back in.
+  const paused = Boolean(workflow?.paused_at)
+  const [pausing, setPausing] = useState(false)
 
   // Approval gates waiting on the current run: nodeId -> { id, message,
   // expiresAt }. Set by 'approval' events off the exec-update channel; an
@@ -523,6 +537,28 @@ function CanvasInner({ workflowId }) {
       setDeploying(false)
     }
   }, [deploy, nodes, edges])
+
+  // Flip the kill switch. Idempotent server-side, so a stale UI can't wedge;
+  // the toast names the resulting state. On success the hook has already folded
+  // the fresh paused_at into `workflow`, so the banner and toolbar re-render.
+  const handleTogglePause = useCallback(async () => {
+    const next = !paused
+    setPausing(true)
+    try {
+      await setPaused(next)
+      toastRef.current.success(
+        next
+          ? 'Workflow paused — new runs are held until you resume it.'
+          : 'Workflow resumed — new runs are accepted again.'
+      )
+    } catch (err) {
+      toastRef.current.error(
+        `Couldn’t ${next ? 'pause' : 'resume'} the workflow: ${err.message}`
+      )
+    } finally {
+      setPausing(false)
+    }
+  }, [paused, setPaused])
 
   // The right-side panels (history / webhooks / suggestions) share screen space,
   // so opening one closes the others. The Issues panel lives on the left and
@@ -976,6 +1012,9 @@ function CanvasInner({ workflowId }) {
         issuesOpen={issuesOpen}
         onDeploy={handleDeploy}
         onToggleHistory={handleToggleHistory}
+        onTogglePause={handleTogglePause}
+        paused={paused}
+        pausing={pausing}
         running={execution?.status === 'running' || execution?.status === 'pending'}
         testing={testBannerVisible}
         suggesting={suggestLoading}
@@ -984,6 +1023,13 @@ function CanvasInner({ workflowId }) {
         scheduleWarning={hasSchedule && !deployed}
       />
       <PresenceBar users={remoteUsers} selfId={user?.id} />
+      {paused && (
+        <div className="canvas-pause-banner" role="status">
+          ⏸ This workflow is paused — new runs are held (manual, API, webhook,
+          and schedule). Test runs still work. Resume from the toolbar to accept
+          runs again.
+        </div>
+      )}
       {testBannerVisible && (
         <div className="canvas-test-banner" role="status">
           ⚡ Test mode — action nodes will not fire

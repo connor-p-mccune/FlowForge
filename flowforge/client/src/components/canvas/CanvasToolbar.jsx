@@ -24,6 +24,9 @@ export default function CanvasToolbar({
   issuesOpen,
   onDeploy,
   onToggleHistory,
+  onTogglePause,
+  paused,
+  pausing,
   running,
   testing,
   suggesting,
@@ -140,9 +143,9 @@ export default function CanvasToolbar({
       <span className="canvas-toolbar__divider" />
       <button
         className="toolbar-btn toolbar-btn--run"
-        title="Run workflow"
+        title={paused ? 'Workflow is paused — resume it to run' : 'Run workflow'}
         onClick={onRun}
-        disabled={running}
+        disabled={running || paused}
       >
         {running && !testing ? 'Running…' : '▶ Run'}
       </button>
@@ -153,6 +156,19 @@ export default function CanvasToolbar({
         disabled={running}
       >
         {testing ? 'Testing…' : '⚡ Test'}
+      </button>
+      <button
+        className={`toolbar-btn toolbar-btn--pause${paused ? ' toolbar-btn--paused' : ''}`}
+        title={
+          paused
+            ? 'Resume — accept new runs again'
+            : 'Pause — hold all new runs (manual, API, webhook, schedule); in-flight runs finish and test runs still work'
+        }
+        onClick={onTogglePause}
+        disabled={pausing}
+        aria-pressed={paused}
+      >
+        {pausing ? '…' : paused ? '▶ Resume' : '⏸ Pause'}
       </button>
       <button
         className="toolbar-btn toolbar-btn--runs"

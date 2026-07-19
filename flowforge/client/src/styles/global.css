@@ -692,6 +692,30 @@ html, body, #root {
   pointer-events: none;
 }
 
+/* Kill-switch banner — sits a row below the test banner so both can show. */
+.canvas-pause-banner {
+  position: absolute;
+  top: 62px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 10;
+  max-width: 560px;
+  padding: 6px 16px;
+  background: #fee2e2;
+  border: 1px solid #ef4444;
+  border-radius: 8px;
+  color: #991b1b;
+  font-size: 13px;
+  font-weight: 600;
+  text-align: center;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+  pointer-events: none;
+}
+/* When both banners are up, drop the test banner below the (taller) pause one. */
+.canvas-pause-banner ~ .canvas-test-banner {
+  top: 108px;
+}
+
 /* Sidebar sections */
 .sidebar__section {
   padding: 14px 12px;
@@ -3599,6 +3623,19 @@ html, body, #root {
   color: #fff;
 }
 .toolbar-btn--deploy:disabled { opacity: 0.6; cursor: not-allowed; }
+
+/* Kill switch: neutral while running, red while paused so the state reads at
+   a glance. */
+.toolbar-btn--pause {
+  border-color: #d1d5db;
+  background: #fff;
+}
+.toolbar-btn--pause.toolbar-btn--paused {
+  border-color: #ef4444;
+  background: #ef4444;
+  color: #fff;
+}
+.toolbar-btn--pause:disabled { opacity: 0.6; cursor: not-allowed; }
 
 .toolbar-btn--history {
   border-color: #d1d5db;
