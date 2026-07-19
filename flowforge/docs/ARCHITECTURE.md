@@ -806,6 +806,36 @@ The design is almost entirely reuse:
   delay node (which sleeps even in dry-run) reports *timed-out* rather than
   hanging the gate.
 
+### Cross-workflow dependency analysis
+
+The linter reasons about *one* graph; `services/workflowDependencies.js` reasons
+about how a workspace's workflows reference *each other*. Three mechanisms make
+one workflow depend on another — a **sub-workflow** node, a **for-each** node
+(both `node.data.config.workflowId`), and an **error-handler** designation
+(`workflows.error_workflow_id`) — and together they define a directed graph.
+The service exists to answer the question that graph is *for*: what breaks if I
+change, undeploy, or delete this?
+
+- **Both directions, from one build.** A single pass builds
+  `Map(source → Map(target → {via}))` for the workspace, keeping only edges
+  whose target still exists there — a dangling reference is a lint error, not a
+  dependency, so it's dropped rather than reported here. `dependsOn` is a
+  workflow's out-edges; `dependedOnBy` is found by scanning for in-edges. Each
+  edge carries *how* the reference is made, aggregated (a workflow that both
+  calls another as a sub-workflow and escalates to it on failure shows
+  `["error-handler", "sub-workflow"]`).
+- **Cycle detection is the interesting part.** Sub-workflow recursion is blocked
+  at run time by the engine's ancestor-id stack, but a *stale configuration* can
+  still describe a cycle (A calls B, someone points B back at A) that only fails
+  when a run actually reaches it. A DFS from the workflow's successors that finds
+  its way back to the workflow reconstructs the offending path
+  (`[A, B, A]`), so the loop is visible statically — in the panel, on the API,
+  and as a non-zero exit from `flowforge deps` — before a run trips it.
+- **Same workspace, same boundary as everything else.** References only resolve
+  within a workspace because the sub-workflow runner and the error-handler
+  settings both enforce that, so the analysis needs no cross-workspace joins and
+  the read endpoint's single membership check covers the whole result.
+
 ---
 
 ## Status badges

@@ -449,6 +449,36 @@ empty or cyclic graph.
 
 Requires the `read` scope.
 
+### Workflow dependencies (impact analysis)
+
+```bash
+curl -s "https://your-flowforge-host/api/v1/workflows/6f0c…/dependencies" \
+  -H "Authorization: Bearer $FLOWFORGE_TOKEN"
+```
+
+Response `200` — the workflows this one references (`dependsOn`), the workflows
+that reference it (`dependedOnBy`), and any stale cross-workflow reference cycle
+it sits on (`cycle`, else `null`). Each edge is labelled with how the reference
+is made: `sub-workflow`, `for-each`, or `error-handler`. Use it to refuse a
+promotion that would undeploy a workflow others still call, or to map a change's
+blast radius.
+
+```json
+{
+  "workflowId": "6f0c…",
+  "dependsOn": [
+    { "id": "a1b2…", "name": "Send alert", "status": "deployed", "via": ["error-handler", "sub-workflow"] }
+  ],
+  "dependedOnBy": [
+    { "id": "c3d4…", "name": "Nightly rollup", "status": "deployed", "via": ["for-each"] }
+  ],
+  "cycle": null
+}
+```
+
+Requires the `read` scope. From the CLI: `flowforge deps <id>` (exits non-zero
+on a cycle).
+
 ### Preview the schedule
 
 ```bash

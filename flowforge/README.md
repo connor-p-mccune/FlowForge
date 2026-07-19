@@ -170,6 +170,15 @@ order while streaming live progress back to every collaborator on the canvas.
   linter from CI: `flowforge lint <id>` gates on the live graph, and
   `flowforge lint <id> file.json` vets an exported definition against its
   target workspace **before** importing it.
+- **Cross-workflow impact analysis** — workflows reference each other through
+  sub-workflow calls, for-each fan-outs, and error-handler designations, which
+  together form a dependency graph across a workspace. Before you undeploy or
+  delete something, **see what breaks**: the run settings panel, `flowforge deps
+  <id>`, and `GET /api/v1/workflows/:id/dependencies` all show what a workflow
+  calls, what calls it (each edge labelled with the relationship kind), and
+  whether it sits on a **stale cross-workflow cycle** (A→B→A) — the kind that
+  fails at run time with a circular-reference error, surfaced statically before
+  it does.
 - **Version diffs** — every deploy snapshots the graph; the history drawer can
   preview any version, restore it (reversibly), or **diff it against the live
   canvas** — nodes added/removed, changed config fields, and rewired
