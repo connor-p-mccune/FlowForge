@@ -37,6 +37,9 @@ export default function RunSettingsPanel({ workflowId, open, onClose }) {
   // refuses self-handling).
   const [handlerId, setHandlerId] = useState('')
   const [handlerOptions, setHandlerOptions] = useState([])
+  // Cross-workflow dependencies (read-only impact analysis). null while
+  // loading; a fetch failure just hides the section — it's informational.
+  const [deps, setDeps] = useState(null)
   // Step cache: { entries, hits } for the section below. null while loading;
   // a fetch failure just hides the numbers — the panel's main job is settings.
   const [cacheStats, setCacheStats] = useState(null)
@@ -56,6 +59,14 @@ export default function RunSettingsPanel({ workflowId, open, onClose }) {
       })
       .catch(() => {
         /* stats are a nicety — the settings form still works without them */
+      })
+    setDeps(null)
+    apiFetch(`/api/workflows/${workflowId}/dependencies`)
+      .then((d) => {
+        if (!cancelled) setDeps(d)
+      })
+      .catch(() => {
+        /* the impact section is informational — hide it if it can't load */
       })
     apiFetch(`/api/workflows/${workflowId}`)
       .then(({ workflow: wf }) => {
@@ -383,6 +394,48 @@ export default function RunSettingsPanel({ workflowId, open, onClose }) {
               <button className="webhook-panel__create" onClick={handleSave} disabled={saving}>
                 {saving ? 'Saving…' : 'Save settings'}
               </button>
+
+              {deps && (deps.dependsOn.length > 0 || deps.dependedOnBy.length > 0 || deps.cycle) && (
+                <>
+                  <div className="run-settings__section">Dependencies</div>
+                  {deps.cycle && (
+                    <p className="webhook-panel__error">
+                      ⚠ Cross-workflow cycle: {deps.cycle.join(' → ')}. This would fail at run
+                      time with a circular-reference error.
+                    </p>
+                  )}
+                  {deps.dependsOn.length > 0 && (
+                    <div className="run-settings__deps">
+                      <span className="run-settings__label">Calls</span>
+                      <ul className="run-settings__deps-list">
+                        {deps.dependsOn.map((d) => (
+                          <li key={d.id} title={d.id}>
+                            {d.name}{' '}
+                            <span className="run-settings__deps-via">({d.via.join(', ')})</span>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+                  {deps.dependedOnBy.length > 0 && (
+                    <div className="run-settings__deps">
+                      <span className="run-settings__label">Called by</span>
+                      <ul className="run-settings__deps-list">
+                        {deps.dependedOnBy.map((d) => (
+                          <li key={d.id} title={d.id}>
+                            {d.name}{' '}
+                            <span className="run-settings__deps-via">({d.via.join(', ')})</span>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+                  <p className="webhook-panel__hint">
+                    What this workflow references and what references it, across the
+                    workspace — check before undeploying or deleting.
+                  </p>
+                </>
+              )}
 
               <div className="run-settings__section">Step cache</div>
               <p className="webhook-panel__hint">

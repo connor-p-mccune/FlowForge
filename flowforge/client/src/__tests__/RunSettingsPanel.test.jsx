@@ -324,6 +324,51 @@ describe('RunSettingsPanel', () => {
     )
   })
 
+  it('shows the dependency impact section when the workflow has references', async () => {
+    apiFetch.mockImplementation((path, opts) => {
+      if (path === '/api/workflows/wf1' && !opts) return Promise.resolve({ workflow: WORKFLOW })
+      if (path === '/api/workspaces/ws1/workflows') {
+        return Promise.resolve({ workflows: WORKSPACE_WORKFLOWS })
+      }
+      if (path === '/api/workflows/wf1/cache' && !opts) {
+        return Promise.resolve({ cache: { entries: 0, hits: 0 } })
+      }
+      if (path === '/api/workflows/wf1/dependencies') {
+        return Promise.resolve({
+          workflowId: 'wf1',
+          dependsOn: [{ id: 'wf2', name: 'Send alert', status: 'deployed', via: ['sub-workflow'] }],
+          dependedOnBy: [{ id: 'wf3', name: 'Nightly', status: 'deployed', via: ['for-each'] }],
+          cycle: null,
+        })
+      }
+      return Promise.reject(new Error(`unexpected: ${path}`))
+    })
+    setup()
+    expect(await screen.findByText('Dependencies')).toBeInTheDocument()
+    expect(screen.getByText('(sub-workflow)')).toBeInTheDocument()
+    expect(screen.getByText('(for-each)')).toBeInTheDocument()
+  })
+
+  it('warns about a cross-workflow dependency cycle', async () => {
+    apiFetch.mockImplementation((path, opts) => {
+      if (path === '/api/workflows/wf1' && !opts) return Promise.resolve({ workflow: WORKFLOW })
+      if (path === '/api/workspaces/ws1/workflows') {
+        return Promise.resolve({ workflows: WORKSPACE_WORKFLOWS })
+      }
+      if (path === '/api/workflows/wf1/cache' && !opts) {
+        return Promise.resolve({ cache: { entries: 0, hits: 0 } })
+      }
+      if (path === '/api/workflows/wf1/dependencies') {
+        return Promise.resolve({
+          workflowId: 'wf1', dependsOn: [], dependedOnBy: [], cycle: ['wf1', 'wf2', 'wf1'],
+        })
+      }
+      return Promise.reject(new Error(`unexpected: ${path}`))
+    })
+    setup()
+    expect(await screen.findByText(/Cross-workflow cycle/)).toBeInTheDocument()
+  })
+
   it('shows live step-cache stats and clears them on demand', async () => {
     setup()
     expect(await screen.findByText(/2 live cached results, reused 5 times/i)).toBeInTheDocument()

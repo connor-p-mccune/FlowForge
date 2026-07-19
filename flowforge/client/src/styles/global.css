@@ -1993,6 +1993,24 @@ html, body, #root {
   color: #6b7280;
 }
 
+/* Dependencies (read-only impact analysis). */
+.run-settings__deps {
+  margin: 8px 0;
+}
+.run-settings__deps-list {
+  margin: 4px 0 0;
+  padding-left: 18px;
+  font-size: 13px;
+  color: #374151;
+}
+.run-settings__deps-list li {
+  margin: 2px 0;
+}
+.run-settings__deps-via {
+  color: #6b7280;
+  font-size: 12px;
+}
+
 /* Rate limit: "Max runs" beside "Per [n] [unit]" on one row. */
 .run-settings__rate {
   display: flex;
