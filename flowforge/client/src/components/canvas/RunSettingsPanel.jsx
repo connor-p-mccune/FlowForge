@@ -3,6 +3,18 @@ import { apiFetch } from '../../services/api'
 import { useToast } from '../../hooks/useToast'
 import StatusBadgeSection from './StatusBadgeSection'
 
+// Rate-limit window units, in seconds. The panel stores a window in seconds
+// server-side but lets the user pick a friendlier unit; on load we show the
+// largest unit the stored window divides into evenly.
+const RATE_UNITS = { second: 1, minute: 60, hour: 3600 }
+function splitWindow(seconds) {
+  if (!seconds) return { value: '', unit: 'minute' }
+  for (const unit of ['hour', 'minute']) {
+    if (seconds % RATE_UNITS[unit] === 0) return { value: String(seconds / RATE_UNITS[unit]), unit }
+  }
+  return { value: String(seconds), unit: 'second' }
+}
+
 // Per-workflow run limits: cap how many of this workflow's runs may be active
 // at once, and choose what happens to a run submitted at the cap — park it
 // until a slot frees ('queue') or refuse it with an error ('reject'). Saves
@@ -12,6 +24,10 @@ export default function RunSettingsPanel({ workflowId, open, onClose }) {
   const [workflow, setWorkflow] = useState(null)
   const [limitInput, setLimitInput] = useState('') // '' = unlimited
   const [policy, setPolicy] = useState('queue')
+  // Rate limit: max run starts per window. '' max = no limit.
+  const [rateMaxInput, setRateMaxInput] = useState('')
+  const [rateWindowInput, setRateWindowInput] = useState('')
+  const [rateUnit, setRateUnit] = useState('minute')
   const [priority, setPriority] = useState('normal') // default queue lane
   const [slaDurationInput, setSlaDurationInput] = useState('') // seconds, '' = no target
   const [slaSuccessInput, setSlaSuccessInput] = useState('') // percent, '' = no target
@@ -47,6 +63,12 @@ export default function RunSettingsPanel({ workflowId, open, onClose }) {
         setWorkflow(wf)
         setLimitInput(wf.max_concurrent_runs ? String(wf.max_concurrent_runs) : '')
         setPolicy(wf.concurrency_policy || 'queue')
+        setRateMaxInput(wf.rate_limit_max ? String(wf.rate_limit_max) : '')
+        {
+          const { value, unit } = splitWindow(wf.rate_limit_window_seconds)
+          setRateWindowInput(value)
+          setRateUnit(unit)
+        }
         setPriority(wf.default_priority || 'normal')
         // Stored in ms / as a 0..1 fraction; shown in the friendlier seconds / %.
         setSlaDurationInput(wf.sla_max_duration_ms ? String(wf.sla_max_duration_ms / 1000) : '')
@@ -101,6 +123,29 @@ export default function RunSettingsPanel({ workflowId, open, onClose }) {
       return
     }
 
+    // Rate limit: max runs per window (converted to seconds). Empty max clears
+    // the whole limit; a set max needs a positive window.
+    const rateMaxTrim = rateMaxInput.trim()
+    let rateMax = null
+    let rateWindowSeconds = null
+    if (rateMaxTrim !== '') {
+      rateMax = Number(rateMaxTrim)
+      if (!Number.isInteger(rateMax) || rateMax < 1) {
+        setError('Rate limit must be a whole number of runs (1 or more), or empty for no limit')
+        return
+      }
+      const windowValue = Number(rateWindowInput.trim())
+      if (!Number.isInteger(windowValue) || windowValue < 1) {
+        setError('Rate-limit window must be a whole number (1 or more)')
+        return
+      }
+      rateWindowSeconds = windowValue * RATE_UNITS[rateUnit]
+      if (rateWindowSeconds > 86400) {
+        setError('Rate-limit window must be at most one day')
+        return
+      }
+    }
+
     // SLA targets: seconds → ms, percent → fraction. Empty clears the target.
     const durTrim = slaDurationInput.trim()
     const durSeconds = durTrim === '' ? null : Number(durTrim)
@@ -134,6 +179,8 @@ export default function RunSettingsPanel({ workflowId, open, onClose }) {
           description: workflow.description ?? undefined,
           max_concurrent_runs: limit,
           concurrency_policy: policy,
+          rate_limit_max: rateMax,
+          rate_limit_window_seconds: rateWindowSeconds,
           sla_max_duration_ms: durSeconds === null ? null : Math.round(durSeconds * 1000),
           sla_min_success_rate: successPct === null ? null : successPct / 100,
           heartbeat_interval_minutes: heartbeatMinutes,
@@ -193,6 +240,49 @@ export default function RunSettingsPanel({ workflowId, open, onClose }) {
                   ? 'Submissions at the cap fail immediately (409) — callers find out now instead of watching a run sit queued. Scheduled ticks are skipped, which is exactly “don’t overlap” for cron workflows.'
                   : 'Runs at the cap wait and start automatically once a slot frees. Order across waiting runs is not guaranteed.'}
               </p>
+
+              <div className="run-settings__section">Rate limit</div>
+              <p className="webhook-panel__hint">
+                Cap how many runs may <em>start</em> in a rolling window —
+                independent of the concurrency cap above. Concurrency bounds how
+                many run at once; this bounds how often they start, so a runaway
+                schedule or a bursty webhook sender can’t hammer a downstream
+                API. Over the limit, a run is refused (409); test runs are exempt.
+              </p>
+              <div className="run-settings__rate">
+                <label className="run-settings__field run-settings__rate-max">
+                  <span className="run-settings__label">Max runs</span>
+                  <input
+                    type="number"
+                    min="1"
+                    placeholder="No limit"
+                    value={rateMaxInput}
+                    onChange={(e) => setRateMaxInput(e.target.value)}
+                  />
+                </label>
+                <label className="run-settings__field run-settings__rate-window">
+                  <span className="run-settings__label">Per</span>
+                  <div className="run-settings__rate-window-inputs">
+                    <input
+                      type="number"
+                      min="1"
+                      placeholder="1"
+                      value={rateWindowInput}
+                      onChange={(e) => setRateWindowInput(e.target.value)}
+                      aria-label="Rate-limit window amount"
+                    />
+                    <select
+                      value={rateUnit}
+                      onChange={(e) => setRateUnit(e.target.value)}
+                      aria-label="Rate-limit window unit"
+                    >
+                      <option value="second">second(s)</option>
+                      <option value="minute">minute(s)</option>
+                      <option value="hour">hour(s)</option>
+                    </select>
+                  </div>
+                </label>
+              </div>
 
               <label className="run-settings__field">
                 <span className="run-settings__label">Default run priority</span>

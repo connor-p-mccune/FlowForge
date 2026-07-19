@@ -1993,6 +1993,29 @@ html, body, #root {
   color: #6b7280;
 }
 
+/* Rate limit: "Max runs" beside "Per [n] [unit]" on one row. */
+.run-settings__rate {
+  display: flex;
+  gap: 10px;
+  align-items: flex-end;
+}
+.run-settings__rate-max {
+  flex: 0 0 90px;
+}
+.run-settings__rate-window {
+  flex: 1 1 auto;
+}
+.run-settings__rate-window-inputs {
+  display: flex;
+  gap: 6px;
+}
+.run-settings__rate-window-inputs input {
+  width: 70px;
+}
+.run-settings__rate-window-inputs select {
+  flex: 1 1 auto;
+}
+
 /* Run insights panel (InsightsPanel) — shares the webhook panel shell. */
 /* Test scenarios panel. */
 .tests-panel__toolbar {

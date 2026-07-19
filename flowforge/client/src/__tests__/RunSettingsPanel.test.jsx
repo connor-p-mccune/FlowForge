@@ -247,6 +247,68 @@ describe('RunSettingsPanel', () => {
     expect(screen.getByText(/failures are not being escalated/i)).toBeInTheDocument()
   })
 
+  it('loads an existing rate limit in the largest friendly unit', async () => {
+    apiFetch.mockImplementation((path, opts) => {
+      if (path === '/api/workflows/wf1' && !opts) {
+        return Promise.resolve({
+          workflow: { ...WORKFLOW, rate_limit_max: 100, rate_limit_window_seconds: 3600 },
+        })
+      }
+      if (path === '/api/workspaces/ws1/workflows') {
+        return Promise.resolve({ workflows: WORKSPACE_WORKFLOWS })
+      }
+      return Promise.reject(new Error(`unexpected: ${path}`))
+    })
+    setup()
+    // 3600s divides evenly into hours → "1 hour".
+    expect(await screen.findByLabelText(/max runs/i)).toHaveValue(100)
+    expect(screen.getByLabelText(/rate-limit window amount/i)).toHaveValue(1)
+    expect(screen.getByLabelText(/rate-limit window unit/i)).toHaveValue('hour')
+  })
+
+  it('saves a rate limit converted to seconds', async () => {
+    setup()
+    fireEvent.change(await screen.findByLabelText(/max runs/i), { target: { value: '30' } })
+    fireEvent.change(screen.getByLabelText(/rate-limit window amount/i), { target: { value: '5' } })
+    fireEvent.change(screen.getByLabelText(/rate-limit window unit/i), { target: { value: 'minute' } })
+    fireEvent.click(screen.getByRole('button', { name: /save settings/i }))
+
+    await waitFor(() =>
+      expect(apiFetch).toHaveBeenCalledWith('/api/workflows/wf1', {
+        method: 'PUT',
+        body: expect.objectContaining({
+          rate_limit_max: 30,
+          rate_limit_window_seconds: 300, // 5 minutes
+        }),
+      })
+    )
+  })
+
+  it('sends a null rate limit when max is empty', async () => {
+    setup()
+    await screen.findByLabelText(/max runs/i)
+    fireEvent.click(screen.getByRole('button', { name: /save settings/i }))
+    await waitFor(() =>
+      expect(apiFetch).toHaveBeenCalledWith('/api/workflows/wf1', {
+        method: 'PUT',
+        body: expect.objectContaining({
+          rate_limit_max: null,
+          rate_limit_window_seconds: null,
+        }),
+      })
+    )
+  })
+
+  it('rejects a rate-limit max without a window, before calling the API', async () => {
+    setup()
+    fireEvent.change(await screen.findByLabelText(/max runs/i), { target: { value: '10' } })
+    fireEvent.change(screen.getByLabelText(/rate-limit window amount/i), { target: { value: '' } })
+    fireEvent.click(screen.getByRole('button', { name: /save settings/i }))
+
+    expect(await screen.findByText(/window must be a whole number/i)).toBeInTheDocument()
+    expect(apiFetch).not.toHaveBeenCalledWith('/api/workflows/wf1', expect.objectContaining({ method: 'PUT' }))
+  })
+
   it('loads and saves the default run priority', async () => {
     setup()
     const select = await screen.findByLabelText(/default run priority/i)
