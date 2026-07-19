@@ -13,6 +13,7 @@ const stepCache = require('../services/stepCache')
 const { isValidPriority } = require('../services/runPriority')
 const { forbidViewer } = require('../services/workspaceRoles')
 const { pauseWorkflow, resumeWorkflow } = require('../services/workflowPause')
+const { computeDependencies } = require('../services/workflowDependencies')
 const {
   getRunner,
   loadWorkspaceSecrets,
@@ -469,6 +470,25 @@ router.post('/workflows/:id/resume', auth, (req, res) => {
     }
     if (forbidViewer(res, workflow.workspace_id, req.user.id)) return
     res.json({ workflow: resumeWorkflow(workflow, req.user.id) })
+  } catch (err) {
+    console.error(err)
+    res.status(500).json({ error: 'Internal server error' })
+  }
+})
+
+// GET /api/workflows/:id/dependencies — cross-workflow impact analysis: which
+// workflows this one calls (sub-workflow / for-each nodes, error handler),
+// which workflows call it, and whether it sits on a stale cross-workflow
+// reference cycle. Read-only; any workspace member (viewers included) can see
+// it. Answers "what breaks if I undeploy or delete this?" before you find out
+// the hard way.
+router.get('/workflows/:id/dependencies', auth, (req, res) => {
+  try {
+    const workflow = db.prepare('SELECT * FROM workflows WHERE id = ?').get(req.params.id)
+    if (!workflow || !isMember(workflow.workspace_id, req.user.id)) {
+      return res.status(404).json({ error: 'Workflow not found' })
+    }
+    res.json({ workflowId: workflow.id, ...computeDependencies(workflow) })
   } catch (err) {
     console.error(err)
     res.status(500).json({ error: 'Internal server error' })
