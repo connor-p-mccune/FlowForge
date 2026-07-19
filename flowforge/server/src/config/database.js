@@ -143,6 +143,25 @@ ensureColumn('executions', 'priority', 'TEXT')
 ensureColumn('workflows', 'heartbeat_interval_minutes', 'INTEGER')
 ensureColumn('workflows', 'heartbeat_alerted_at', 'TEXT')
 
+// Per-workflow rate limiting (services/concurrencyGate.js): cap how many runs
+// a workflow may *start* within a rolling time window, independent of how many
+// run at once (that's max_concurrent_runs). rate_limit_max is the ceiling and
+// rate_limit_window_seconds is the window; both NULL = no limit (they're set
+// and cleared together). A submission over the limit is refused with a 409 at
+// every entry point — the same admission gate the concurrency cap uses — so a
+// runaway schedule or webhook sender can't hammer a downstream API. Dry runs
+// are exempt, like everywhere else.
+ensureColumn('workflows', 'rate_limit_max', 'INTEGER')
+ensureColumn('workflows', 'rate_limit_window_seconds', 'INTEGER')
+
+// The rate-limit gate counts a workflow's recent runs by created_at; index it
+// so the count stays cheap on a busy instance. (Distinct from
+// idx_executions_workflow_started, which is keyed on started_at for analytics.)
+db.exec(`
+  CREATE INDEX IF NOT EXISTS idx_executions_workflow_created
+    ON executions (workflow_id, created_at);
+`)
+
 // Workflow pause (services/workflowPause.js): paused_at is the operational
 // kill switch — while set, no new real run starts anywhere (manual, public
 // API, webhook, schedule, error-handler escalation); in-flight runs settle

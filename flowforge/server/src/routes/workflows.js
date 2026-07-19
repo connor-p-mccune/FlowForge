@@ -212,6 +212,28 @@ function validateConcurrency(body) {
   return null
 }
 
+// Optional per-workflow rate limit (services/concurrencyGate.js). The two
+// fields travel together: both null = no limit, both set = at most
+// rate_limit_max run starts per rate_limit_window_seconds. Validated here (not
+// in workflowRule) because they're nullable and interdependent — the
+// both-or-neither rule is enforced after value resolution in the handler.
+// Returns an error string or null.
+function validateRateLimit(body) {
+  if ('rate_limit_max' in body && body.rate_limit_max !== null) {
+    const n = body.rate_limit_max
+    if (!Number.isInteger(n) || n < 1 || n > 100000) {
+      return 'rate_limit_max must be an integer between 1 and 100000, or null to clear it'
+    }
+  }
+  if ('rate_limit_window_seconds' in body && body.rate_limit_window_seconds !== null) {
+    const n = body.rate_limit_window_seconds
+    if (!Number.isInteger(n) || n < 1 || n > 86400) {
+      return 'rate_limit_window_seconds must be an integer between 1 and 86400 (one day), or null to clear it'
+    }
+  }
+  return null
+}
+
 // Optional per-workflow SLA targets (services/slaMonitor.js). Both are nullable
 // (null clears the objective), so they're validated here rather than in the
 // shared workflowRule. Returns an error string or null.
@@ -286,6 +308,8 @@ router.put('/workflows/:id', auth, validate(workflowRule), (req, res) => {
 
     const concurrencyError = validateConcurrency(req.body)
     if (concurrencyError) return res.status(400).json({ error: concurrencyError })
+    const rateLimitError = validateRateLimit(req.body)
+    if (rateLimitError) return res.status(400).json({ error: rateLimitError })
     const slaError = validateSla(req.body)
     if (slaError) return res.status(400).json({ error: slaError })
     const heartbeatError = validateHeartbeat(req.body)
@@ -298,6 +322,18 @@ router.put('/workflows/:id', auth, validate(workflowRule), (req, res) => {
       'max_concurrent_runs' in req.body ? req.body.max_concurrent_runs : workflow.max_concurrent_runs
     const policy =
       'concurrency_policy' in req.body ? req.body.concurrency_policy : workflow.concurrency_policy
+    const rateMax =
+      'rate_limit_max' in req.body ? req.body.rate_limit_max : workflow.rate_limit_max
+    const rateWindow =
+      'rate_limit_window_seconds' in req.body
+        ? req.body.rate_limit_window_seconds
+        : workflow.rate_limit_window_seconds
+    // Both-or-neither: a max without a window (or vice versa) is meaningless.
+    if ((rateMax == null) !== (rateWindow == null)) {
+      return res.status(400).json({
+        error: 'rate_limit_max and rate_limit_window_seconds must be set together, or both cleared',
+      })
+    }
     const slaMaxDuration =
       'sla_max_duration_ms' in req.body ? req.body.sla_max_duration_ms : workflow.sla_max_duration_ms
     const slaMinSuccess =
@@ -318,9 +354,10 @@ router.put('/workflows/:id', auth, validate(workflowRule), (req, res) => {
     const now = new Date().toISOString()
     db.prepare(
       `UPDATE workflows SET name = ?, description = ?, max_concurrent_runs = ?, concurrency_policy = ?,
+         rate_limit_max = ?, rate_limit_window_seconds = ?,
          sla_max_duration_ms = ?, sla_min_success_rate = ?, heartbeat_interval_minutes = ?, heartbeat_alerted_at = ?,
          error_workflow_id = ?, default_priority = ?, updated_at = ? WHERE id = ?`
-    ).run(name, description ?? workflow.description, maxConcurrent, policy, slaMaxDuration, slaMinSuccess, heartbeatInterval, heartbeatAlertedAt, errorWorkflowId, defaultPriority, now, req.params.id)
+    ).run(name, description ?? workflow.description, maxConcurrent, policy, rateMax, rateWindow, slaMaxDuration, slaMinSuccess, heartbeatInterval, heartbeatAlertedAt, errorWorkflowId, defaultPriority, now, req.params.id)
 
     const updated = db.prepare('SELECT * FROM workflows WHERE id = ?').get(req.params.id)
     activityService.logEvent(workflow.workspace_id, req.user.id, 'workflow.updated', {

@@ -224,6 +224,15 @@ const pausedSkips = counter(
   ['source']
 )
 
+// Per-workflow rate limiting (services/concurrencyGate.js). Each increment is
+// a run submission refused because the workflow had already started its
+// allowance within the rolling window — a rising rate means a schedule or
+// webhook sender is outrunning the cap and backing off (or should be).
+const runsRateLimited = counter(
+  'flowforge_runs_rate_limited_total',
+  'Run submissions refused because the workflow was over its rate limit.'
+)
+
 const processUptime = gauge('process_uptime_seconds', 'Process uptime in seconds.')
 const processMemory = gauge(
   'process_resident_memory_bytes',
@@ -287,6 +296,11 @@ function recordPausedSkip(source) {
   pausedSkips.inc({ source })
 }
 
+// Called by the admission gate when a submission is refused over its rate limit.
+function recordRateLimited() {
+  runsRateLimited.inc({})
+}
+
 module.exports = {
   counter,
   gauge,
@@ -301,6 +315,7 @@ module.exports = {
   recordHeartbeatMissed,
   recordStepCache,
   recordPausedSkip,
+  recordRateLimited,
   queueJobs,
   webhookPending,
 }
