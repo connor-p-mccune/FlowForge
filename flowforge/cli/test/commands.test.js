@@ -8,6 +8,7 @@ const { startStub, makeCtx } = require('./helpers')
 const workflows = require('../src/commands/workflows')
 const trigger = require('../src/commands/trigger')
 const runs = require('../src/commands/runs')
+const deps = require('../src/commands/deps')
 const insights = require('../src/commands/insights')
 const forecast = require('../src/commands/forecast')
 const schedule = require('../src/commands/schedule')
@@ -244,6 +245,50 @@ test('runs renders the summary table with a limit', async () => {
   assert.equal(code, 0)
   assert.match(ctx.output(), /e1/)
   assert.match(ctx.output(), /webhook/)
+})
+
+test('deps lists callers and callees and exits 0 without a cycle', async () => {
+  const stub = await startStub((method, url) => {
+    assert.equal(url, '/api/v1/workflows/wf-1/dependencies')
+    return {
+      json: {
+        workflowId: 'wf-1',
+        dependsOn: [{ id: 'wf-2', name: 'Send alert', status: 'deployed', via: ['sub-workflow', 'error-handler'] }],
+        dependedOnBy: [{ id: 'wf-3', name: 'Nightly', status: 'deployed', via: ['for-each'] }],
+        cycle: null,
+      },
+    }
+  })
+  const ctx = makeCtx(stub.api)
+  const code = await deps({ positionals: ['wf-1'], flags: {} }, ctx)
+  await stub.close()
+
+  assert.equal(code, 0)
+  assert.match(ctx.output(), /Send alert/)
+  assert.match(ctx.output(), /sub-workflow, error-handler/)
+  assert.match(ctx.output(), /Nightly/)
+})
+
+test('deps exits 1 and names the cycle when one is present', async () => {
+  const stub = await startStub(() => ({
+    json: { workflowId: 'wf-1', dependsOn: [], dependedOnBy: [], cycle: ['wf-1', 'wf-2', 'wf-1'] },
+  }))
+  const ctx = makeCtx(stub.api)
+  const code = await deps({ positionals: ['wf-1'], flags: {} }, ctx)
+  await stub.close()
+
+  assert.equal(code, 1)
+  assert.match(ctx.output(), /cycle/i)
+  assert.match(ctx.output(), /wf-1 → wf-2 → wf-1/)
+})
+
+test('deps without a workflow id prints usage and exits 1', async () => {
+  const stub = await startStub(() => ({ json: {} }))
+  const ctx = makeCtx(stub.api)
+  const code = await deps({ positionals: [], flags: {} }, ctx)
+  await stub.close()
+  assert.equal(code, 1)
+  assert.equal(stub.requests.length, 0)
 })
 
 test('insights renders percentiles, success rate, and anomalies', async () => {

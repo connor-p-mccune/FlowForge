@@ -52,6 +52,7 @@ export FLOWFORGE_TOKEN=ffp_…
 | `flowforge pause <id>` | Kill switch — hold **all** new runs (manual, API, webhook, schedule, error-handler) while in-flight runs settle; wrap a deploy window so no cron tick fires into a half-migrated system (needs the `manage` scope) |
 | `flowforge unpause <id>` | Release the pause and accept runs again (needs the `manage` scope) |
 | `flowforge runs <id> [--limit N]` | A workflow's recent runs |
+| `flowforge deps <id>` | Cross-workflow impact analysis — what a workflow calls (sub-workflow/for-each nodes, error handler) and what calls it; exits non-zero on a stale reference cycle |
 | `flowforge insights <id> [--limit N]` | Duration percentiles, success rate, throughput, and anomalous runs ([docs](../docs/INSIGHTS.md)) |
 | `flowforge forecast <id>` | Predicted next-run duration and bottleneck ([docs](../docs/INSIGHTS.md#forecasting-the-next-run)) |
 | `flowforge schedule <id> [--count N]` | Upcoming scheduled run times, computed from the workflow's cron (UTC) |

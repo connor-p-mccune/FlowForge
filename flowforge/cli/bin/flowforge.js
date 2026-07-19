@@ -22,6 +22,7 @@ const COMMANDS = {
   pause: require('../src/commands/pause'),
   unpause: require('../src/commands/resume-workflow'),
   runs: require('../src/commands/runs'),
+  deps: require('../src/commands/deps'),
   insights: require('../src/commands/insights'),
   forecast: require('../src/commands/forecast'),
   schedule: require('../src/commands/schedule'),
@@ -51,6 +52,7 @@ Usage:
   flowforge pause <workflow-id>                    Hold all new runs (kill switch) — needs a manage token
   flowforge unpause <workflow-id>                  Release the pause and accept runs again
   flowforge runs <workflow-id> [--limit N]         Recent runs for a workflow
+  flowforge deps <workflow-id>                     What a workflow calls and what calls it (exits non-zero on a reference cycle)
   flowforge insights <workflow-id> [--limit N]     Duration percentiles, success rate, anomalies
   flowforge forecast <workflow-id>                 Predicted next-run duration and bottleneck
   flowforge schedule <workflow-id> [--count N]     Upcoming scheduled run times (UTC)
