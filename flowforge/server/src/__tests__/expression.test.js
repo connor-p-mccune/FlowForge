@@ -218,6 +218,23 @@ describe('FXL standard library', () => {
     expect(evalExpr('clamp(15, 0, 10)')).toBe(10)
   })
 
+  it('statistics helpers', () => {
+    expect(evalExpr('median([3, 1, 2])')).toBe(2)
+    expect(evalExpr('median([1, 2, 3, 4])')).toBe(2.5) // interpolated midpoint
+    expect(evalExpr('percentile([1, 2, 3, 4], 50)')).toBe(2.5)
+    expect(evalExpr('percentile([1, 2, 3, 4, 5], 100)')).toBe(5)
+    expect(evalExpr('percentile([1, 2, 3, 4, 5], 0)')).toBe(1)
+    // Out-of-range p clamps rather than throwing.
+    expect(evalExpr('percentile([1, 2, 3], 150)')).toBe(3)
+    expect(evalExpr('variance([2, 4, 6])')).toBe(8 / 3) // population variance
+    expect(evalExpr('stddev([2, 2, 2])')).toBe(0)
+    // Empty arrays fold to 0, like avg/sum.
+    expect(evalExpr('median([])')).toBe(0)
+    expect(evalExpr('stddev([])')).toBe(0)
+    // Non-numeric elements fail the same friendly way as the scalar helpers.
+    expect(() => evalExpr('median([1, "x"])')).toThrow(/expected a number/)
+  })
+
   it('array helpers', () => {
     expect(evalExpr('len([1, 2, 3])')).toBe(3)
     expect(evalExpr('first([1, 2, 3])')).toBe(1)

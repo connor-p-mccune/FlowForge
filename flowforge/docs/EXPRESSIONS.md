@@ -142,6 +142,13 @@ you run.)
 `pow(x, e)` · `min(…)` · `max(…)` (loose args or a single array) ·
 `clamp(x, lo, hi)` · `sum(arr)` · `avg(arr)`.
 
+### Statistics
+`median(arr)` · `percentile(arr, p)` (0–100, linear interpolation between
+closest ranks — the same method the insights panel uses) · `variance(arr)` ·
+`stddev(arr)` (both population, ÷ N). Each coerces its elements to numbers and
+folds an empty array to `0`, like `avg`. Handy in a filter predicate —
+`amount > percentile(recentAmounts, 90)` keeps only the top-decile items.
+
 ### Arrays
 `first(arr)` · `last(arr)` · `join(arr, sep)` · `reverse(arr)` · `sort(arr)` ·
 `unique(arr)` · `slice(arr, start[, end])` · `len(arr)`.

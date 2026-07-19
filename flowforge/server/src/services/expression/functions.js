@@ -125,6 +125,20 @@ const registry = {
     return a.reduce((s, b) => s + num(b, 'avg'), 0) / a.length
   }],
 
+  // — statistics — pure aggregates over a numeric array, so a rule can reason
+  // about a distribution ("this item is above the 90th percentile") the same
+  // way the insights panel does over run history. Each coerces its elements to
+  // numbers (throwing the same friendly error as the rest of the math helpers)
+  // and returns 0 for an empty array, matching avg/sum.
+  median: [1, 1, (arr) => percentileOf(numsOf(arr, 'median'), 50)],
+  // percentile(arr, p): the p-th percentile (0..100) by linear interpolation
+  // between closest ranks — the same method the run-stats percentiles use.
+  percentile: [2, 2, (arr, p) => percentileOf(numsOf(arr, 'percentile'), num(p, 'percentile'))],
+  // Population variance / standard deviation (divide by N, not N-1): a rule
+  // reasons about the data it has, not a sample of a larger population.
+  variance: [1, 1, (arr) => varianceOf(numsOf(arr, 'variance'))],
+  stddev: [1, 1, (arr) => Math.sqrt(varianceOf(numsOf(arr, 'stddev')))],
+
   // — arrays —
   first: [1, 1, (arr) => requireArray(arr, 'first')[0]],
   last: [1, 1, (arr) => { const a = requireArray(arr, 'last'); return a[a.length - 1] }],
@@ -219,6 +233,36 @@ function toBool(value) {
 function flattenNums(vals, fnName) {
   const source = vals.length === 1 && Array.isArray(vals[0]) ? vals[0] : vals
   return source.map((v) => num(v, fnName))
+}
+
+// Coerce every element of an array to a number, with the same friendly error
+// the scalar math helpers throw on a non-number.
+function numsOf(arr, fnName) {
+  return requireArray(arr, fnName).map((v) => num(v, fnName))
+}
+
+// The p-th percentile (0..100) of a numeric array by linear interpolation
+// between closest ranks — the same method services/runStats.js uses for the
+// insights panel, so a rule and the dashboard agree. Empty → 0 (like avg),
+// and p is clamped into range rather than throwing on an out-of-band value.
+function percentileOf(nums, p) {
+  if (nums.length === 0) return 0
+  const sorted = [...nums].sort((a, b) => a - b)
+  if (sorted.length === 1) return sorted[0]
+  const clamped = Math.min(Math.max(p, 0), 100)
+  const rank = (clamped / 100) * (sorted.length - 1)
+  const lo = Math.floor(rank)
+  const hi = Math.ceil(rank)
+  if (lo === hi) return sorted[lo]
+  return sorted[lo] + (sorted[hi] - sorted[lo]) * (rank - lo)
+}
+
+// Population variance (÷ N, not N−1): a rule reasons about the data it has,
+// not a sample of a larger population. Empty → 0.
+function varianceOf(nums) {
+  if (nums.length === 0) return 0
+  const mean = nums.reduce((s, x) => s + x, 0) / nums.length
+  return nums.reduce((s, x) => s + (x - mean) ** 2, 0) / nums.length
 }
 
 // Look up and arity-check a function by name, returning the raw implementation.
