@@ -210,6 +210,50 @@ describe('RunSettingsPanel', () => {
     expect(await screen.findByText(/whole number of minutes/i)).toBeInTheDocument()
   })
 
+  it('loads and saves a maintenance window', async () => {
+    apiFetch.mockImplementation((path, opts) => {
+      if (path === '/api/workflows/wf1' && !opts) {
+        return Promise.resolve({
+          workflow: { ...WORKFLOW, maintenance_cron: '0 2 * * 0', maintenance_duration_minutes: 120 },
+        })
+      }
+      if (path === '/api/workspaces/ws1/workflows') {
+        return Promise.resolve({ workflows: WORKSPACE_WORKFLOWS })
+      }
+      if (path === '/api/workflows/wf1' && opts?.method === 'PUT') {
+        return Promise.resolve({ workflow: WORKFLOW })
+      }
+      return Promise.reject(new Error(`unexpected: ${path}`))
+    })
+    setup()
+    const cron = await screen.findByLabelText(/maintenance window cron/i)
+    expect(cron).toHaveValue('0 2 * * 0')
+    expect(screen.getByLabelText(/maintenance window duration/i)).toHaveValue(120)
+
+    fireEvent.change(cron, { target: { value: '0 3 * * 1' } })
+    fireEvent.change(screen.getByLabelText(/maintenance window duration/i), { target: { value: '60' } })
+    fireEvent.click(screen.getByRole('button', { name: /save settings/i }))
+    await waitFor(() =>
+      expect(apiFetch).toHaveBeenCalledWith('/api/workflows/wf1', {
+        method: 'PUT',
+        body: expect.objectContaining({
+          maintenance_cron: '0 3 * * 1',
+          maintenance_duration_minutes: 60,
+        }),
+      })
+    )
+  })
+
+  it('rejects a maintenance cron without a duration, before calling the API', async () => {
+    setup()
+    fireEvent.change(await screen.findByLabelText(/maintenance window cron/i), {
+      target: { value: '0 2 * * *' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: /save settings/i }))
+    expect(await screen.findByText(/duration must be a whole number/i)).toBeInTheDocument()
+    expect(apiFetch).not.toHaveBeenCalledWith('/api/workflows/wf1', expect.objectContaining({ method: 'PUT' }))
+  })
+
   it('offers only other deployed workflows as error handlers', async () => {
     setup()
     const select = await screen.findByLabelText(/on failure, run/i)

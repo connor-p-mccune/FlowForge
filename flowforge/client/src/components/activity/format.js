@@ -47,6 +47,9 @@ export function actorLabel(event) {
   if (type.startsWith('workflow.heartbeat_') || type === 'execution.sla_breached') {
     return 'The monitor'
   }
+  if (type.startsWith('workflow.maintenance_')) {
+    return 'The scheduler'
+  }
   const t = event.metadata && event.metadata.triggerType
   if (t === 'webhook') return 'A webhook'
   if (t === 'schedule') return 'A schedule'
@@ -74,6 +77,8 @@ export function formatEvent(event) {
       return meta.version ? `restored ${name} to v${meta.version}` : `restored ${name}`
     case 'workflow.paused': return `paused workflow ${name}`
     case 'workflow.resumed': return `resumed workflow ${name}`
+    case 'workflow.maintenance_started': return `paused ${name} for a maintenance window`
+    case 'workflow.maintenance_ended': return `resumed ${name} after maintenance`
     case 'execution.completed': return `ran ${name}`
     case 'execution.failed': return `ran ${name} — failed`
     case 'execution.cancelled': return `stopped a run of ${name}`

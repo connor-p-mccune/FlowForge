@@ -32,6 +32,9 @@ export default function RunSettingsPanel({ workflowId, open, onClose }) {
   const [slaDurationInput, setSlaDurationInput] = useState('') // seconds, '' = no target
   const [slaSuccessInput, setSlaSuccessInput] = useState('') // percent, '' = no target
   const [heartbeatInput, setHeartbeatInput] = useState('') // minutes, '' = no expectation
+  // Maintenance window: a cron (start) + duration (minutes). '' cron = none.
+  const [maintCronInput, setMaintCronInput] = useState('')
+  const [maintDurationInput, setMaintDurationInput] = useState('')
   // Error-handler workflow: '' = none. Options are the workspace's *deployed*
   // workflows (the runtime requirement), excluding this one (the route
   // refuses self-handling).
@@ -88,6 +91,10 @@ export default function RunSettingsPanel({ workflowId, open, onClose }) {
         )
         setHeartbeatInput(
           wf.heartbeat_interval_minutes ? String(wf.heartbeat_interval_minutes) : ''
+        )
+        setMaintCronInput(wf.maintenance_cron || '')
+        setMaintDurationInput(
+          wf.maintenance_duration_minutes ? String(wf.maintenance_duration_minutes) : ''
         )
         setHandlerId(wf.error_workflow_id || '')
         return apiFetch(`/api/workspaces/${wf.workspace_id}/workflows`).then(
@@ -180,6 +187,21 @@ export default function RunSettingsPanel({ workflowId, open, onClose }) {
       return
     }
 
+    // Maintenance window: a cron (start) plus a duration in minutes. Empty cron
+    // clears the window; a set cron needs a positive duration. The server
+    // validates the cron syntax itself.
+    const maintCron = maintCronInput.trim()
+    let maintenanceCron = null
+    let maintenanceDuration = null
+    if (maintCron !== '') {
+      maintenanceCron = maintCron
+      maintenanceDuration = Number(maintDurationInput.trim())
+      if (!Number.isInteger(maintenanceDuration) || maintenanceDuration < 1 || maintenanceDuration > 10080) {
+        setError('Maintenance duration must be a whole number of minutes from 1 to 10080')
+        return
+      }
+    }
+
     setSaving(true)
     setError(null)
     try {
@@ -195,6 +217,8 @@ export default function RunSettingsPanel({ workflowId, open, onClose }) {
           sla_max_duration_ms: durSeconds === null ? null : Math.round(durSeconds * 1000),
           sla_min_success_rate: successPct === null ? null : successPct / 100,
           heartbeat_interval_minutes: heartbeatMinutes,
+          maintenance_cron: maintenanceCron,
+          maintenance_duration_minutes: maintenanceDuration,
           error_workflow_id: handlerId || null,
           default_priority: priority,
         },
@@ -357,6 +381,36 @@ export default function RunSettingsPanel({ workflowId, open, onClose }) {
                   placeholder="No expectation"
                   value={heartbeatInput}
                   onChange={(e) => setHeartbeatInput(e.target.value)}
+                />
+              </label>
+
+              <div className="run-settings__section">Maintenance window</div>
+              <p className="webhook-panel__hint">
+                Automatically pause this workflow during a recurring window and
+                resume it after — for a nightly migration, a downstream API’s own
+                maintenance hour, or a deploy freeze. Inside the window no new
+                runs start (in-flight runs finish); a manual pause is never
+                touched by the schedule. Times are UTC.
+              </p>
+              <label className="run-settings__field">
+                <span className="run-settings__label">Starts (cron)</span>
+                <input
+                  placeholder="0 2 * * 0  (02:00 every Sunday)"
+                  value={maintCronInput}
+                  onChange={(e) => setMaintCronInput(e.target.value)}
+                  aria-label="Maintenance window cron"
+                />
+              </label>
+              <label className="run-settings__field">
+                <span className="run-settings__label">Lasts (minutes)</span>
+                <input
+                  type="number"
+                  min="1"
+                  max="10080"
+                  placeholder="No window"
+                  value={maintDurationInput}
+                  onChange={(e) => setMaintDurationInput(e.target.value)}
+                  aria-label="Maintenance window duration"
                 />
               </label>
 

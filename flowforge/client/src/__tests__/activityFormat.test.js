@@ -33,6 +33,10 @@ describe('formatEvent', () => {
       .toBe('paused workflow Webhook Alerter')
     expect(formatEvent({ ...base, event_type: 'workflow.resumed' }))
       .toBe('resumed workflow Webhook Alerter')
+    expect(formatEvent({ ...base, event_type: 'workflow.maintenance_started' }))
+      .toBe('paused Webhook Alerter for a maintenance window')
+    expect(formatEvent({ ...base, event_type: 'workflow.maintenance_ended' }))
+      .toBe('resumed Webhook Alerter after maintenance')
     expect(formatEvent({ ...base, event_type: 'execution.completed', entity_name: 'Nightly Sync' }))
       .toBe('ran Nightly Sync')
     expect(formatEvent({ ...base, event_type: 'execution.failed', entity_name: 'Nightly Sync' }))
@@ -107,6 +111,12 @@ describe('actorLabel', () => {
       .toBe('The monitor')
     expect(actorLabel({ actor_display_name: null, event_type: 'execution.sla_breached' }))
       .toBe('The monitor')
+  })
+  it('attributes maintenance-window events to the scheduler', () => {
+    expect(actorLabel({ actor_display_name: null, event_type: 'workflow.maintenance_started' }))
+      .toBe('The scheduler')
+    expect(actorLabel({ actor_display_name: null, event_type: 'workflow.maintenance_ended' }))
+      .toBe('The scheduler')
   })
 })
 
