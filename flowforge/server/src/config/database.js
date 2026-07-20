@@ -169,6 +169,20 @@ db.exec(`
 // for the audit trail. NULL = active.
 ensureColumn('workflows', 'paused_at', 'TEXT')
 ensureColumn('workflows', 'paused_by', 'TEXT REFERENCES users(id)')
+// Why the workflow is paused: 'manual' (a person pulled the switch) or
+// 'maintenance' (a scheduled window auto-paused it). The distinction lets the
+// maintenance sweep auto-resume only the pauses it caused, never a manual one.
+ensureColumn('workflows', 'paused_reason', 'TEXT')
+
+// Scheduled maintenance windows (services/maintenanceWindow.js): a recurring
+// window during which the workflow is automatically paused, then resumed when
+// it ends. maintenance_cron is the window's *start* (a cron expression, UTC,
+// same engine as schedule triggers) and maintenance_duration_minutes is how
+// long it stays open. Both NULL = no window (set/cleared together). Reuses the
+// pause kill switch: inside a window the workflow admits no new runs, exactly
+// as if a person had paused it.
+ensureColumn('workflows', 'maintenance_cron', 'TEXT')
+ensureColumn('workflows', 'maintenance_duration_minutes', 'INTEGER')
 
 // Two-factor authentication (TOTP). Optional, opt-in per user. totp_enabled stays
 // 0 until the user verifies a code from their authenticator, so a half-finished

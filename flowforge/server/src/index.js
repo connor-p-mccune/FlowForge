@@ -113,6 +113,10 @@ if (process.env.NODE_ENV !== 'test') {
   // minutes goes quiet. Absence of runs can't hook a run settling, so this is
   // the one monitor that has to sweep.
   require('./services/heartbeatMonitor').startHeartbeatMonitor()
+  // Scheduled maintenance windows: auto-pause a workflow during its declared
+  // window and resume it after, reusing the pause kill switch. Reconciles once
+  // at boot so a window spanning a restart takes effect immediately.
+  require('./services/maintenanceWindow').startMaintenanceWindows()
 
   // Graceful shutdown (services/shutdown.js): on SIGTERM/SIGINT, drain in
   // dependency order instead of dying mid-run. Sources of new work stop first
@@ -136,6 +140,7 @@ if (process.env.NODE_ENV !== 'test') {
   onShutdown('event-dispatcher', () => require('./services/eventDispatcher').stopDispatcher())
   onShutdown('retention', () => require('./services/retention').stopRetention())
   onShutdown('heartbeat-monitor', () => require('./services/heartbeatMonitor').stopHeartbeatMonitor())
+  onShutdown('maintenance-windows', () => require('./services/maintenanceWindow').stopMaintenanceWindows())
   onShutdown('socket-io', () => new Promise((resolve) => io.close(() => resolve())))
   onShutdown('redis', () => require('./config/redis').quit().catch(() => {}))
   onShutdown('database', () => require('./config/database').close())

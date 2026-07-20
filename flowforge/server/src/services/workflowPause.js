@@ -28,26 +28,31 @@ function isPaused(workflow) {
 }
 
 // Pause the workflow (no-op when already paused) and return the fresh row.
-// actorId is who pulled the switch — kept on the row for the audit trail and
-// logged to the activity feed, which outbound webhooks relay, so "someone
-// paused the sync" reaches the on-call channel without a new alert path.
-function pauseWorkflow(workflow, actorId) {
+// actorId is who pulled the switch (null for the maintenance sweep) — kept on
+// the row for the audit trail and logged to the activity feed, which outbound
+// webhooks relay, so "someone paused the sync" reaches the on-call channel
+// without a new alert path. `reason` ('manual' | 'maintenance') records what
+// caused it, so the maintenance sweep can auto-resume only its own pauses;
+// `eventType` lets the sweep emit a distinct feed event.
+function pauseWorkflow(workflow, actorId, { reason = 'manual', eventType = 'workflow.paused' } = {}) {
   if (!workflow.paused_at) {
-    db.prepare('UPDATE workflows SET paused_at = ?, paused_by = ? WHERE id = ?')
-      .run(new Date().toISOString(), actorId ?? null, workflow.id)
-    activityService.logEvent(workflow.workspace_id, actorId ?? null, 'workflow.paused', {
+    db.prepare('UPDATE workflows SET paused_at = ?, paused_by = ?, paused_reason = ? WHERE id = ?')
+      .run(new Date().toISOString(), actorId ?? null, reason, workflow.id)
+    activityService.logEvent(workflow.workspace_id, actorId ?? null, eventType, {
       type: 'workflow', id: workflow.id, name: workflow.name,
     })
   }
   return db.prepare('SELECT * FROM workflows WHERE id = ?').get(workflow.id)
 }
 
-// Resume the workflow (no-op when not paused) and return the fresh row.
-function resumeWorkflow(workflow, actorId) {
+// Resume the workflow (no-op when not paused) and return the fresh row. Clears
+// the reason with the pause; `eventType` lets the maintenance sweep emit a
+// distinct feed event for a window ending.
+function resumeWorkflow(workflow, actorId, { eventType = 'workflow.resumed' } = {}) {
   if (workflow.paused_at) {
-    db.prepare('UPDATE workflows SET paused_at = NULL, paused_by = NULL WHERE id = ?')
+    db.prepare('UPDATE workflows SET paused_at = NULL, paused_by = NULL, paused_reason = NULL WHERE id = ?')
       .run(workflow.id)
-    activityService.logEvent(workflow.workspace_id, actorId ?? null, 'workflow.resumed', {
+    activityService.logEvent(workflow.workspace_id, actorId ?? null, eventType, {
       type: 'workflow', id: workflow.id, name: workflow.name,
     })
   }

@@ -14,6 +14,7 @@ const { isValidPriority } = require('../services/runPriority')
 const { forbidViewer } = require('../services/workspaceRoles')
 const { pauseWorkflow, resumeWorkflow } = require('../services/workflowPause')
 const { computeDependencies } = require('../services/workflowDependencies')
+const { isValid: isValidCron } = require('../services/cronExpression')
 const {
   getRunner,
   loadWorkspaceSecrets,
@@ -235,6 +236,28 @@ function validateRateLimit(body) {
   return null
 }
 
+// Optional scheduled maintenance window (services/maintenanceWindow.js). The
+// two fields travel together: both null = no window, both set = auto-pause for
+// maintenance_duration_minutes starting at each maintenance_cron fire time.
+// The cron is validated by the same engine the schedule preview uses, so a
+// window that saves is a window that computes. The both-or-neither rule is
+// enforced after value resolution in the handler. Returns an error string or
+// null.
+function validateMaintenance(body) {
+  if ('maintenance_cron' in body && body.maintenance_cron !== null) {
+    if (typeof body.maintenance_cron !== 'string' || !isValidCron(body.maintenance_cron)) {
+      return 'maintenance_cron must be a valid cron expression, or null to clear it'
+    }
+  }
+  if ('maintenance_duration_minutes' in body && body.maintenance_duration_minutes !== null) {
+    const n = body.maintenance_duration_minutes
+    if (!Number.isInteger(n) || n < 1 || n > 10080) {
+      return 'maintenance_duration_minutes must be an integer between 1 and 10080 (one week), or null to clear it'
+    }
+  }
+  return null
+}
+
 // Optional per-workflow SLA targets (services/slaMonitor.js). Both are nullable
 // (null clears the objective), so they're validated here rather than in the
 // shared workflowRule. Returns an error string or null.
@@ -311,6 +334,8 @@ router.put('/workflows/:id', auth, validate(workflowRule), (req, res) => {
     if (concurrencyError) return res.status(400).json({ error: concurrencyError })
     const rateLimitError = validateRateLimit(req.body)
     if (rateLimitError) return res.status(400).json({ error: rateLimitError })
+    const maintenanceError = validateMaintenance(req.body)
+    if (maintenanceError) return res.status(400).json({ error: maintenanceError })
     const slaError = validateSla(req.body)
     if (slaError) return res.status(400).json({ error: slaError })
     const heartbeatError = validateHeartbeat(req.body)
@@ -335,6 +360,18 @@ router.put('/workflows/:id', auth, validate(workflowRule), (req, res) => {
         error: 'rate_limit_max and rate_limit_window_seconds must be set together, or both cleared',
       })
     }
+    const maintenanceCron =
+      'maintenance_cron' in req.body ? req.body.maintenance_cron : workflow.maintenance_cron
+    const maintenanceDuration =
+      'maintenance_duration_minutes' in req.body
+        ? req.body.maintenance_duration_minutes
+        : workflow.maintenance_duration_minutes
+    if ((maintenanceCron == null) !== (maintenanceDuration == null)) {
+      return res.status(400).json({
+        error:
+          'maintenance_cron and maintenance_duration_minutes must be set together, or both cleared',
+      })
+    }
     const slaMaxDuration =
       'sla_max_duration_ms' in req.body ? req.body.sla_max_duration_ms : workflow.sla_max_duration_ms
     const slaMinSuccess =
@@ -356,9 +393,21 @@ router.put('/workflows/:id', auth, validate(workflowRule), (req, res) => {
     db.prepare(
       `UPDATE workflows SET name = ?, description = ?, max_concurrent_runs = ?, concurrency_policy = ?,
          rate_limit_max = ?, rate_limit_window_seconds = ?,
+         maintenance_cron = ?, maintenance_duration_minutes = ?,
          sla_max_duration_ms = ?, sla_min_success_rate = ?, heartbeat_interval_minutes = ?, heartbeat_alerted_at = ?,
          error_workflow_id = ?, default_priority = ?, updated_at = ? WHERE id = ?`
-    ).run(name, description ?? workflow.description, maxConcurrent, policy, rateMax, rateWindow, slaMaxDuration, slaMinSuccess, heartbeatInterval, heartbeatAlertedAt, errorWorkflowId, defaultPriority, now, req.params.id)
+    ).run(name, description ?? workflow.description, maxConcurrent, policy, rateMax, rateWindow, maintenanceCron, maintenanceDuration, slaMaxDuration, slaMinSuccess, heartbeatInterval, heartbeatAlertedAt, errorWorkflowId, defaultPriority, now, req.params.id)
+
+    // Clearing (or removing) the window while it still holds a maintenance
+    // pause would strand the workflow paused — the sweep no longer sees it to
+    // resume. So release a maintenance pause the moment its window is cleared.
+    if (maintenanceCron == null && workflow.paused_reason === 'maintenance') {
+      resumeWorkflow(
+        db.prepare('SELECT * FROM workflows WHERE id = ?').get(req.params.id),
+        req.user.id,
+        { eventType: 'workflow.maintenance_ended' }
+      )
+    }
 
     const updated = db.prepare('SELECT * FROM workflows WHERE id = ?').get(req.params.id)
     activityService.logEvent(workflow.workspace_id, req.user.id, 'workflow.updated', {
