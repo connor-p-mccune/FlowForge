@@ -370,6 +370,15 @@ export default function Sidebar({ open = false, onNavigate }) {
                       title="Double-click to rename"
                     >
                       {wf.name}
+                      {wf.paused_at && (
+                        <span
+                          className="sidebar__workflow-paused"
+                          title="Paused — new runs are held"
+                          aria-label="paused"
+                        >
+                          ⏸
+                        </span>
+                      )}
                     </button>
                     <div className="sidebar__menu">
                       <button

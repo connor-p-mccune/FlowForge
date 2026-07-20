@@ -92,4 +92,18 @@ describe('Sidebar workflow actions menu', () => {
 
     expect(await screen.findByRole('dialog', { name: 'Import workflow' })).toBeInTheDocument()
   })
+
+  it('marks a paused workflow with an indicator', async () => {
+    apiFetch.mockImplementation((path, opts) => {
+      if (path === '/api/workspaces' && !opts) return Promise.resolve({ workspaces: WORKSPACES })
+      if (path === '/api/workspaces/ws1/workflows') {
+        return Promise.resolve({
+          workflows: [{ ...WORKFLOWS[0], paused_at: '2026-07-19T00:00:00Z' }],
+        })
+      }
+      return Promise.reject(new Error(`unexpected request: ${path}`))
+    })
+    render(<Sidebar />)
+    expect(await screen.findByLabelText('paused')).toBeInTheDocument()
+  })
 })

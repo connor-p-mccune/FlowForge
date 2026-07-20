@@ -853,6 +853,13 @@ html, body, #root {
   white-space: nowrap;
 }
 
+/* Paused kill-switch indicator beside a workflow name in the list. */
+.sidebar__workflow-paused {
+  margin-left: 6px;
+  font-size: 11px;
+  color: #ef4444;
+}
+
 .sidebar__workflow .sidebar__icon-btn {
   visibility: hidden;
 }
