@@ -494,6 +494,46 @@ different question and none needing to know about the others: **pause** holds
 limit** bounds *how often* runs start, and **priority lanes** order *pickup*
 among the runs that are admitted.
 
+### Scheduled maintenance windows
+
+`services/maintenanceWindow.js` is the pause switch on a timer: a workflow with
+a window (`maintenance_cron` marks each start, `maintenance_duration_minutes`
+how long it stays open) is auto-paused while the window is open and resumed when
+it closes. It's a monitor in the heartbeat mould — a background sweep, because
+there's no event to hook: "a window opened" is the passage of time, not an
+action. Each pass reconciles two booleans, *is now inside a window* and *is the
+workflow paused*, and drives one from the other.
+
+The interesting piece is "is now inside a window", and it falls out of the cron
+engine for free. A window is the half-open interval `[start, start + duration)`.
+`nextRun(cron, from)` returns the first fire *strictly after* `from`, so asking
+it for the first fire after `now − duration` yields the candidate start `S` with
+`now − duration < S`; the workflow is inside a window exactly when `S ≤ now`.
+The strict-after boundary is precisely what makes the interval half-open — a
+window that ended at exactly `now` (its start sat at `now − duration`) is not
+re-reported, so it correctly reads as closed. All UTC, like the schedule
+preview, so the answer doesn't depend on the server's clock zone.
+
+Two rules keep the sweep from fighting an operator, and both hang off the
+`paused_reason` column the pause switch now records:
+
+- **It only resumes its own pauses.** Auto-resume fires only when
+  `paused_reason = 'maintenance'`, so a person who pauses a workflow during a
+  window still has it paused after the window lifts — the human decision
+  outranks the schedule.
+- **It never double-pauses.** Auto-pause fires only when the workflow isn't
+  already paused, so a manual pause taken inside a window is left exactly as the
+  operator set it, reason and all.
+
+One loose end is closed explicitly: clearing a workflow's window while it still
+holds a maintenance pause would strand it — the sweep no longer sees the row to
+resume it — so the settings route releases a maintenance pause the moment its
+window is removed. Transitions emit distinct `workflow.maintenance_started` /
+`workflow.maintenance_ended` activity events (attributed to "the scheduler" in
+the feed, like monitor events), and the monitor reconciles once at boot so a
+window spanning a restart takes effect immediately instead of after a full
+interval.
+
 ### Priority lanes
 
 Every run enters the queue in one of three lanes — `high`, `normal`

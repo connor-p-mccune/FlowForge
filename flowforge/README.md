@@ -101,6 +101,15 @@ order while streaming live progress back to every collaborator on the canvas.
   API (`manage` scope), or `flowforge pause <id>`; wrap a deploy window so no
   cron tick fires into a half-migrated system, and the silent skips land on
   `/metrics`.
+- **Scheduled maintenance windows** — the kill switch on a timer: declare a
+  recurring window (a cron **start** plus a **duration**) and FlowForge
+  auto-pauses the workflow while it's open and resumes it when it closes — a
+  nightly migration, a downstream API's own maintenance hour, a weekly deploy
+  freeze. It reuses the same cron engine as schedule previews (UTC), and never
+  fights an operator: a **manual pause survives** a window ending, and a
+  workflow a person already paused is never auto-touched. Clearing the window
+  releases any pause it was holding, so a config change can't strand a workflow
+  paused.
 - **Resume from failure** — continue a failed (or cancelled) run from where it
   stopped: steps that already succeeded are **reused** rather than re-executed
   — an approval gate that was already granted is not asked twice — and only
@@ -443,6 +452,7 @@ Copy `.env.example` to `.env` before running. **Never commit `.env`.**
 | `SLA_SUCCESS_RATE_MIN_RUNS` | no | Minimum settled runs before the success-rate floor check fires (default 5) |
 | `SLA_ANOMALY_MIN_RUNS` | no | Minimum completed-run baseline before an anomaly alert fires (default 20) |
 | `HEARTBEAT_CHECK_INTERVAL_MS` | no | How often the heartbeat monitor sweeps for overdue workflows (default 60000) |
+| `MAINTENANCE_CHECK_INTERVAL_MS` | no | How often the maintenance-window sweep reconciles auto-pause/resume (default 60000) |
 | `WEBHOOK_DELIVERY_RETENTION_DAYS` | no | Prune settled delivery-log rows after this many days (default 30; 0 = keep) |
 
 \* The app runs without it, but any AI node or the Suggest button will error
