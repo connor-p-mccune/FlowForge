@@ -4,6 +4,7 @@ import { apiFetch } from '../../services/api'
 import VariableExplorer from './VariableExplorer'
 import NodeTester from './NodeTester'
 import ExpressionTester from './ExpressionTester'
+import { listTimeZones, browserTimeZone } from '../../utils/timezones'
 
 // Starter sample data for the inline FXL playground, per node kind. Condition
 // sees the incoming data's fields; the list nodes see one item's scope.
@@ -57,7 +58,12 @@ function formatFireTime(iso) {
 // times — the piece cronstrue's rule description can't provide. Silent while the
 // expression is invalid (the description line already flags that) so the panel
 // never shows two errors for the same typo.
-function SchedulePreview({ cron }) {
+//
+// With a zone, each row shows the local wall clock and the offset that will be
+// in effect *at that instant*. Two consecutive rows at the same local time on
+// different offsets is exactly what a DST change looks like, and seeing it is
+// the point — a UTC-only preview makes a correct schedule look broken.
+function SchedulePreview({ cron, timezone }) {
   const [runs, setRuns] = useState(null) // null = nothing to show yet
   const [unreachable, setUnreachable] = useState(false)
 
@@ -70,10 +76,15 @@ function SchedulePreview({ cron }) {
     }
     let cancelled = false
     const timer = setTimeout(() => {
-      apiFetch('/api/schedule/preview', { method: 'POST', body: { cron: expr, count: 3 } })
+      apiFetch('/api/schedule/preview', {
+        method: 'POST',
+        body: { cron: expr, count: 3, ...(timezone ? { timezone } : {}) },
+      })
         .then((data) => {
           if (cancelled) return
-          setRuns(data.nextRuns || [])
+          // The zoned payload carries the richer rows; fall back to the plain
+          // UTC instants when no zone is set.
+          setRuns(data.nextRunsLocal || (data.nextRuns || []).map((utc) => ({ utc })))
           setUnreachable(data.reachable === false)
         })
         .catch(() => {
@@ -89,18 +100,35 @@ function SchedulePreview({ cron }) {
       cancelled = true
       clearTimeout(timer)
     }
-  }, [cron])
+  }, [cron, timezone])
 
   if (unreachable) {
     return <p className="schedule-nextruns schedule-nextruns--empty">This schedule never fires.</p>
   }
   if (!runs || runs.length === 0) return null
+  // A zone whose offset changes within the previewed runs is about to cross a
+  // DST boundary — worth calling out, because it's the moment a schedule looks
+  // like it moved when it didn't.
+  const offsets = new Set(runs.map((r) => r.offset).filter(Boolean))
   return (
-    <ul className="schedule-nextruns">
-      {runs.map((iso) => (
-        <li key={iso} className="schedule-nextruns__item">↳ {formatFireTime(iso)}</li>
-      ))}
-    </ul>
+    <>
+      <ul className="schedule-nextruns">
+        {runs.map((run) => (
+          <li key={run.utc} className="schedule-nextruns__item">
+            ↳ {run.local ? `${run.local} ${run.offset}` : formatFireTime(run.utc)}
+            {run.local && (
+              <span className="schedule-nextruns__utc"> · {formatFireTime(run.utc)}</span>
+            )}
+          </li>
+        ))}
+      </ul>
+      {offsets.size > 1 && (
+        <p className="schedule-nextruns schedule-nextruns--note">
+          ⓘ A daylight-saving change falls inside these runs — the local time holds, the
+          UTC instant shifts by an hour.
+        </p>
+      )}
+    </>
   )
 }
 
@@ -381,7 +409,9 @@ export default function NodeConfigPanel({
         )
       case 'trigger-schedule': {
         const cronValue = config.cron || ''
+        const zoneValue = config.timezone || ''
         const desc = describeCron(cronValue)
+        const localZone = browserTimeZone()
         return (
           <>
             <label className="config-panel__field">
@@ -392,11 +422,36 @@ export default function NodeConfigPanel({
                 onChange={(e) => setConfig('cron', e.target.value)}
               />
             </label>
+            <label className="config-panel__field">
+              <span>Time zone</span>
+              <select
+                value={zoneValue}
+                onChange={(e) => setConfig('timezone', e.target.value)}
+              >
+                <option value="">UTC (default)</option>
+                {listTimeZones()
+                  .filter((z) => z !== 'UTC')
+                  .map((z) => (
+                    <option key={z} value={z}>
+                      {z.replace(/_/g, ' ')}
+                    </option>
+                  ))}
+              </select>
+            </label>
+            {zoneValue !== localZone && localZone !== 'UTC' && (
+              <button
+                type="button"
+                className="schedule-quickpick"
+                onClick={() => setConfig('timezone', localZone)}
+              >
+                Use my zone ({localZone.replace(/_/g, ' ')})
+              </button>
+            )}
             <p className={`schedule-preview${desc.error ? ' schedule-preview--error' : ''}`}>
               {desc.error ? '⚠ ' : '🕑 '}
               {desc.text}
             </p>
-            {!desc.error && <SchedulePreview cron={cronValue} />}
+            {!desc.error && <SchedulePreview cron={cronValue} timezone={zoneValue} />}
             <div className="schedule-quickpicks">
               {SCHEDULE_PRESETS.map((p) => (
                 <button
@@ -410,7 +465,9 @@ export default function NodeConfigPanel({
               ))}
             </div>
             <p className="config-panel__hint">
-              Deploy the workflow to activate the schedule. Runs use the server’s timezone.
+              Deploy the workflow to activate the schedule. Times are interpreted in the
+              zone above — a schedule in a named zone keeps its local hour across daylight-
+              saving changes.
             </p>
           </>
         )

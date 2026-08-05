@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { apiFetch } from '../../services/api'
 import { useToast } from '../../hooks/useToast'
 import StatusBadgeSection from './StatusBadgeSection'
+import { listTimeZones } from '../../utils/timezones'
 
 // Rate-limit window units, in seconds. The panel stores a window in seconds
 // server-side but lets the user pick a friendlier unit; on load we show the
@@ -35,6 +36,9 @@ export default function RunSettingsPanel({ workflowId, open, onClose }) {
   // Maintenance window: a cron (start) + duration (minutes). '' cron = none.
   const [maintCronInput, setMaintCronInput] = useState('')
   const [maintDurationInput, setMaintDurationInput] = useState('')
+  // The IANA zone the window's cron is read in. '' = UTC, which is what every
+  // window meant before zones existed.
+  const [maintTimezone, setMaintTimezone] = useState('')
   // Error-handler workflow: '' = none. Options are the workspace's *deployed*
   // workflows (the runtime requirement), excluding this one (the route
   // refuses self-handling).
@@ -96,6 +100,7 @@ export default function RunSettingsPanel({ workflowId, open, onClose }) {
         setMaintDurationInput(
           wf.maintenance_duration_minutes ? String(wf.maintenance_duration_minutes) : ''
         )
+        setMaintTimezone(wf.maintenance_timezone || '')
         setHandlerId(wf.error_workflow_id || '')
         return apiFetch(`/api/workspaces/${wf.workspace_id}/workflows`).then(
           ({ workflows: list }) => {
@@ -219,6 +224,7 @@ export default function RunSettingsPanel({ workflowId, open, onClose }) {
           heartbeat_interval_minutes: heartbeatMinutes,
           maintenance_cron: maintenanceCron,
           maintenance_duration_minutes: maintenanceDuration,
+          maintenance_timezone: maintenanceCron === null ? null : maintTimezone || null,
           error_workflow_id: handlerId || null,
           default_priority: priority,
         },
@@ -390,7 +396,7 @@ export default function RunSettingsPanel({ workflowId, open, onClose }) {
                 resume it after — for a nightly migration, a downstream API’s own
                 maintenance hour, or a deploy freeze. Inside the window no new
                 runs start (in-flight runs finish); a manual pause is never
-                touched by the schedule. Times are UTC.
+                touched by the schedule.
               </p>
               <label className="run-settings__field">
                 <span className="run-settings__label">Starts (cron)</span>
@@ -413,6 +419,28 @@ export default function RunSettingsPanel({ workflowId, open, onClose }) {
                   aria-label="Maintenance window duration"
                 />
               </label>
+              <label className="run-settings__field">
+                <span className="run-settings__label">Time zone</span>
+                <select
+                  value={maintTimezone}
+                  onChange={(e) => setMaintTimezone(e.target.value)}
+                  aria-label="Maintenance window time zone"
+                >
+                  <option value="">UTC (default)</option>
+                  {listTimeZones()
+                    .filter((z) => z !== 'UTC')
+                    .map((z) => (
+                      <option key={z} value={z}>
+                        {z.replace(/_/g, ' ')}
+                      </option>
+                    ))}
+                </select>
+              </label>
+              <p className="webhook-panel__hint">
+                The window opens on this zone’s clock, so a nightly freeze stays put
+                across daylight-saving changes. Its <em>length</em> is elapsed time —
+                a two-hour freeze is two real hours even when the clocks move inside it.
+              </p>
 
               <div className="run-settings__section">Error handler</div>
               <p className="webhook-panel__hint">

@@ -4207,6 +4207,24 @@ html, body, #root {
   color: #b45309;
   margin: 6px 0 0;
 }
+/* The UTC instant behind a zoned fire time — secondary, because the local wall
+   clock is what the author reasons about, but present because the instant is
+   what every consumer of the API actually receives. */
+.schedule-nextruns__utc {
+  color: #9ca3af;
+}
+/* A daylight-saving change falling inside the previewed runs. Informational,
+   not a warning: the schedule holding its local hour is correct behaviour, and
+   the note exists so the shifting UTC column doesn't read as a bug. */
+.schedule-nextruns--note {
+  font-size: 12px;
+  color: #1d4ed8;
+  background: #eff6ff;
+  border-radius: 6px;
+  padding: 6px 8px;
+  margin: 6px 0 0;
+  line-height: 1.4;
+}
 
 /* Switch node config: one editable block per case (label + FXL expression). */
 .switch-case {
