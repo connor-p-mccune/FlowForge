@@ -20,9 +20,21 @@
 //      settles on the answer in a few hundred steps at worst, and returns null
 //      for an impossible schedule (Feb 30) instead of looping forever.
 //
-// All computation is in UTC and Date arguments are treated as UTC instants, so
+// Computation defaults to UTC and Date arguments are always UTC instants, so
 // the result is deterministic and independent of the server's timezone; callers
 // render the ISO-8601 `Z` timestamps in whatever zone they present.
+//
+// A caller may instead pass an IANA `timeZone`, in which case the *fields* are
+// matched against that zone's wall clock — "weekdays at 9am" meaning 9am in an
+// office rather than 9am in Greenwich. The matcher itself is unchanged: the
+// search runs over a pseudo-UTC Date carrying the zone's local fields, and each
+// match is converted back to a real instant by services/timezone.js, which owns
+// the two cases a wall clock can't answer on its own (a spring-forward gap
+// resolves to the transition instant, so a daily job still runs once; a
+// fall-back overlap resolves to the first occurrence, and the strictly-after-in-
+// UTC contract below stops the repeat from firing a duplicate).
+
+const tz = require('./timezone')
 
 // Field bounds as [min, max]. Seconds is optional (6-field expressions); the
 // standard 5-field form starts at minute.
@@ -220,16 +232,65 @@ function nextFrom(fields, from) {
   return null
 }
 
+// How many local wall clocks the zoned search may reject before giving up.
+// Only a fall-back overlap makes it reject anything at all: every local time
+// inside the repeated hour maps to an instant at or before `from`, so a
+// per-minute schedule discards up to 60 of them (a per-second one, up to 3600)
+// before the clock leaves the overlap. Sized to clear the longest overlap any
+// zone has ever declared, with room to spare.
+const MAX_ZONE_RESOLUTIONS = 5000
+
+// The zoned counterpart of nextFrom: match the expression's fields against the
+// zone's *wall clock*, then convert the match back to the instant it names.
+//
+// The conversion can land at or before `from` — that is precisely a fall-back
+// overlap, where the repeated local hour resolves to its first (already past)
+// occurrence — so the result is re-checked against the strictly-after contract
+// and the search resumes from the rejected wall clock. That check is what keeps
+// a schedule from firing twice on the night the clocks go back.
+function nextFromZoned(fields, from, timeZone) {
+  let cursor = tz.utcToZonedPseudo(timeZone, from)
+  for (let i = 0; i < MAX_ZONE_RESOLUTIONS; i++) {
+    const local = nextFrom(fields, cursor)
+    if (!local) return null
+    const { utc } = tz.zonedTimeToUtc(timeZone, {
+      year: local.getUTCFullYear(),
+      month: local.getUTCMonth() + 1,
+      day: local.getUTCDate(),
+      hour: local.getUTCHours(),
+      minute: local.getUTCMinutes(),
+      second: local.getUTCSeconds(),
+    })
+    if (utc.getTime() > from.getTime()) return utc
+    cursor = local
+  }
+  return null
+}
+
+// Dispatch one search in whichever space the caller asked for. An unknown zone
+// name is a caller error, not a schedule that never fires, so it throws — the
+// routes validate the zone before storing it, and the scheduler validates again
+// before registering.
+function advance(fields, from, timeZone) {
+  if (!timeZone || timeZone === 'UTC') return nextFrom(fields, from)
+  if (!tz.isValidTimeZone(timeZone)) {
+    throw new Error(`Unknown time zone: ${JSON.stringify(timeZone)}`)
+  }
+  return nextFromZoned(fields, from, timeZone)
+}
+
 // The next `count` fire times strictly after `from` (default: now), as Date
 // objects, oldest first. Stops early (returning fewer) if the schedule becomes
 // unreachable — so an impossible expression yields [] rather than throwing.
-function nextRuns(expression, count = 5, from = new Date()) {
+// `timeZone` (IANA name) matches the expression against that zone's wall clock
+// instead of UTC; the returned Dates are always real UTC instants either way.
+function nextRuns(expression, count = 5, from = new Date(), { timeZone } = {}) {
   const fields = parseCron(expression)
   const n = Math.max(0, Math.min(Number(count) || 0, 100))
   const runs = []
   let cursor = from
   for (let i = 0; i < n; i++) {
-    const next = nextFrom(fields, cursor)
+    const next = advance(fields, cursor, timeZone)
     if (!next) break
     runs.push(next)
     cursor = next
@@ -238,8 +299,8 @@ function nextRuns(expression, count = 5, from = new Date()) {
 }
 
 // The single next fire time after `from`, or null if unreachable.
-function nextRun(expression, from = new Date()) {
-  return nextFrom(parseCron(expression), from)
+function nextRun(expression, from = new Date(), { timeZone } = {}) {
+  return advance(parseCron(expression), from, timeZone)
 }
 
 // True if the expression parses. Mirrors node-cron's validate for the fields the
@@ -254,4 +315,4 @@ function isValid(expression) {
   }
 }
 
-module.exports = { parseCron, nextRun, nextRuns, isValid }
+module.exports = { parseCron, nextRun, nextRuns, isValid, isValidTimeZone: tz.isValidTimeZone }
