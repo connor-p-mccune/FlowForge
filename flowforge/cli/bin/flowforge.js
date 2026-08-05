@@ -13,6 +13,7 @@ const COMMANDS = {
   login: require('../src/commands/login'),
   workflows: require('../src/commands/workflows'),
   workspaces: require('../src/commands/workspaces'),
+  audit: require('../src/commands/audit'),
   search: require('../src/commands/search'),
   export: require('../src/commands/export'),
   import: require('../src/commands/import'),
@@ -43,6 +44,7 @@ Usage:
   flowforge login --url <server> --token <ffp_…>   Store credentials (~/.flowforge.json)
   flowforge workflows                              List workflows visible to the token
   flowforge workspaces                             List workspaces (import targets)
+  flowforge audit <ws-id> [--verify] [--action <f>] Audit log + hash-chain verification (exits non-zero on a broken chain)
   flowforge search <query> [--limit N]             Find workflows by name or by what's inside them
   flowforge export <workflow-id>                   Print the portable workflow JSON (pipe to a file)
   flowforge import <workspace-id> <file> [--name]  Create a draft workflow from an exported file
@@ -72,8 +74,8 @@ Configuration:
 
 Exit codes:
   0 success · 1 error, a watched run that failed/was cancelled, a
-  'check' whose workflow breached its health thresholds, or a 'diff'
-  that found drift`
+  'check' whose workflow breached its health thresholds, a 'diff'
+  that found drift, or an 'audit' whose chain failed verification`
 
 async function main() {
   const argv = process.argv.slice(2)

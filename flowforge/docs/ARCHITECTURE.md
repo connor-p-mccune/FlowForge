@@ -12,6 +12,7 @@ relative to `flowforge/`.
 - [Run insights & SLA monitoring](#run-insights--sla-monitoring)
 - [The expression language](#the-expression-language)
 - [Static analysis (the linter)](#static-analysis-the-linter)
+- [The tamper-evident audit log](#the-tamper-evident-audit-log)
 - [Security architecture](#security-architecture)
 - [Observability](#observability)
 - [Persistence](#persistence)
@@ -1044,6 +1045,75 @@ with the name column weighted well above node_text, so a workflow *named*
 "stripe sync" beats one that merely mentions stripe in a config; each hit
 reports which field matched and an FTS5 `snippet()` with the matched terms
 bracketed, so the palette can show *why* a result surfaced.
+
+## The tamper-evident audit log
+
+`services/auditLog.js` exists because FlowForge already had an activity feed and
+the feed is the wrong artefact for one specific reader. The two answer different
+questions:
+
+| | `activity_events` | `audit_log` |
+|---|---|---|
+| Reader | a teammate, on a dashboard | an auditor, or an incident review |
+| Question | "what's been happening here?" | "who changed security-relevant state — and is this record intact?" |
+| Coalescing | yes (an editing burst is one row) | never |
+| Mutability | rows can be bumped | append-only, enforced by trigger |
+| Scope | everything notable | a fixed allow-list of governed actions |
+
+Everything below follows from the second column's last clause. A log is only
+evidence if altering it is detectable, so each workspace's entries form a hash
+chain — `hash(n) = SHA-256(canonical(n) || hash(n-1))` — and `seq` is a
+contiguous per-workspace counter. Editing an entry breaks every hash after it;
+deleting one breaks the link *and* leaves a hole in the numbering.
+
+Design decisions worth the words:
+
+- **Canonicalisation is `JSON.stringify` over a fixed-order array.** It's
+  deterministic (no key ordering to depend on) and its escaping means no field's
+  contents can imitate a field boundary — a `target_name` of
+  `","action":"secret.deleted` is a string with quotes in it, not a way to shift
+  what the digest covers. The row `id` is deliberately *not* covered: it's a
+  random surrogate that carries no claim.
+
+- **Two independent defences, because they fail differently.** The BEFORE
+  UPDATE/DELETE triggers make append-only a property of the database rather than
+  a habit of the code, so an application bug cannot rewrite history. The chain
+  catches an attacker who has enough access to drop the triggers. Neither
+  subsumes the other.
+
+- **The guarantee is stated with its limit.** A chain proves internal
+  consistency, not notarisation: rewrite every subsequent entry and you get a
+  self-consistent forgery. The tests demonstrate exactly that rather than
+  pretending otherwise, and what betrays it is the **head hash** — which is why
+  `verifyChain` returns it, the UI displays it, and the CLI prints it. Anchoring
+  the head anywhere out of reach closes the gap.
+
+- **Writes are best-effort at the boundary**, like `activityService`. Refusing
+  to delete a secret because its audit entry couldn't be written would convert
+  an observability fault into an outage. The resulting gap can't be forged shut
+  later, because every subsequent hash already chains past where the missing
+  entry would have gone.
+
+- **Actions are an allow-list, and the list is short.** An unrecognised action
+  is refused rather than stored, which is what lets a reader treat an *absent*
+  entry as "it didn't happen" instead of "someone typo'd a call site". Ordinary
+  authoring — renaming a workflow, dragging a node — stays in the activity feed;
+  putting it here would bury the entries that matter.
+
+- **Only decisions, not the scheduler.** A person halting production is audited;
+  a maintenance window auto-pausing on its cron every night is not. The
+  distinction hangs off the `paused_reason` column the pause switch already
+  records, so it needed no new state.
+
+- **Reads are owner-only**, matching secrets and status-page tokens: "who was
+  granted access recently" is what an attacker with a member session would like
+  to read. And a failed verification is a `200 { ok: false }`, never a 5xx — a
+  probe must distinguish a compromised log from a dead endpoint.
+
+The trail has no foreign key to `workspaces` and no cascade, which is the one
+place this schema deliberately breaks the pattern every other table follows: an
+audit log that vanishes when someone deletes the workspace is exactly the log an
+attacker would target.
 
 ## Security architecture
 

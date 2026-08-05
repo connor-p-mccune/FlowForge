@@ -214,6 +214,23 @@ order while streaming live progress back to every collaborator on the canvas.
   rate, typical duration, and last-run age. Deliberately unactionable — no
   ids, no error text, no drafts, no dry runs — so it's safe for an on-call
   channel or a client; rotate the link and every shared copy dies.
+- **Tamper-evident audit log** — the activity feed tells your team what
+  happened; this tells an auditor what changed and proves the record wasn't
+  edited. Every governed action (secrets, variables, membership, API tokens,
+  deploys, deletes, imports, manual pause/resume, status-page publication) is
+  appended to a **per-workspace hash chain**: each entry's SHA-256 covers its own
+  fields *plus the previous entry's hash*, so editing any entry invalidates every
+  entry after it, and a contiguous sequence number makes a deletion visible as a
+  hole even if the hashes were recomputed. Append-only is enforced by **database
+  triggers**, not convention — so tampering needs schema-level access, and the
+  chain still catches it. One click verifies the whole chain and reports the
+  first divergence (edited / deleted / reordered are three distinct findings);
+  `flowforge audit --verify` does the same from a cron and exits non-zero, so
+  the integrity check is something that actually runs. Export the trail as CSV or
+  JSON **with the chain fields**, so a recipient can re-verify it without
+  trusting the server. The limit is documented rather than oversold: a chain
+  proves internal consistency, not notarisation — anchoring the returned head
+  hash externally is what would catch a wholesale rewrite.
 - **Command palette** — `Ctrl/⌘-K` fuzzy-jumps to any workflow, page, or action
   across every workspace.
 - **Full-text search** — "which workflow calls the Stripe API?" is a query,

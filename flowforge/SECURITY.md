@@ -240,6 +240,50 @@ personal access tokens (`services/apiTokens.js`, `middleware/tokenAuth.js`):
 
 Tested in `__tests__/apiTokens.test.js`.
 
+### Tamper-evident audit log
+
+`services/auditLog.js` records security-relevant changes — secrets, variables,
+membership, API tokens, deploys/deletes/imports, manual pause/resume, status-page
+publication — into a **per-workspace hash chain**:
+
+```
+hash(n) = SHA-256( canonical(entry n) || hash(n-1) )
+```
+
+The activity feed already answered "what happened here?" for people. This
+answers a different question, and the difference is the security property:
+**can the record be shown to be unedited?**
+
+- **Editing any entry breaks every hash after it.** The digest covers the
+  entry's own fields *and* the previous entry's hash.
+- **Deleting an entry is visible twice over** — the chain fails to link, and
+  `seq` (a contiguous per-workspace counter) has a hole. An attacker who
+  recomputes hashes still has to explain the missing number.
+- **Append-only is enforced by the schema**, not by convention: BEFORE UPDATE
+  and BEFORE DELETE triggers on `audit_log` abort the statement. Tampering
+  requires dropping the triggers with direct database access — and the chain
+  catches it afterwards. The two controls are independent on purpose.
+- **The trail outlives its subject.** There is deliberately no foreign key and
+  no `ON DELETE CASCADE` to `workspaces`: a log that disappears when someone
+  deletes the workspace is the log an attacker would target.
+
+**Stated limits.** A hash chain proves *internal consistency*, not third-party
+notarisation. An attacker with database write access who rewrites **every**
+subsequent entry can produce a self-consistent forged chain — a case
+`__tests__/auditLog.test.js` demonstrates rather than hides. What the chain
+defeats is the realistic attack: a targeted edit or deletion of the few entries
+that incriminate someone. The residual gap is closable by anchoring the head
+hash outside the system, which is why `GET /workspaces/:id/audit/verify` returns
+it, and why `flowforge audit --verify` exits non-zero on a broken chain so a
+scheduled job can hold the log to account.
+
+Reads are **owner-only** on both the session and public APIs: "who was granted
+access recently" is precisely what an attacker holding a member's session would
+want. Verification failures are reported as `200 { ok: false }` rather than a 5xx,
+so a monitoring probe distinguishes a compromised log from an unreachable
+endpoint — those page different people. Secret *values* never enter the log; only
+that a secret changed.
+
 ### Real-time (Socket.io) authorization (T8)
 
 The Socket.io connection is JWT-authenticated in the handshake, but that only

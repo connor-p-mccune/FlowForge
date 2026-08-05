@@ -61,6 +61,119 @@ const spec = {
         },
       },
     },
+    '/workspaces/{workspaceId}/audit': {
+      get: {
+        tags: ['workspaces'],
+        summary: 'Read the audit log',
+        description:
+          'The workspace’s tamper-evident governance trail: changes to secrets, ' +
+          'variables, membership, API tokens, and what is deployed. Each entry ' +
+          'carries its position in the hash chain (`seq`, `prevHash`, `hash`), so ' +
+          'a caller can verify the record independently of this server. ' +
+          'Newest first, keyset-paginated on `seq`. Requires the `read` scope, ' +
+          'and the token owner must be a workspace **owner**.',
+        operationId: 'listAuditEntries',
+        parameters: [
+          { name: 'workspaceId', in: 'path', required: true, schema: { type: 'string' } },
+          {
+            name: 'limit',
+            in: 'query',
+            description: 'Entries per page (1–200, default 50).',
+            schema: { type: 'integer', minimum: 1, maximum: 200, default: 50 },
+          },
+          {
+            name: 'before',
+            in: 'query',
+            description: 'Return entries with a sequence number below this one.',
+            schema: { type: 'integer' },
+          },
+          {
+            name: 'action',
+            in: 'query',
+            description:
+              'Filter to one action, or to a family with a trailing wildcard ' +
+              '(`secret.*`).',
+            schema: { type: 'string', example: 'secret.*' },
+          },
+        ],
+        responses: {
+          200: {
+            description: 'A page of audit entries.',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    entries: { type: 'array', items: { $ref: '#/components/schemas/AuditEntry' } },
+                    hasMore: { type: 'boolean' },
+                  },
+                },
+              },
+            },
+          },
+          401: { $ref: '#/components/responses/Unauthorized' },
+          403: { $ref: '#/components/responses/Forbidden' },
+          404: { $ref: '#/components/responses/NotFound' },
+          429: { $ref: '#/components/responses/RateLimited' },
+        },
+      },
+    },
+    '/workspaces/{workspaceId}/audit/verify': {
+      get: {
+        tags: ['workspaces'],
+        summary: 'Verify the audit log’s hash chain',
+        description:
+          'Recomputes the whole chain and reports the first divergence, if any. ' +
+          'A broken chain is reported as `200` with `ok: false` — not an error ' +
+          'status — so a monitoring probe can distinguish a compromised log from ' +
+          'an unreachable endpoint. `head` is the newest hash: anchoring it ' +
+          'outside this system is what detects a wholesale rewrite. Requires the ' +
+          '`read` scope and workspace ownership.',
+        operationId: 'verifyAuditChain',
+        parameters: [
+          { name: 'workspaceId', in: 'path', required: true, schema: { type: 'string' } },
+        ],
+        responses: {
+          200: {
+            description: 'The verification verdict (whether or not the chain is intact).',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    ok: { type: 'boolean' },
+                    entries: { type: 'integer' },
+                    head: {
+                      type: 'string',
+                      nullable: true,
+                      description: 'The newest entry’s hash; null when the chain is broken.',
+                    },
+                    brokenAt: {
+                      type: 'object',
+                      nullable: true,
+                      properties: {
+                        seq: { type: 'integer' },
+                        id: { type: 'string' },
+                        reason: {
+                          type: 'string',
+                          enum: ['sequence-gap', 'chain-mismatch', 'hash-mismatch'],
+                        },
+                        detail: { type: 'string' },
+                      },
+                    },
+                    verifiedAt: { type: 'string', format: 'date-time' },
+                  },
+                },
+              },
+            },
+          },
+          401: { $ref: '#/components/responses/Unauthorized' },
+          403: { $ref: '#/components/responses/Forbidden' },
+          404: { $ref: '#/components/responses/NotFound' },
+          429: { $ref: '#/components/responses/RateLimited' },
+        },
+      },
+    },
     '/workspaces/{workspaceId}/workflows/import': {
       post: {
         tags: ['workspaces'],
@@ -1045,6 +1158,37 @@ const spec = {
       },
     },
     schemas: {
+      AuditEntry: {
+        type: 'object',
+        description:
+          'One entry in a workspace’s hash-chained audit log. `seq` is a ' +
+          'contiguous per-workspace counter (a gap means an entry was removed) ' +
+          'and `hash` covers the entry’s fields plus `prevHash`, so any edit ' +
+          'invalidates every entry after it.',
+        properties: {
+          id: { type: 'string' },
+          seq: { type: 'integer' },
+          action: {
+            type: 'string',
+            example: 'secret.updated',
+            description: 'The governed operation, from a fixed allow-list.',
+          },
+          actor: {
+            type: 'string',
+            nullable: true,
+            description:
+              'The actor’s display name at the time of the action, or "system" ' +
+              'when the platform acted with no user behind it.',
+          },
+          targetType: { type: 'string', nullable: true },
+          targetId: { type: 'string', nullable: true },
+          targetName: { type: 'string', nullable: true },
+          metadata: { type: 'object', nullable: true, additionalProperties: true },
+          createdAt: { type: 'string', format: 'date-time' },
+          prevHash: { type: 'string', description: 'The previous entry’s hash (SHA-256, hex).' },
+          hash: { type: 'string', description: 'This entry’s hash (SHA-256, hex).' },
+        },
+      },
       Workflow: {
         type: 'object',
         properties: {

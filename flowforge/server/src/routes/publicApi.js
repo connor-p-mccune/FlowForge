@@ -27,9 +27,10 @@ const { compareRuns } = require('../services/runComparison')
 const { searchWorkflows } = require('../services/workflowSearch')
 const { diffGraphs, presentDiff } = require('../services/graphDiff')
 const { lintGraph } = require('../services/workflowLinter')
-const { forbidViewer } = require('../services/workspaceRoles')
+const { forbidViewer, memberRole } = require('../services/workspaceRoles')
 const { isPaused, PAUSED_ERROR, pauseWorkflow, resumeWorkflow } = require('../services/workflowPause')
 const { computeDependencies } = require('../services/workflowDependencies')
+const { listAudit, verifyChain } = require('../services/auditLog')
 
 const router = express.Router()
 
@@ -106,6 +107,76 @@ router.get('/workspaces', tokenAuth('read'), (req, res) => {
         ORDER BY w.created_at`
     ).all(req.user.id)
     res.json({ workspaces })
+  } catch (err) {
+    console.error(err)
+    res.status(500).json({ error: 'Internal server error' })
+  }
+})
+
+// GET /api/v1/workspaces/:id/audit — the tamper-evident governance trail, and
+// GET .../audit/verify — its chain verification. `read` scope, and owner-only
+// on top of it, mirroring the session route: a token acts as its owner, so a
+// non-owner's token is refused here exactly as their session would be.
+//
+// The verify endpoint exists on the public API specifically so a *monitoring
+// job* can hold the log to account on a schedule. An integrity check nobody
+// runs is not a control, and the natural place to run one is the same CI box
+// that already talks to this API — `flowforge audit --verify` exits non-zero on
+// a broken chain, which is all a cron needs to page someone.
+function auditWorkspaceOr404(req, res) {
+  const role = memberRole(req.params.id, req.user.id)
+  if (role === null) {
+    res.status(404).json({ error: 'Workspace not found' })
+    return false
+  }
+  if (role !== 'owner') {
+    // 403 rather than 404: the token's owner can see this workspace, so
+    // pretending it doesn't exist would be a confusing lie. The operation is
+    // what's refused.
+    res.status(403).json({ error: 'Only workspace owners can read the audit log' })
+    return false
+  }
+  return true
+}
+
+router.get('/workspaces/:id/audit', tokenAuth('read'), (req, res) => {
+  try {
+    if (!auditWorkspaceOr404(req, res)) return
+    const limit = Math.max(1, Math.min(parseInt(req.query.limit, 10) || 50, 200))
+    const rows = listAudit(req.params.id, {
+      limit: limit + 1,
+      before: req.query.before,
+      action: req.query.action,
+    })
+    const hasMore = rows.length > limit
+    res.json({
+      entries: rows.slice(0, limit).map((row) => ({
+        id: row.id,
+        seq: row.seq,
+        action: row.action,
+        actor: row.actor_label,
+        targetType: row.target_type,
+        targetId: row.target_id,
+        targetName: row.target_name,
+        metadata: row.metadata ? JSON.parse(row.metadata) : null,
+        createdAt: row.created_at,
+        prevHash: row.prev_hash,
+        hash: row.hash,
+      })),
+      hasMore,
+    })
+  } catch (err) {
+    console.error(err)
+    res.status(500).json({ error: 'Internal server error' })
+  }
+})
+
+router.get('/workspaces/:id/audit/verify', tokenAuth('read'), (req, res) => {
+  try {
+    if (!auditWorkspaceOr404(req, res)) return
+    // A broken chain is a 200 with ok:false, like the session route: a probe
+    // must distinguish "the log is compromised" from "the endpoint is down".
+    res.json({ ...verifyChain(req.params.id), verifiedAt: new Date().toISOString() })
   } catch (err) {
     console.error(err)
     res.status(500).json({ error: 'Internal server error' })
