@@ -15,6 +15,7 @@ const { forbidViewer } = require('../services/workspaceRoles')
 const { pauseWorkflow, resumeWorkflow } = require('../services/workflowPause')
 const { computeDependencies } = require('../services/workflowDependencies')
 const { isValid: isValidCron } = require('../services/cronExpression')
+const { isValidTimeZone } = require('../services/timezone')
 const {
   getRunner,
   loadWorkspaceSecrets,
@@ -255,6 +256,17 @@ function validateMaintenance(body) {
       return 'maintenance_duration_minutes must be an integer between 1 and 10080 (one week), or null to clear it'
     }
   }
+  // The zone the window's cron is read in. Optional and independent of the
+  // both-or-neither pair above — null simply means UTC, which is what every
+  // window meant before zones existed.
+  if ('maintenance_timezone' in body && body.maintenance_timezone !== null) {
+    if (
+      typeof body.maintenance_timezone !== 'string' ||
+      !isValidTimeZone(body.maintenance_timezone)
+    ) {
+      return 'maintenance_timezone must be a valid IANA time zone name (e.g. "America/New_York"), or null for UTC'
+    }
+  }
   return null
 }
 
@@ -372,6 +384,14 @@ router.put('/workflows/:id', auth, validate(workflowRule), (req, res) => {
           'maintenance_cron and maintenance_duration_minutes must be set together, or both cleared',
       })
     }
+    // A zone with no window to interpret is dead config; clearing the window
+    // clears it too, so a later window can't inherit a forgotten zone.
+    const maintenanceTimezone =
+      maintenanceCron == null
+        ? null
+        : 'maintenance_timezone' in req.body
+          ? req.body.maintenance_timezone
+          : workflow.maintenance_timezone
     const slaMaxDuration =
       'sla_max_duration_ms' in req.body ? req.body.sla_max_duration_ms : workflow.sla_max_duration_ms
     const slaMinSuccess =
@@ -393,10 +413,10 @@ router.put('/workflows/:id', auth, validate(workflowRule), (req, res) => {
     db.prepare(
       `UPDATE workflows SET name = ?, description = ?, max_concurrent_runs = ?, concurrency_policy = ?,
          rate_limit_max = ?, rate_limit_window_seconds = ?,
-         maintenance_cron = ?, maintenance_duration_minutes = ?,
+         maintenance_cron = ?, maintenance_duration_minutes = ?, maintenance_timezone = ?,
          sla_max_duration_ms = ?, sla_min_success_rate = ?, heartbeat_interval_minutes = ?, heartbeat_alerted_at = ?,
          error_workflow_id = ?, default_priority = ?, updated_at = ? WHERE id = ?`
-    ).run(name, description ?? workflow.description, maxConcurrent, policy, rateMax, rateWindow, maintenanceCron, maintenanceDuration, slaMaxDuration, slaMinSuccess, heartbeatInterval, heartbeatAlertedAt, errorWorkflowId, defaultPriority, now, req.params.id)
+    ).run(name, description ?? workflow.description, maxConcurrent, policy, rateMax, rateWindow, maintenanceCron, maintenanceDuration, maintenanceTimezone, slaMaxDuration, slaMinSuccess, heartbeatInterval, heartbeatAlertedAt, errorWorkflowId, defaultPriority, now, req.params.id)
 
     // Clearing (or removing) the window while it still holds a maintenance
     // pause would strand the workflow paused — the sweep no longer sees it to
@@ -882,6 +902,16 @@ router.post('/workflows/:id/deploy', auth, (req, res) => {
         error: `Invalid cron expression: ${cronExpr ? String(cronExpr) : '(empty)'}`,
       })
     }
+    // Same for its time zone: a typo'd zone would quietly fall back to UTC at
+    // registration, which is a schedule firing hours from where it was meant
+    // to. Deploy is the last point at which a person is watching, so refuse it
+    // here rather than logging it later.
+    const scheduleZone = scheduleNode?.data?.config?.timezone
+    if (scheduleNode && scheduleZone && !isValidTimeZone(String(scheduleZone))) {
+      return res.status(400).json({
+        error: `Unknown time zone: ${String(scheduleZone)}`,
+      })
+    }
 
     const now = new Date().toISOString()
     const version = db.transaction(() => {
@@ -893,8 +923,15 @@ router.post('/workflows/:id/deploy', auth, (req, res) => {
 
     // Activate the schedule to match the just-deployed graph (or clear a stale
     // one if the schedule node was removed before redeploying).
-    if (scheduleNode) scheduler.registerSchedule(req.params.id, cronExpr)
-    else scheduler.unregisterSchedule(req.params.id)
+    if (scheduleNode) {
+      scheduler.registerSchedule(
+        req.params.id,
+        cronExpr,
+        scheduler.scheduleTimeZone(scheduleNode.data?.config)
+      )
+    } else {
+      scheduler.unregisterSchedule(req.params.id)
+    }
 
     activityService.logEvent(workflow.workspace_id, req.user.id, 'workflow.deployed', {
       type: 'workflow', id: workflow.id, name: workflow.name,

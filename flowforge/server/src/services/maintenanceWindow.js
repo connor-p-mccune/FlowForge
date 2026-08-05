@@ -16,8 +16,10 @@
 // window ending; and it only auto-pauses a workflow that isn't already paused,
 // so a manual pause taken inside a window is left exactly as the operator set
 // it. The window itself is computed with the same dependency-free cron engine
-// the schedule preview uses (services/cronExpression.js), in UTC, so "inside a
-// window" is deterministic regardless of the server's timezone.
+// the schedule preview uses (services/cronExpression.js) — in the window's own
+// IANA zone when it declares one, UTC otherwise — so "inside a window" never
+// depends on the server's timezone, and a nightly freeze stays put across a DST
+// change instead of sliding an hour.
 
 const db = require('../config/database')
 const { nextRun, isValid } = require('./cronExpression')
@@ -35,12 +37,25 @@ const CHECK_INTERVAL_MS = Math.max(
 // first fire strictly after its `from`, which is exactly the half-open bound
 // we want — a window is [start, start+duration), so a fire exactly at
 // (now − duration) has already closed and must not count.
-function isWithinWindow(cron, durationMinutes, now = new Date()) {
+//
+// `timeZone` (optional, IANA) interprets the cron in that zone's wall clock.
+// It changes only which instants count as starts — the interval arithmetic is
+// identical, because a window's *duration* is elapsed time, not wall time. That
+// distinction is deliberate: a 2-hour freeze is two real hours even when the
+// clocks go back inside it, which is what an operator freezing deploys means.
+// An invalid zone falls back to UTC rather than throwing: this runs on a sweep,
+// and a bad column must not be able to wedge every other workflow's window.
+function isWithinWindow(cron, durationMinutes, now = new Date(), timeZone = null) {
   if (!cron || !isValid(cron)) return false
   const duration = Number(durationMinutes)
   if (!Number.isFinite(duration) || duration < 1) return false
   const durationMs = duration * 60000
-  const start = nextRun(cron, new Date(now.getTime() - durationMs))
+  let start
+  try {
+    start = nextRun(cron, new Date(now.getTime() - durationMs), { timeZone: timeZone || undefined })
+  } catch {
+    start = nextRun(cron, new Date(now.getTime() - durationMs))
+  }
   return start !== null && start.getTime() <= now.getTime()
 }
 
@@ -53,7 +68,7 @@ function checkOnce(now = new Date()) {
   try {
     workflows = db.prepare(`
       SELECT id, workspace_id, name, paused_at, paused_reason,
-             maintenance_cron, maintenance_duration_minutes
+             maintenance_cron, maintenance_duration_minutes, maintenance_timezone
         FROM workflows
        WHERE maintenance_cron IS NOT NULL
          AND maintenance_duration_minutes IS NOT NULL
@@ -65,7 +80,12 @@ function checkOnce(now = new Date()) {
 
   for (const workflow of workflows) {
     try {
-      const within = isWithinWindow(workflow.maintenance_cron, workflow.maintenance_duration_minutes, now)
+      const within = isWithinWindow(
+        workflow.maintenance_cron,
+        workflow.maintenance_duration_minutes,
+        now,
+        workflow.maintenance_timezone
+      )
       if (within && !workflow.paused_at) {
         pauseWorkflow(workflow, null, { reason: 'maintenance', eventType: 'workflow.maintenance_started' })
         transitions.push({ workflowId: workflow.id, event: 'paused' })

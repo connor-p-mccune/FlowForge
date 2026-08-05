@@ -21,7 +21,7 @@ const { respondToApproval } = require('../services/approvals')
 const { admitRun } = require('../services/concurrencyGate')
 const { isValidPriority, resolvePriority, enqueueOpts } = require('../services/runPriority')
 const { computeInsights, forecastFor, parseLimit } = require('./insights')
-const { scheduleExpressionOf, previewFor, parseCount } = require('./schedule')
+const { scheduleConfigOf, previewFor, parseCount } = require('./schedule')
 const { runSuite } = require('../services/workflowTester')
 const { compareRuns } = require('../services/runComparison')
 const { searchWorkflows } = require('../services/workflowSearch')
@@ -401,15 +401,15 @@ router.get('/workflows/:id/schedule', tokenAuth('read'), (req, res) => {
     const workflow = getWorkflowForMember(req.params.id, req.user.id)
     if (!workflow) return res.status(404).json({ error: 'Workflow not found' })
 
-    const expression = scheduleExpressionOf(workflow)
-    if (!expression) {
+    const schedule = scheduleConfigOf(workflow)
+    if (!schedule) {
       return res.json({ workflowId: workflow.id, scheduled: false, nextRuns: [] })
     }
     res.json({
       workflowId: workflow.id,
       scheduled: true,
       active: workflow.status === 'deployed',
-      ...previewFor(expression, parseCount(req.query.count)),
+      ...previewFor(schedule.cron, parseCount(req.query.count), schedule.timeZone),
     })
   } catch (err) {
     console.error(err)

@@ -44,9 +44,14 @@ describe('schedule deploy / archive / delete wiring', () => {
   const saveGraph = (id, graph) =>
     authed(request(app).put(`/api/workflows/${id}/graph`).send(graph))
 
-  const scheduleGraph = (cron) => ({
+  const scheduleGraph = (cron, timezone) => ({
     nodes: [
-      { id: 's1', type: 'trigger-schedule', position: { x: 0, y: 0 }, data: { label: 'Sched', config: { cron } } },
+      {
+        id: 's1',
+        type: 'trigger-schedule',
+        position: { x: 0, y: 0 },
+        data: { label: 'Sched', config: { cron, ...(timezone ? { timezone } : {}) } },
+      },
     ],
     edges: [],
   })
@@ -58,10 +63,41 @@ describe('schedule deploy / archive / delete wiring', () => {
     const deploy = await authed(request(app).post(`/api/workflows/${wf.id}/deploy`))
     expect(deploy.status).toBe(201)
     expect(deploy.body.version.version).toBe(1)
-    expect(scheduler.registerSchedule).toHaveBeenCalledWith(wf.id, '0 9 * * 1')
+    // No zone declared: registered against UTC, which is what an undeclared
+    // schedule has always meant.
+    expect(scheduler.registerSchedule).toHaveBeenCalledWith(wf.id, '0 9 * * 1', null)
 
     const reload = await authed(request(app).get(`/api/workflows/${wf.id}`))
     expect(reload.body.workflow.status).toBe('deployed')
+  })
+
+  it('deploy passes a declared time zone through to the runner', async () => {
+    const wf = await createWorkflow('Zoned')
+    await saveGraph(wf.id, scheduleGraph('0 9 * * 1-5', 'America/New_York'))
+
+    const deploy = await authed(request(app).post(`/api/workflows/${wf.id}/deploy`))
+    expect(deploy.status).toBe(201)
+    expect(scheduler.registerSchedule).toHaveBeenCalledWith(
+      wf.id,
+      '0 9 * * 1-5',
+      'America/New_York'
+    )
+  })
+
+  it('rejects deploy with a 400 when the time zone is unknown', async () => {
+    // A typo'd zone would otherwise degrade to UTC at registration — a schedule
+    // firing hours from where it was meant to, with nobody watching. Deploy is
+    // the last moment someone is looking, so it fails here instead.
+    const wf = await createWorkflow('Bad zone')
+    await saveGraph(wf.id, scheduleGraph('0 9 * * *', 'America/Nowhere'))
+
+    const deploy = await authed(request(app).post(`/api/workflows/${wf.id}/deploy`))
+    expect(deploy.status).toBe(400)
+    expect(deploy.body.error).toMatch(/Unknown time zone/)
+    expect(scheduler.registerSchedule).not.toHaveBeenCalled()
+
+    const reload = await authed(request(app).get(`/api/workflows/${wf.id}`))
+    expect(reload.body.workflow.status).toBe('draft')
   })
 
   it('rejects deploy with a 400 when the cron is invalid, leaving status untouched', async () => {

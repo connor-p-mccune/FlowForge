@@ -5,12 +5,17 @@
 // under a schedule node, and a CLI/dashboard can preview a workflow's cadence.
 //
 // Read-only and side-effect-free: it computes fire times, it never enqueues a
-// run. Times are UTC ISO-8601, matching the cron engine's contract.
+// run. Times are UTC ISO-8601, matching the cron engine's contract — and when
+// the schedule declares an IANA zone, each fire time also carries the local
+// wall clock and the offset in effect, because that pair is the only way to
+// *see* a DST transition coming ("09:00 UTC-05:00" then "09:00 UTC-04:00" is a
+// schedule holding its local hour; the UTC column alone looks like a bug).
 
 const express = require('express')
 const db = require('../config/database')
 const auth = require('../middleware/auth')
 const { nextRuns, isValid } = require('../services/cronExpression')
+const { isValidTimeZone, formatInZone, formatOffset } = require('../services/timezone')
 
 const router = express.Router()
 
@@ -36,9 +41,9 @@ function getVisibleWorkflow(workflowId, userId) {
   return member ? workflow : null
 }
 
-// The cron expression from a workflow's first schedule trigger, or null when the
+// The schedule trigger's config from a workflow's graph, or null when the
 // workflow has no schedule trigger (a manual/webhook-only workflow).
-function scheduleExpressionOf(workflow) {
+function scheduleConfigOf(workflow) {
   let graph
   try {
     graph = JSON.parse(workflow.graph_json)
@@ -47,22 +52,52 @@ function scheduleExpressionOf(workflow) {
   }
   const node = (graph.nodes || []).find((n) => n.type === 'trigger-schedule')
   const cron = node?.data?.config?.cron
-  return typeof cron === 'string' && cron.trim() !== '' ? cron.trim() : null
+  if (typeof cron !== 'string' || cron.trim() === '') return null
+  const zone = node?.data?.config?.timezone
+  return {
+    cron: cron.trim(),
+    timeZone: typeof zone === 'string' && zone.trim() !== '' ? zone.trim() : null,
+  }
+}
+
+// Back-compat shim: callers that only want the expression (the public API's
+// mirror of this route) keep working unchanged.
+function scheduleExpressionOf(workflow) {
+  return scheduleConfigOf(workflow)?.cron ?? null
 }
 
 // Build the preview payload for one expression, or an { error } shape the caller
 // turns into a 400. Kept separate so both endpoints share the exact wording.
-function previewFor(expression, count) {
+//
+// With a zone, each fire time is reported three ways: the UTC instant (the
+// contract every consumer can compute with), the local wall clock, and the
+// offset in effect at that instant. The third is what makes a DST change legible
+// — two consecutive runs at the same local hour on different offsets is the
+// schedule working, not drifting.
+function previewFor(expression, count, timeZone = null) {
   if (!isValid(expression)) {
     return { error: `"${expression}" is not a valid cron expression` }
   }
-  const runs = nextRuns(expression, count).map((d) => d.toISOString())
+  if (timeZone && !isValidTimeZone(timeZone)) {
+    return { error: `"${timeZone}" is not a known time zone` }
+  }
+  const dates = nextRuns(expression, count, new Date(), { timeZone: timeZone || undefined })
   return {
     cron: expression,
+    timeZone: timeZone || 'UTC',
     // A schedule that parses but never fires (an impossible calendar date, e.g.
     // Feb 30) yields no runs — surfaced honestly rather than as an error.
-    reachable: runs.length > 0,
-    nextRuns: runs,
+    reachable: dates.length > 0,
+    nextRuns: dates.map((d) => d.toISOString()),
+    ...(timeZone
+      ? {
+          nextRunsLocal: dates.map((d) => ({
+            utc: d.toISOString(),
+            local: formatInZone(timeZone, d),
+            offset: formatOffset(timeZone, d),
+          })),
+        }
+      : {}),
   }
 }
 
@@ -74,7 +109,8 @@ router.post('/schedule/preview', auth, (req, res) => {
   try {
     const expression = typeof req.body?.cron === 'string' ? req.body.cron.trim() : ''
     if (!expression) return res.status(400).json({ error: 'A cron expression is required' })
-    const result = previewFor(expression, parseCount(req.body?.count))
+    const zone = typeof req.body?.timezone === 'string' ? req.body.timezone.trim() : ''
+    const result = previewFor(expression, parseCount(req.body?.count), zone || null)
     if (result.error) return res.status(400).json({ error: result.error })
     res.json(result)
   } catch (err) {
@@ -92,11 +128,11 @@ router.get('/workflows/:id/schedule', auth, (req, res) => {
     const workflow = getVisibleWorkflow(req.params.id, req.user.id)
     if (!workflow) return res.status(404).json({ error: 'Workflow not found' })
 
-    const expression = scheduleExpressionOf(workflow)
-    if (!expression) {
+    const schedule = scheduleConfigOf(workflow)
+    if (!schedule) {
       return res.json({ workflowId: workflow.id, scheduled: false, nextRuns: [] })
     }
-    const result = previewFor(expression, parseCount(req.query.count))
+    const result = previewFor(schedule.cron, parseCount(req.query.count), schedule.timeZone)
     // A deployed schedule fires; an undeployed one is previewed but inactive, so
     // the client can label it "will run when deployed".
     res.json({
@@ -114,5 +150,6 @@ router.get('/workflows/:id/schedule', auth, (req, res) => {
 module.exports = router
 // Shared with the public API so /api/v1 can expose the same schedule preview.
 module.exports.scheduleExpressionOf = scheduleExpressionOf
+module.exports.scheduleConfigOf = scheduleConfigOf
 module.exports.previewFor = previewFor
 module.exports.parseCount = parseCount

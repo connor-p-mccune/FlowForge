@@ -22,8 +22,9 @@ const { admitRun } = require('../services/concurrencyGate')
 const { resolvePriority, enqueueOpts } = require('./runPriority')
 const { isPaused } = require('./workflowPause')
 const { recordPausedSkip } = require('./metrics')
+const { isValidTimeZone } = require('./timezone')
 
-// workflowId -> { task, cron } for every currently-registered schedule.
+// workflowId -> { task, cron, timeZone } for every currently-registered schedule.
 const activeTasks = new Map()
 
 // Crash safety-net only — released immediately after enqueue, well within this.
@@ -33,6 +34,21 @@ const LOCK_TTL = Number(process.env.SCHEDULE_LOCK_TTL_SECONDS || 30)
 // front so callers get a clean false rather than a thrown error.
 function validateCron(expr) {
   return typeof expr === 'string' && expr.trim().length > 0 && cron.validate(expr.trim())
+}
+
+// The IANA zone a schedule node declares, or null for UTC. Read from the node's
+// config alongside its cron, and validated against the same Intl-backed check
+// the preview uses — so a zone that previews is a zone that fires. Anything
+// unrecognised degrades to UTC rather than refusing to register: a schedule
+// still running on the wrong offset beats a schedule that silently stopped.
+function scheduleTimeZone(config) {
+  const zone = typeof config?.timezone === 'string' ? config.timezone.trim() : ''
+  if (!zone || zone === 'UTC') return null
+  if (!isValidTimeZone(zone)) {
+    console.error(`Ignoring unknown schedule time zone ${JSON.stringify(zone)}; using UTC`)
+    return null
+  }
+  return zone
 }
 
 // One cron tick: enqueue an execution for the workflow if we win the lock and the
@@ -106,18 +122,29 @@ async function runScheduledExecution(workflowId) {
 
 // Register (or replace) the cron job for a workflow. Throws on an invalid cron so
 // callers (the deploy route) can surface a clear error before activating.
-function registerSchedule(workflowId, cronExpression) {
+//
+// `timeZone` (IANA, optional) is handed to node-cron, which interprets the
+// expression against that zone's wall clock. The preview endpoint computes the
+// same fire times through services/cronExpression.js, so what a user is shown
+// before deploying is what the runner will do — two implementations agreeing on
+// one contract, which the zoned-preview tests pin.
+function registerSchedule(workflowId, cronExpression, timeZone = null) {
   const expr = typeof cronExpression === 'string' ? cronExpression.trim() : ''
   if (!validateCron(expr)) {
     throw new Error(`Invalid cron expression: ${JSON.stringify(cronExpression)}`)
   }
+  const zone = timeZone && isValidTimeZone(timeZone) ? timeZone : null
   unregisterSchedule(workflowId) // replace any existing job for this workflow
-  const task = cron.schedule(expr, () => {
-    runScheduledExecution(workflowId).catch((err) =>
-      console.error(`Schedule tick error for ${workflowId}:`, err.message)
-    )
-  })
-  activeTasks.set(workflowId, { task, cron: expr })
+  const task = cron.schedule(
+    expr,
+    () => {
+      runScheduledExecution(workflowId).catch((err) =>
+        console.error(`Schedule tick error for ${workflowId}:`, err.message)
+      )
+    },
+    zone ? { timezone: zone } : undefined
+  )
+  activeTasks.set(workflowId, { task, cron: expr, timeZone: zone })
   return expr
 }
 
@@ -142,7 +169,7 @@ function restoreSchedules() {
       const scheduleNode = (nodes || []).find((n) => n.type === 'trigger-schedule')
       const cronExpr = scheduleNode?.data?.config?.cron
       if (scheduleNode && validateCron(cronExpr)) {
-        registerSchedule(wf.id, cronExpr)
+        registerSchedule(wf.id, cronExpr, scheduleTimeZone(scheduleNode.data?.config))
         count++
       }
     } catch (err) {
@@ -161,6 +188,7 @@ function stopAllSchedules() {
 
 module.exports = {
   validateCron,
+  scheduleTimeZone,
   registerSchedule,
   unregisterSchedule,
   restoreSchedules,

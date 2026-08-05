@@ -183,6 +183,12 @@ ensureColumn('workflows', 'paused_reason', 'TEXT')
 // as if a person had paused it.
 ensureColumn('workflows', 'maintenance_cron', 'TEXT')
 ensureColumn('workflows', 'maintenance_duration_minutes', 'INTEGER')
+// The IANA zone the window's cron is interpreted in (services/timezone.js).
+// NULL = UTC, which is what every window created before this column existed
+// meant — so the default preserves their behaviour exactly. A named zone makes
+// "pause every night at 01:00" mean 01:00 where the person on call lives, and
+// keeps meaning that across a DST change instead of drifting by an hour.
+ensureColumn('workflows', 'maintenance_timezone', 'TEXT')
 
 // Two-factor authentication (TOTP). Optional, opt-in per user. totp_enabled stays
 // 0 until the user verifies a code from their authenticator, so a half-finished

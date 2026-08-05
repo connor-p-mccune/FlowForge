@@ -151,6 +151,42 @@ describe('POST /api/schedule/preview', () => {
     expect(res.status).toBe(400)
     expect(res.body.error).toMatch(/not a valid cron/)
   })
+
+  it('previews in a named time zone, reporting local time and offset', async () => {
+    const res = await request(app)
+      .post('/api/schedule/preview')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ cron: '0 9 * * *', timezone: 'America/New_York', count: 3 })
+    expect(res.status).toBe(200)
+    expect(res.body.timeZone).toBe('America/New_York')
+    expect(res.body.nextRunsLocal).toHaveLength(3)
+    // Every fire time reads as 09:00 in the zone, whatever its UTC instant is.
+    for (const run of res.body.nextRunsLocal) {
+      expect(run.local).toMatch(/ 09:00$/)
+      expect(run.offset).toMatch(/^UTC[+-]\d{2}:\d{2}$/)
+      expect(run.utc).toBe(new Date(run.utc).toISOString())
+    }
+  })
+
+  it('defaults to UTC and omits the local view when no zone is given', async () => {
+    const res = await request(app)
+      .post('/api/schedule/preview')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ cron: '0 9 * * *' })
+    expect(res.status).toBe(200)
+    expect(res.body.timeZone).toBe('UTC')
+    expect(res.body.nextRunsLocal).toBeUndefined()
+    expect(res.body.nextRuns[0]).toMatch(/T09:00:00\.000Z$/)
+  })
+
+  it('400s on an unknown time zone', async () => {
+    const res = await request(app)
+      .post('/api/schedule/preview')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ cron: '0 9 * * *', timezone: 'America/Nowhere' })
+    expect(res.status).toBe(400)
+    expect(res.body.error).toMatch(/not a known time zone/)
+  })
 })
 
 describe('GET /api/v1/workflows/:id/schedule (public API)', () => {

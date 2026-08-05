@@ -38,6 +38,30 @@ describe('isWithinWindow', () => {
     expect(isWithinWindow(cron, null, at('2026-07-20T02:30:00Z'))).toBe(false)
     expect(isWithinWindow('not a cron', dur, at('2026-07-20T02:30:00Z'))).toBe(false)
   })
+
+  it('opens on the zone’s wall clock when one is declared', () => {
+    // "02:00 New York, for two hours" is 06:00–08:00Z in summer (EDT, UTC-4).
+    const zone = 'America/New_York'
+    expect(isWithinWindow(cron, dur, at('2026-07-20T05:59:00Z'), zone)).toBe(false)
+    expect(isWithinWindow(cron, dur, at('2026-07-20T06:00:00Z'), zone)).toBe(true)
+    expect(isWithinWindow(cron, dur, at('2026-07-20T07:59:00Z'), zone)).toBe(true)
+    expect(isWithinWindow(cron, dur, at('2026-07-20T08:00:00Z'), zone)).toBe(false)
+    // The UTC reading of the same window is *not* open then — which is the bug
+    // a zone-less window has every summer.
+    expect(isWithinWindow(cron, dur, at('2026-07-20T06:30:00Z'))).toBe(false)
+  })
+
+  it('holds its local hour across a DST change', () => {
+    const zone = 'America/New_York'
+    // Winter: 02:00 EST = 07:00Z. Summer: 02:00 EDT = 06:00Z. Both open.
+    expect(isWithinWindow(cron, dur, at('2026-01-20T07:30:00Z'), zone)).toBe(true)
+    expect(isWithinWindow(cron, dur, at('2026-07-20T06:30:00Z'), zone)).toBe(true)
+  })
+
+  it('falls back to UTC rather than throwing on an unknown zone', () => {
+    // A bad column must not be able to wedge every other workflow's sweep.
+    expect(isWithinWindow(cron, dur, at('2026-07-20T02:30:00Z'), 'Mars/Olympus')).toBe(true)
+  })
 })
 
 describe('maintenance sweep (checkOnce)', () => {
