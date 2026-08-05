@@ -5,6 +5,7 @@ import ProtectedRoute from './components/auth/ProtectedRoute'
 import DashboardPage from './components/dashboard/DashboardPage'
 import AnalyticsPage from './components/analytics/AnalyticsPage'
 import ActivityPage from './components/activity/ActivityPage'
+import AuditPage from './components/audit/AuditPage'
 import SecretsPage from './components/secrets/SecretsPage'
 import VariablesPage from './components/variables/VariablesPage'
 import WebhooksPage from './components/webhooks/WebhooksPage'
@@ -38,6 +39,15 @@ function ActivityRoute() {
   return (
     <AppShell>
       <ActivityPage workspaceId={wsId} />
+    </AppShell>
+  )
+}
+
+function AuditRoute() {
+  const { wsId } = useParams()
+  return (
+    <AppShell>
+      <AuditPage workspaceId={wsId} />
     </AppShell>
   )
 }
@@ -84,6 +94,7 @@ export default function App() {
               <Route path="/workflow/:id" element={<WorkflowPage />} />
               <Route path="/workspace/:wsId/analytics" element={<AnalyticsRoute />} />
               <Route path="/workspace/:wsId/activity" element={<ActivityRoute />} />
+              <Route path="/workspace/:wsId/audit" element={<AuditRoute />} />
               <Route path="/workspace/:wsId/secrets" element={<SecretsRoute />} />
               <Route path="/workspace/:wsId/variables" element={<VariablesRoute />} />
               <Route path="/workspace/:wsId/webhooks" element={<WebhooksRoute />} />
