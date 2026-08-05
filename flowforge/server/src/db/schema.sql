@@ -446,3 +446,66 @@ CREATE TABLE IF NOT EXISTS workflow_search_state (
   workflow_id        TEXT PRIMARY KEY REFERENCES workflows(id) ON DELETE CASCADE,
   indexed_updated_at TEXT NOT NULL
 );
+
+-- Tamper-evident audit log (services/auditLog.js). Deliberately *not* the
+-- activity feed: the feed answers "what happened here lately" for people, is
+-- allowed to coalesce bursts, and is a product surface. This answers "who
+-- changed security-relevant state, and can we prove the record is intact" for
+-- an auditor, and every property below follows from that second job.
+--
+-- Each workspace's entries form a hash chain: `hash` covers the entry's own
+-- fields *and* `prev_hash`, so altering any field of any entry — or removing
+-- one, or reordering two — invalidates every hash after it. seq is a
+-- contiguous per-workspace counter, so a deletion is visible as a gap even if
+-- someone recomputed the hashes. GET .../audit/verify walks the chain and
+-- reports the first divergence.
+--
+-- Two schema decisions are load-bearing:
+--
+--   * There is NO foreign key to workspaces and no ON DELETE CASCADE. An audit
+--     log that vanishes when someone deletes the workspace is exactly the log
+--     an attacker would target; the trail outlives its subject on purpose.
+--     workspace_id is therefore a plain string, and the read routes check
+--     membership against the live workspace separately.
+--   * actor_label denormalises the actor's display name at write time (like
+--     activity_events.entity_name), so an entry still reads correctly after
+--     the user is deleted — and can't be silently re-attributed by renaming
+--     an account.
+CREATE TABLE IF NOT EXISTS audit_log (
+  id           TEXT PRIMARY KEY,
+  workspace_id TEXT NOT NULL,
+  seq          INTEGER NOT NULL,
+  actor_id     TEXT,
+  actor_label  TEXT,
+  action       TEXT NOT NULL,
+  target_type  TEXT,
+  target_id    TEXT,
+  target_name  TEXT,
+  metadata     TEXT,
+  created_at   TEXT NOT NULL,
+  prev_hash    TEXT NOT NULL,
+  hash         TEXT NOT NULL,
+  UNIQUE (workspace_id, seq)
+);
+
+-- The log reads newest-first within a workspace, and verification walks it
+-- oldest-first; one index on (workspace_id, seq) serves both directions.
+CREATE INDEX IF NOT EXISTS idx_audit_log_workspace_seq
+  ON audit_log (workspace_id, seq);
+
+-- Append-only, enforced by the database rather than by convention. Application
+-- code never updates or deletes an audit entry, but "never" is a claim the
+-- schema can make good on: any UPDATE or DELETE aborts the statement. Tampering
+-- therefore requires dropping these triggers with direct database access — and
+-- the hash chain still catches it afterwards, which is the point of having both.
+CREATE TRIGGER IF NOT EXISTS audit_log_append_only_update
+BEFORE UPDATE ON audit_log
+BEGIN
+  SELECT RAISE(ABORT, 'audit_log is append-only');
+END;
+
+CREATE TRIGGER IF NOT EXISTS audit_log_append_only_delete
+BEFORE DELETE ON audit_log
+BEGIN
+  SELECT RAISE(ABORT, 'audit_log is append-only');
+END;

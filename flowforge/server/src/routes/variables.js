@@ -14,6 +14,7 @@ const db = require('../config/database')
 const auth = require('../middleware/auth')
 const { validate } = require('../middleware/validate')
 const activityService = require('../services/activityService')
+const { recordAudit } = require('../services/auditLog')
 
 const router = express.Router()
 
@@ -110,6 +111,9 @@ router.put(
       activityService.logEvent(req.params.wsId, req.user.id, existing ? 'variable.updated' : 'variable.created', {
         type: 'variable', id: name, name,
       })
+      recordAudit(req.params.wsId, req.user.id, existing ? 'variable.updated' : 'variable.created', {
+        type: 'variable', id: name, name,
+      })
 
       res.status(existing ? 200 : 201).json({ variable: getVariable(req.params.wsId, name) })
     } catch (err) {
@@ -134,6 +138,9 @@ router.delete('/workspaces/:wsId/variables/:name', auth, (req, res) => {
     if (result.changes === 0) return res.status(404).json({ error: 'Variable not found' })
 
     activityService.logEvent(req.params.wsId, req.user.id, 'variable.deleted', {
+      type: 'variable', id: req.params.name, name: req.params.name,
+    })
+    recordAudit(req.params.wsId, req.user.id, 'variable.deleted', {
       type: 'variable', id: req.params.name, name: req.params.name,
     })
     res.status(204).end()

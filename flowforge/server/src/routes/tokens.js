@@ -10,7 +10,31 @@ const auth = require('../middleware/auth')
 const { validate } = require('../middleware/validate')
 const { generateToken, SCOPES } = require('../services/apiTokens')
 
+const { recordAudit } = require('../services/auditLog')
+
 const router = express.Router()
+
+// A personal access token is minted per *user*, but it can act on every
+// workspace that user belongs to — so the entry that matters ("a credential
+// capable of touching our secrets was created") belongs in each of those
+// workspaces' logs, not in a user-scoped log nobody reviews. Recording it as a
+// fan-out keeps the chain workspace-scoped, which is what makes verification
+// and export a per-workspace operation.
+function auditTokenEvent(db, userId, action, row) {
+  const workspaces = db
+    .prepare('SELECT workspace_id FROM workspace_members WHERE user_id = ?')
+    .all(userId)
+  for (const { workspace_id: workspaceId } of workspaces) {
+    recordAudit(workspaceId, userId, action, {
+      type: 'api_token',
+      id: row.id,
+      name: row.name,
+      // The prefix identifies which token without being usable as one — the
+      // same display-only value the settings page shows.
+      metadata: { prefix: row.token_prefix, scopes: JSON.parse(row.scopes || '[]') },
+    })
+  }
+}
 
 // Enough for real automation use; low enough that a runaway script minting
 // tokens in a loop gets stopped.
@@ -102,6 +126,7 @@ router.post(
       ).run(id, req.user.id, name, prefix, hash, JSON.stringify(scopes), expiresAt, now)
 
       const row = db.prepare('SELECT * FROM api_tokens WHERE id = ?').get(id)
+      auditTokenEvent(db, req.user.id, 'token.minted', row)
       // `token` is the only copy the caller will ever see.
       res.status(201).json({ token, apiToken: presentToken(row) })
     } catch (err) {
@@ -122,6 +147,7 @@ router.delete('/tokens/:id', auth, (req, res) => {
     if (!row.revoked_at) {
       db.prepare('UPDATE api_tokens SET revoked_at = ? WHERE id = ?')
         .run(new Date().toISOString(), row.id)
+      auditTokenEvent(db, req.user.id, 'token.revoked', row)
     }
     res.status(204).end()
   } catch (err) {

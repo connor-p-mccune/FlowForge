@@ -13,6 +13,7 @@ const auth = require('../middleware/auth')
 const { validate } = require('../middleware/validate')
 const { encryptSecret } = require('../services/secretVault')
 const activityService = require('../services/activityService')
+const { recordAudit } = require('../services/auditLog')
 
 const router = express.Router()
 
@@ -104,6 +105,12 @@ router.put(
       activityService.logEvent(req.params.wsId, req.user.id, existing ? 'secret.updated' : 'secret.created', {
         type: 'secret', id: name, name,
       })
+      // …and the audit chain records it a second time, on purpose. The feed is
+      // for people watching a workspace; this is the copy an auditor reads,
+      // and it can be proven un-edited.
+      recordAudit(req.params.wsId, req.user.id, existing ? 'secret.updated' : 'secret.created', {
+        type: 'secret', id: name, name,
+      })
 
       const secret = db.prepare(
         `SELECT s.name, s.created_at, s.updated_at, u.display_name AS created_by_name
@@ -134,6 +141,9 @@ router.delete('/workspaces/:wsId/secrets/:name', auth, (req, res) => {
     if (result.changes === 0) return res.status(404).json({ error: 'Secret not found' })
 
     activityService.logEvent(req.params.wsId, req.user.id, 'secret.deleted', {
+      type: 'secret', id: req.params.name, name: req.params.name,
+    })
+    recordAudit(req.params.wsId, req.user.id, 'secret.deleted', {
       type: 'secret', id: req.params.name, name: req.params.name,
     })
     res.status(204).end()

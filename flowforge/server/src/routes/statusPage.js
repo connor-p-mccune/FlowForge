@@ -9,6 +9,7 @@ const db = require('../config/database')
 const auth = require('../middleware/auth')
 const { webhookLimiter } = require('../middleware/rateLimit')
 const { mintToken, buildStatusPage } = require('../services/statusPage')
+const { recordAudit } = require('../services/auditLog')
 
 const router = express.Router()
 
@@ -42,9 +43,22 @@ router.post('/workspaces/:id/status-page', auth, (req, res) => {
     if (role !== 'owner') {
       return res.status(403).json({ error: 'Only a workspace owner can manage the status page' })
     }
+    const existing = db
+      .prepare('SELECT status_page_token FROM workspaces WHERE id = ?')
+      .get(req.params.id)
     const token = mintToken()
     db.prepare('UPDATE workspaces SET status_page_token = ?, updated_at = ? WHERE id = ?')
       .run(token, new Date().toISOString(), req.params.id)
+    // Publishing run health to anyone holding a URL is a disclosure decision,
+    // so it is audited — and minting is distinguished from rotating, because
+    // "a link now exists" and "the link was replaced" answer different
+    // questions in a review. The token itself is never recorded.
+    recordAudit(
+      req.params.id,
+      req.user.id,
+      existing?.status_page_token ? 'status_page.rotated' : 'status_page.enabled',
+      { type: 'workspace', id: req.params.id }
+    )
     res.status(201).json({ token })
   } catch (err) {
     console.error(err)
@@ -62,6 +76,9 @@ router.delete('/workspaces/:id/status-page', auth, (req, res) => {
     }
     db.prepare('UPDATE workspaces SET status_page_token = NULL, updated_at = ? WHERE id = ?')
       .run(new Date().toISOString(), req.params.id)
+    recordAudit(req.params.id, req.user.id, 'status_page.disabled', {
+      type: 'workspace', id: req.params.id,
+    })
     res.status(204).end()
   } catch (err) {
     console.error(err)

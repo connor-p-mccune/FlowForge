@@ -6,6 +6,7 @@ const { validate, EMAIL_PATTERN } = require('../middleware/validate')
 const { createNotification } = require('../services/notificationService')
 const activityService = require('../services/activityService')
 const { forbidViewer } = require('../services/workspaceRoles')
+const { recordAudit } = require('../services/auditLog')
 
 const router = express.Router()
 
@@ -171,6 +172,12 @@ router.post(
         type: 'member', id: invitee.id, name: invitee.display_name,
         metadata: { role },
       })
+      // Membership changes are the audit log's core subject: who was given the
+      // ability to act here, by whom, at what level.
+      recordAudit(req.params.id, req.user.id, 'member.invited', {
+        type: 'member', id: invitee.id, name: invitee.display_name,
+        metadata: { role, email: invitee.email },
+      })
 
       res.status(201).json({ member: { userId: invitee.id, role } })
     } catch (err) {
@@ -222,6 +229,10 @@ router.put('/workspaces/:id/members/:userId', auth, (req, res) => {
       type: 'member', id: target.user_id, name: target.display_name,
       metadata: { from: target.role, to: role },
     })
+    recordAudit(req.params.id, req.user.id, 'member.role_changed', {
+      type: 'member', id: target.user_id, name: target.display_name,
+      metadata: { from: target.role, to: role },
+    })
 
     res.json({ member: { userId: target.user_id, role } })
   } catch (err) {
@@ -263,6 +274,10 @@ router.delete('/workspaces/:id/members/:userId', auth, (req, res) => {
 
     activityService.logEvent(req.params.id, req.user.id, 'member.removed', {
       type: 'member', id: target.user_id, name: target.display_name,
+    })
+    recordAudit(req.params.id, req.user.id, 'member.removed', {
+      type: 'member', id: target.user_id, name: target.display_name,
+      metadata: { role: target.role },
     })
 
     res.status(204).end()

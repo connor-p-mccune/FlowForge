@@ -18,6 +18,7 @@
 
 const db = require('../config/database')
 const activityService = require('./activityService')
+const { recordAudit } = require('./auditLog')
 
 // The one refusal message every 409 path shares, so a caller hitting the
 // switch from any surface reads the same explanation.
@@ -41,6 +42,15 @@ function pauseWorkflow(workflow, actorId, { reason = 'manual', eventType = 'work
     activityService.logEvent(workflow.workspace_id, actorId ?? null, eventType, {
       type: 'workflow', id: workflow.id, name: workflow.name,
     })
+    // Audit only the *decisions*, not the schedule. A person halting production
+    // is exactly what an incident review reconstructs; a maintenance window
+    // opening on its cron every night is routine, already in the activity feed,
+    // and would bury the entries that matter under recurring noise.
+    if (reason === 'manual') {
+      recordAudit(workflow.workspace_id, actorId ?? null, 'workflow.paused', {
+        type: 'workflow', id: workflow.id, name: workflow.name,
+      })
+    }
   }
   return db.prepare('SELECT * FROM workflows WHERE id = ?').get(workflow.id)
 }
@@ -50,11 +60,20 @@ function pauseWorkflow(workflow, actorId, { reason = 'manual', eventType = 'work
 // distinct feed event for a window ending.
 function resumeWorkflow(workflow, actorId, { eventType = 'workflow.resumed' } = {}) {
   if (workflow.paused_at) {
+    const wasManual = workflow.paused_reason !== 'maintenance'
     db.prepare('UPDATE workflows SET paused_at = NULL, paused_by = NULL, paused_reason = NULL WHERE id = ?')
       .run(workflow.id)
     activityService.logEvent(workflow.workspace_id, actorId ?? null, eventType, {
       type: 'workflow', id: workflow.id, name: workflow.name,
     })
+    // Mirror the pause rule: a window closing on schedule is not an audited
+    // decision, but releasing a manual halt is — including when the release is
+    // the settings route clearing a window that a person had pinned open.
+    if (wasManual) {
+      recordAudit(workflow.workspace_id, actorId ?? null, 'workflow.resumed', {
+        type: 'workflow', id: workflow.id, name: workflow.name,
+      })
+    }
   }
   return db.prepare('SELECT * FROM workflows WHERE id = ?').get(workflow.id)
 }

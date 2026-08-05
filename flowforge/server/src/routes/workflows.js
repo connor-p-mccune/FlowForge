@@ -14,6 +14,7 @@ const { isValidPriority } = require('../services/runPriority')
 const { forbidViewer } = require('../services/workspaceRoles')
 const { pauseWorkflow, resumeWorkflow } = require('../services/workflowPause')
 const { computeDependencies } = require('../services/workflowDependencies')
+const { recordAudit } = require('../services/auditLog')
 const { isValid: isValidCron } = require('../services/cronExpression')
 const { isValidTimeZone } = require('../services/timezone')
 const {
@@ -155,6 +156,13 @@ router.post('/workspaces/:wsId/workflows/import', auth, validate(importRule), (r
     ).run(id, req.params.wsId, name, null, graphJson, req.user.id, now, now)
 
     const workflow = db.prepare('SELECT * FROM workflows WHERE id = ?').get(id)
+    // An import is how a definition crosses an environment boundary — the
+    // question "where did this workflow in production come from?" is exactly
+    // what a review asks, so it belongs in the audited record.
+    recordAudit(req.params.wsId, req.user.id, 'workflow.imported', {
+      type: 'workflow', id, name: workflow.name,
+      metadata: { nodes: graph_data.nodes.length },
+    })
     res.status(201).json({ workflow })
   } catch (err) {
     console.error(err)
@@ -477,6 +485,12 @@ router.delete('/workflows/:id', auth, (req, res) => {
     scheduler.unregisterSchedule(req.params.id)
     activityService.logEvent(workflow.workspace_id, req.user.id, 'workflow.deleted', {
       type: 'workflow', id: workflow.id, name: workflow.name,
+    })
+    // The audit entry outlives the workflow it names — target_name is captured
+    // here precisely because the row it refers to is gone a line above.
+    recordAudit(workflow.workspace_id, req.user.id, 'workflow.deleted', {
+      type: 'workflow', id: workflow.id, name: workflow.name,
+      metadata: { status: workflow.status },
     })
     res.status(204).end()
   } catch (err) {
@@ -937,6 +951,12 @@ router.post('/workflows/:id/deploy', auth, (req, res) => {
       type: 'workflow', id: workflow.id, name: workflow.name,
       metadata: { version: version.version },
     })
+    // What is live, and who made it live. The version number makes the entry
+    // resolvable to an exact graph in workflow_versions.
+    recordAudit(workflow.workspace_id, req.user.id, 'workflow.deployed', {
+      type: 'workflow', id: workflow.id, name: workflow.name,
+      metadata: { version: version.version },
+    })
 
     res.status(201).json({ version })
   } catch (err) {
@@ -1008,6 +1028,10 @@ router.post('/workflows/:id/versions/:versionId/restore', auth, (req, res) => {
     })()
 
     activityService.logEvent(workflow.workspace_id, req.user.id, 'workflow.restored', {
+      type: 'workflow', id: workflow.id, name: workflow.name,
+      metadata: { version: target.version },
+    })
+    recordAudit(workflow.workspace_id, req.user.id, 'workflow.version_restored', {
       type: 'workflow', id: workflow.id, name: workflow.name,
       metadata: { version: target.version },
     })
