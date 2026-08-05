@@ -44,16 +44,32 @@ module.exports = async function schedule(args, ctx) {
   }
 
   const state = data.active ? green('active') : yellow('inactive (not deployed)')
-  ctx.log(bold('Schedule') + gray(`  ${data.cron}`) + `  ${state}`)
+  const zone = data.timeZone && data.timeZone !== 'UTC' ? gray(`  [${data.timeZone}]`) : ''
+  ctx.log(bold('Schedule') + gray(`  ${data.cron}`) + zone + `  ${state}`)
 
   if (!data.reachable || !data.nextRuns?.length) {
     ctx.log(yellow('  This schedule never fires — check the expression (e.g. Feb 30).'))
     return 0
   }
 
-  data.nextRuns.forEach((iso, i) => {
-    const rel = i === 0 ? gray(`  ${relative(iso)}`) : ''
-    ctx.log(`  ${formatUtc(iso)}${rel}`)
+  // A zoned schedule prints the local wall clock first (what the author wrote)
+  // with the UTC instant beside it (what actually happens), because reading
+  // only one of the two is how DST bugs get missed.
+  const rows = data.nextRunsLocal || data.nextRuns.map((utc) => ({ utc }))
+  rows.forEach((run, i) => {
+    const rel = i === 0 ? gray(`  ${relative(run.utc)}`) : ''
+    const line = run.local
+      ? `${run.local} ${run.offset}${gray(`  · ${formatUtc(run.utc)}`)}`
+      : formatUtc(run.utc)
+    ctx.log(`  ${line}${rel}`)
   })
+
+  // Call out a daylight-saving change inside the previewed window: the local
+  // hour holding while the UTC instant moves is correct, and unexplained it
+  // looks like the schedule slipped.
+  const offsets = new Set(rows.map((r) => r.offset).filter(Boolean))
+  if (offsets.size > 1) {
+    ctx.log(gray('  A daylight-saving change falls in this window — local time holds, UTC shifts.'))
+  }
   return 0
 }

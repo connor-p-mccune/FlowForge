@@ -279,6 +279,19 @@ order while streaming live progress back to every collaborator on the canvas.
   day-of-month/day-of-week OR-rule and sparse dates like Feb 29. The schedule
   node shows the next runs live as you type; `flowforge schedule <id>` and the
   public API expose the same.
+- **Time-zone-aware schedules** — "weekdays at 9am" means 9am in an office, so a
+  schedule (and a maintenance window) can name an **IANA time zone** and hold
+  its local hour across daylight-saving changes instead of drifting an hour
+  twice a year. Zone arithmetic is dependency-free, reading offsets from the
+  runtime's own tz data via `Intl` — so rule changes arrive with the platform,
+  not with a package bump. The two days a year it's hard are handled
+  explicitly: a wall clock **skipped** by spring-forward (02:30 on a
+  02:00→03:00 day) fires at the transition instant, so a daily job still runs
+  once rather than silently vanishing for a day; a wall clock **repeated** by
+  fall-back (01:30 twice) fires once, on the first occurrence. Previews show
+  each run as local time + the offset in effect *and* the UTC instant, and flag
+  a DST change falling inside the window — because a correct schedule whose UTC
+  column jumps an hour otherwise reads as a bug.
 - **Real-time collaboration** — multiple people edit the same workflow at once
   with shared cursors, presence, and last-write-wins sync.
 - **Webhook triggers** — generate a public URL that fires a workflow on POST;

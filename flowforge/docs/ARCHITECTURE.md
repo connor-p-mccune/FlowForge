@@ -949,12 +949,70 @@ Two details make it correct rather than a toy:
   null for an impossible expression (Feb 30) instead of looping — bounded by a
   step budget that is a horizon of centuries.
 
-All computation is in UTC so the result is deterministic and independent of the
-server's timezone; the exposed endpoints (`/api/workflows/:id/schedule`, a
+Computation defaults to UTC so the result is deterministic and independent of
+the server's timezone; the exposed endpoints (`/api/workflows/:id/schedule`, a
 generic `/api/schedule/preview`, and the public `/api/v1/...` mirror) return
 ISO-8601 `Z` instants, and an unreachable schedule is reported as
 `reachable: false` rather than an error. The same parser backs `isValid`, so a
 schedule that previews is a schedule that will run.
+
+### Named time zones and the two days a year they matter
+
+UTC is the right *default* and the wrong *only option*: "weekdays at 9am" means
+9am in an office, and a UTC-only schedule silently drifts an hour twice a year
+in every zone that observes DST. A schedule node (and a maintenance window) can
+therefore name an IANA zone, and the expression is matched against that zone's
+wall clock.
+
+`services/timezone.js` supplies the zone arithmetic with **no dependency and no
+tz database of its own** — offsets are read from the runtime's own data through
+`Intl.DateTimeFormat#formatToParts`, so zone-rule changes (and governments
+change them often) arrive with the platform rather than with a package bump.
+It's the same call the metrics registry and the cron engine itself make: the app
+needs one narrow capability, not a datetime library.
+
+The matcher is untouched. The search runs over a **pseudo-UTC Date carrying the
+zone's local fields**, so the Vixie day-of-month/day-of-week OR-rule and the
+field-stepping search work in local space exactly as they did in UTC; only the
+final conversion is new. That conversion is where the difficulty actually lives,
+because twice a year a wall clock has no single answer:
+
+- **Spring forward leaves a gap.** 02:30 does not exist on the day the clock
+  jumps 02:00 → 03:00. A skipped wall clock resolves to the **transition
+  instant**, so a daily 02:30 job still runs once that day, at 03:00 local. The
+  alternative — skipping the day — loses a production run silently, once a year,
+  which is precisely the class of bug nobody notices until it matters.
+- **Fall back leaves an overlap.** 01:30 happens twice. An ambiguous wall clock
+  resolves to the **first** occurrence, and the search's existing
+  strictly-after-*in-UTC* contract is what stops the repeat from firing a
+  duplicate — no new rule, just the old one applied in the right space.
+
+Resolution is offset-driven rather than iterative. Only two offsets can
+plausibly apply to a given wall clock (the one a day before it and the one a day
+after), so each is tried and kept when the instant it implies really does read
+back as the requested time. Zero survivors means a gap; two means an overlap;
+one is an ordinary conversion. The gap case then binary-searches the transition
+to **millisecond** precision — a fire time is persisted and compared, so an
+answer a second off is a wrong answer.
+
+Three integration decisions:
+
+- **Two implementations, one contract.** node-cron fires the schedule (it takes
+  a `timezone` option); `cronExpression.js` computes the preview. They are
+  independent code paths, so the zoned-preview tests exist to pin that what a
+  user is shown before deploying is what the runner will do.
+- **Deploy refuses an unknown zone; the sweep doesn't.** Degrading to UTC is
+  right for a schedule already running (a wrong offset beats a stopped
+  schedule), and wrong at deploy time, where someone is watching and a schedule
+  quietly firing five hours off is worse than a failed deploy.
+- **A window's duration stays elapsed time, not wall time.** A two-hour
+  maintenance freeze is two real hours even when the clocks go back inside it —
+  which is what freezing deploys means. Only the window's *start* is a wall
+  clock.
+
+Tests pin real transitions in America/New_York, Europe/London,
+Australia/Sydney (a southern-hemisphere overlap, so the seasons can't be
+hard-coded backwards) and Asia/Kolkata (no DST, half-hour offset).
 
 ## Full-text search
 
