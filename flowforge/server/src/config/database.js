@@ -190,6 +190,26 @@ ensureColumn('workflows', 'maintenance_duration_minutes', 'INTEGER')
 // keeps meaning that across a DST change instead of drifting by an hour.
 ensureColumn('workflows', 'maintenance_timezone', 'TEXT')
 
+// Schedule backfill (services/backfill.js): re-running a scheduled workflow
+// over a historical window. logical_date is the scheduled instant a run
+// *represents*, which is not the instant it executes — a backfill of last
+// Tuesday runs today but is "about" last Tuesday, and the graph reads that
+// through its trigger payload to fetch the right slice of data. backfill_id
+// groups the runs one submission created, so progress can be reported and the
+// whole batch cancelled together. Both NULL for every ordinary run.
+ensureColumn('executions', 'logical_date', 'TEXT')
+ensureColumn('executions', 'backfill_id', 'TEXT')
+
+// Backfills ask two questions repeatedly: "does this workflow already have a
+// run for this logical date?" (the skip-existing check, once per occurrence)
+// and "how is batch X progressing?".
+db.exec(`
+  CREATE INDEX IF NOT EXISTS idx_executions_logical_date
+    ON executions (workflow_id, logical_date);
+  CREATE INDEX IF NOT EXISTS idx_executions_backfill
+    ON executions (backfill_id);
+`)
+
 // Two-factor authentication (TOTP). Optional, opt-in per user. totp_enabled stays
 // 0 until the user verifies a code from their authenticator, so a half-finished
 // setup never locks them out of login. totp_backup_codes is a JSON array of
