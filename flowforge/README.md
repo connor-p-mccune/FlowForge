@@ -110,6 +110,24 @@ order while streaming live progress back to every collaborator on the canvas.
   workflow a person already paused is never auto-touched. Clearing the window
   releases any pause it was holding, so a config change can't strand a workflow
   paused.
+- **Schedule backfill** — replay re-runs a *recorded* run; backfill runs the
+  ones that never happened: a schedule deployed late, a workflow paused through
+  an incident, logic fixed after three weeks of wrong output. Pick a window and
+  FlowForge recreates every occurrence its cron **would** have fired — same
+  engine, same time zone, so a backfill across a daylight-saving change matches
+  the real schedule instead of a naive UTC grid. Each run carries the instant it
+  *represents* as `{{trigger.logicalDate}}`, so a workflow that processes
+  "yesterday" processes the right yesterday rather than recomputing today 20
+  times. Guardrails throughout: every surface **previews the run count before
+  anything is created** (and the canvas clears the plan the moment you edit the
+  window), an over-cap range is refused rather than silently truncated,
+  occurrences that already ran are skipped so re-submitting an overlapping range
+  is safe, and the batch rides the **low lane** so it can't starve live traffic.
+  Pause blocks it — bulk historical traffic is what pausing is *for* — while the
+  rate limit deliberately doesn't, since that bounds unattended frequency and a
+  backfill is an explicit, bounded, human decision. Watch progress per batch and
+  stop one midway; from the canvas, `flowforge backfill <id> --from 7d --yes`,
+  or the public API.
 - **Resume from failure** — continue a failed (or cancelled) run from where it
   stopped: steps that already succeeded are **reused** rather than re-executed
   — an approval gate that was already granted is not asked twice — and only

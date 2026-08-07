@@ -8,6 +8,7 @@ relative to `flowforge/`.
 - [The execution engine](#the-execution-engine)
 - [Real-time collaboration](#real-time-collaboration)
 - [Jobs and reliability](#jobs-and-reliability)
+- [Schedule backfill](#schedule-backfill)
 - [Outbound webhooks](#outbound-webhooks)
 - [Run insights & SLA monitoring](#run-insights--sla-monitoring)
 - [The expression language](#the-expression-language)
@@ -1014,6 +1015,73 @@ Three integration decisions:
 Tests pin real transitions in America/New_York, Europe/London,
 Australia/Sydney (a southern-hemisphere overlap, so the seasons can't be
 hard-coded backwards) and Asia/Kolkata (no DST, half-hour offset).
+
+## Schedule backfill
+
+`services/backfill.js` answers the question replay doesn't: replay re-runs a
+*recorded* run, backfill runs the ones that never happened — a schedule
+deployed late, a workflow paused through an incident, logic fixed after three
+weeks of wrong output.
+
+The idea that carries the feature is the **logical date**: the instant a run
+represents, which is not the instant it executes. A backfill of last Tuesday
+runs today but is *about* last Tuesday, and a workflow that fetches
+"yesterday's orders" has to be told which yesterday it means or every
+backfilled run recomputes today. Each generated run therefore carries its
+scheduled instant into the graph as trigger data — `{{<trigger>.logicalDate}}`
+and `{{<trigger>.backfill}}` — which is exactly the mechanism webhook payloads
+already use. No new templating concept, no engine change, and a workflow
+written for live traffic keeps working because an ordinary run simply has no
+`logicalDate`. The `backfill` flag is there because skipping a notification
+step while replaying history is a thing people legitimately want to branch on.
+
+Occurrences come from the same cron engine, in the same zone, that the live
+scheduler fires on — so a backfill across a DST change reproduces the *actual*
+schedule rather than a naive UTC grid that would silently disagree with the
+runs on either side of it.
+
+The rest is guardrails, each aimed at a specific way this goes wrong:
+
+- **Refuse, don't truncate.** A window over the occurrence cap is rejected with
+  the count rather than trimmed. "I asked for a year and got the first 1000" is
+  a worse failure than being told to narrow the range, because it's silent.
+
+- **The preview is the safety mechanism, not a convenience.** The same planner
+  that submits is exposed read-only, and every surface (API, CLI, panel) shows
+  the count before anything can be created. The canvas panel additionally
+  *invalidates* the plan whenever the window changes — a stale count sitting
+  next to new dates is precisely how someone submits a range they never looked
+  at.
+
+- **Idempotent by default.** Occurrences whose logical date already has a run
+  are skipped, so re-submitting an overlapping range — the normal thing to do
+  after a partial backfill — is safe. The window is half-open at its start for
+  the same reason: "from the last one I ran" must not repeat it.
+
+- **Low lane.** Bulk work must never starve live traffic, and priority lanes
+  already express exactly that.
+
+- **Pause is honoured; the rate limit is not.** This is the one boundary worth
+  arguing. Pause means *stop everything*, and bulk historical traffic is
+  precisely what an operator pausing a workflow is trying to prevent. The rate
+  limit, though, exists to bound **unattended** frequency — a runaway cron, a
+  bursty webhook sender — and a backfill is neither: it is explicit, bounded,
+  and human-initiated. Its load on the downstream system is governed by the
+  **concurrency cap at worker pickup**, which is the control that actually
+  applies here.
+
+- **Rows in one transaction, then enqueue.** A submission produces its whole
+  batch or none of it, so a failure halfway can't leave a partial backfill to
+  reconcile by hand. Bull is not part of that transaction, so jobs are added
+  only after it commits — a job pointing at a rolled-back row would fail on
+  pickup.
+
+Batch progress is *derived* from the runs (`GROUP BY backfill_id`) rather than
+stored on a batch row: there is no second source of truth to drift, and a run
+cancelled or replayed outside the panel is reflected for free. Cancelling a
+batch goes through the ordinary cooperative cancel path, so a stopped backfill
+leaves the same evidence as any other cancelled run — "we backfilled March and
+stopped partway" is exactly the sort of thing someone has to reconstruct later.
 
 ## Full-text search
 
