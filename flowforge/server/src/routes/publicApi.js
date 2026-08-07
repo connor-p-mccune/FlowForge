@@ -31,6 +31,8 @@ const { forbidViewer, memberRole } = require('../services/workspaceRoles')
 const { isPaused, PAUSED_ERROR, pauseWorkflow, resumeWorkflow } = require('../services/workflowPause')
 const { computeDependencies } = require('../services/workflowDependencies')
 const { listAudit, verifyChain } = require('../services/auditLog')
+const { planBackfill, listBackfills } = require('../services/backfill')
+const { runBackfill } = require('./backfill')
 
 const router = express.Router()
 
@@ -482,6 +484,54 @@ router.get('/workflows/:id/schedule', tokenAuth('read'), (req, res) => {
       active: workflow.status === 'deployed',
       ...previewFor(schedule.cron, parseCount(req.query.count), schedule.timeZone),
     })
+  } catch (err) {
+    console.error(err)
+    res.status(500).json({ error: 'Internal server error' })
+  }
+})
+
+// POST /api/v1/workflows/:id/backfill { from, to, skipExisting?, priority?, preview? }
+//
+// The programmatic half of backfill, and the one that matters most: a
+// backfill is usually the tail of a recovery script — "redeploy the fixed
+// workflow, then replay the window it was broken for" — which belongs in the
+// same automation as the deploy, not in a browser tab someone has to remember.
+//
+// `trigger` scope, since it starts runs. `preview: true` returns the plan
+// without creating anything, so a script can gate on the count (or print it
+// for a human to approve) before committing.
+router.post('/workflows/:id/backfill', tokenAuth('trigger'), async (req, res) => {
+  try {
+    const workflow = getWorkflowForMember(req.params.id, req.user.id)
+    if (!workflow) return res.status(404).json({ error: 'Workflow not found' })
+    if (forbidViewer(res, workflow.workspace_id, req.user.id)) return
+
+    if (req.body?.preview) {
+      const plan = planBackfill(workflow, {
+        from: req.body.from,
+        to: req.body.to,
+        skipExisting: req.body.skipExisting !== false,
+      })
+      if (plan.error) return res.status(400).json({ error: plan.error })
+      return res.json(plan)
+    }
+
+    const { status, body } = await runBackfill(workflow, req.user.id, req.body)
+    res.status(status).json(body)
+  } catch (err) {
+    console.error(err)
+    res.status(500).json({ error: 'Internal server error' })
+  }
+})
+
+// GET /api/v1/workflows/:id/backfills — batches and their progress, so a
+// script that submitted one can poll it to completion the same way it polls a
+// single run. `read` scope.
+router.get('/workflows/:id/backfills', tokenAuth('read'), (req, res) => {
+  try {
+    const workflow = getWorkflowForMember(req.params.id, req.user.id)
+    if (!workflow) return res.status(404).json({ error: 'Workflow not found' })
+    res.json({ backfills: listBackfills(workflow.id, req.query.limit) })
   } catch (err) {
     console.error(err)
     res.status(500).json({ error: 'Internal server error' })

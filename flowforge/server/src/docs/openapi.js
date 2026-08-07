@@ -658,6 +658,189 @@ const spec = {
         },
       },
     },
+    '/workflows/{workflowId}/backfill': {
+      post: {
+        tags: ['workflows'],
+        summary: 'Backfill a schedule over a historical window',
+        description:
+          'Creates one run per scheduled occurrence in `(from, to]`, each ' +
+          'carrying the instant it represents as `logicalDate` in its trigger ' +
+          'payload — so a workflow that processes "yesterday" processes the ' +
+          'right yesterday. Occurrences are computed with the same cron engine ' +
+          'and time zone the live scheduler fires on, so a backfill across a ' +
+          'daylight-saving change reproduces what would actually have run.\n\n' +
+          'Send `preview: true` to get the plan without creating anything. ' +
+          'Occurrences that already have a run are skipped unless ' +
+          '`skipExisting` is `false`, so re-submitting an overlapping range is ' +
+          'safe. Runs ride the `low` lane by default so a backfill cannot ' +
+          'starve live traffic. A paused or undeployed workflow is refused. ' +
+          'Requires the `trigger` scope.',
+        operationId: 'backfillWorkflow',
+        parameters: [
+          { name: 'workflowId', in: 'path', required: true, schema: { type: 'string' } },
+        ],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                required: ['from', 'to'],
+                properties: {
+                  from: {
+                    type: 'string',
+                    format: 'date-time',
+                    description: 'Start of the window (exclusive).',
+                  },
+                  to: {
+                    type: 'string',
+                    format: 'date-time',
+                    description:
+                      'End of the window (inclusive). Clamped to now — a backfill ' +
+                      'never creates runs for occurrences that have yet to fire.',
+                  },
+                  skipExisting: {
+                    type: 'boolean',
+                    default: true,
+                    description: 'Skip occurrences whose logical date already has a run.',
+                  },
+                  priority: {
+                    type: 'string',
+                    enum: ['high', 'normal', 'low'],
+                    description: 'Queue lane for the generated runs (default `low`).',
+                  },
+                  preview: {
+                    type: 'boolean',
+                    description: 'Return the plan without creating any runs.',
+                  },
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          200: {
+            description: 'The plan (preview mode only) — nothing was created.',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    cron: { type: 'string' },
+                    timeZone: { type: 'string' },
+                    from: { type: 'string', format: 'date-time' },
+                    to: { type: 'string', format: 'date-time' },
+                    total: { type: 'integer', description: 'Occurrences in the window.' },
+                    skipped: { type: 'integer', description: 'Already covered by a run.' },
+                    willRun: { type: 'integer' },
+                    occurrences: {
+                      type: 'array',
+                      items: {
+                        type: 'object',
+                        properties: {
+                          logicalDate: { type: 'string', format: 'date-time' },
+                          alreadyRan: { type: 'boolean' },
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+          202: {
+            description: 'The batch was created and queued.',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    backfillId: { type: 'string' },
+                    created: { type: 'integer' },
+                    skipped: { type: 'integer' },
+                    priority: { type: 'string' },
+                    from: { type: 'string', format: 'date-time' },
+                    to: { type: 'string', format: 'date-time' },
+                    timeZone: { type: 'string' },
+                  },
+                },
+              },
+            },
+          },
+          400: {
+            description:
+              'An invalid window, a workflow with no schedule trigger, a range ' +
+              'over the occurrence cap, or a range already fully covered.',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } },
+          },
+          401: { $ref: '#/components/responses/Unauthorized' },
+          403: { $ref: '#/components/responses/Forbidden' },
+          404: { $ref: '#/components/responses/NotFound' },
+          409: {
+            description:
+              'The workflow is paused — a backfill is exactly the traffic pause holds.',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/Error' } },
+            },
+          },
+          429: { $ref: '#/components/responses/RateLimited' },
+        },
+      },
+    },
+    '/workflows/{workflowId}/backfills': {
+      get: {
+        tags: ['workflows'],
+        summary: 'List backfill batches and their progress',
+        description:
+          'Progress is derived from the runs themselves, so a script that ' +
+          'submitted a batch can poll it to completion the way it would poll a ' +
+          'single run. Requires the `read` scope.',
+        operationId: 'listBackfills',
+        parameters: [
+          { name: 'workflowId', in: 'path', required: true, schema: { type: 'string' } },
+          {
+            name: 'limit',
+            in: 'query',
+            schema: { type: 'integer', minimum: 1, maximum: 100, default: 20 },
+          },
+        ],
+        responses: {
+          200: {
+            description: 'Batches, newest first.',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    backfills: {
+                      type: 'array',
+                      items: {
+                        type: 'object',
+                        properties: {
+                          backfillId: { type: 'string' },
+                          total: { type: 'integer' },
+                          completed: { type: 'integer' },
+                          failed: { type: 'integer' },
+                          cancelled: { type: 'integer' },
+                          active: { type: 'integer' },
+                          firstLogicalDate: { type: 'string', format: 'date-time' },
+                          lastLogicalDate: { type: 'string', format: 'date-time' },
+                          submittedAt: { type: 'string', format: 'date-time' },
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+          401: { $ref: '#/components/responses/Unauthorized' },
+          403: { $ref: '#/components/responses/Forbidden' },
+          404: { $ref: '#/components/responses/NotFound' },
+          429: { $ref: '#/components/responses/RateLimited' },
+        },
+      },
+    },
     '/workflows/{workflowId}/export': {
       get: {
         tags: ['workflows'],

@@ -24,6 +24,7 @@ import SuggestionsPanel from './SuggestionsPanel'
 import GenerateModal from './GenerateModal'
 import WebhookPanel from './WebhookPanel'
 import RunSettingsPanel from './RunSettingsPanel'
+import BackfillPanel from './BackfillPanel'
 import InsightsPanel from './InsightsPanel'
 import TestsPanel from './TestsPanel'
 import HistoryPanel from './HistoryPanel'
@@ -93,6 +94,7 @@ function CanvasInner({ workflowId }) {
 
   // Per-workflow run limits (concurrency cap + at-limit policy)
   const [runSettingsOpen, setRunSettingsOpen] = useState(false)
+  const [backfillOpen, setBackfillOpen] = useState(false)
   const [insightsOpen, setInsightsOpen] = useState(false)
   const [testsOpen, setTestsOpen] = useState(false)
 
@@ -997,6 +999,8 @@ function CanvasInner({ workflowId }) {
         onGenerate={handleOpenGenerate}
         onToggleWebhooks={handleToggleWebhooks}
         onToggleRunSettings={() => setRunSettingsOpen((v) => !v)}
+        onToggleBackfill={() => setBackfillOpen((v) => !v)}
+        backfillOpen={backfillOpen}
         onToggleInsights={() => setInsightsOpen((v) => !v)}
         insightsOpen={insightsOpen}
         onToggleTests={() => setTestsOpen((v) => !v)}
@@ -1125,6 +1129,11 @@ function CanvasInner({ workflowId }) {
         workflowId={workflowId}
         open={runSettingsOpen}
         onClose={() => setRunSettingsOpen(false)}
+      />
+      <BackfillPanel
+        workflowId={workflowId}
+        open={backfillOpen}
+        onClose={() => setBackfillOpen(false)}
       />
       <InsightsPanel
         workflowId={workflowId}

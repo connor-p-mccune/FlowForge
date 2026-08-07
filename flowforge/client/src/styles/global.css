@@ -3470,6 +3470,7 @@ html, body, #root {
   .config-panel { width: min(300px, 86vw); }
   .suggest-panel { width: min(300px, 90vw); right: 12px; }
   .webhook-panel { width: min(340px, 92vw); right: 12px; }
+  .backfill-panel { width: min(360px, 92vw); right: 12px; }
   .history-panel { width: min(380px, 94vw); }
 
   /* Sidebar is overlaid now, so the toolbar can use the full width */
@@ -6419,4 +6420,177 @@ html, body, #root {
   border-radius: 8px;
   background: #fff;
   cursor: pointer;
+}
+
+/* ---------------------------------------------------------------------------
+   Backfill panel. Laid out around the *plan* rather than the submit button:
+   this is the only surface where one click creates hundreds of runs, so the
+   count gets the largest type on the panel and the action stays disabled until
+   the count exists.
+   --------------------------------------------------------------------------- */
+.backfill-panel {
+  position: absolute;
+  top: 64px;
+  right: 16px;
+  width: 360px;
+  max-height: calc(100% - 96px);
+  overflow-y: auto;
+  background: #fff;
+  border: 1px solid #e5e5e5;
+  border-radius: 10px;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.12);
+  z-index: 25;
+  padding: 0 14px 14px;
+  animation: config-panel-slide 0.18s ease-out;
+}
+.backfill-panel__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 0;
+  border-bottom: 1px solid #f0f0f0;
+  margin-bottom: 10px;
+  position: sticky;
+  top: 0;
+  background: #fff;
+}
+.backfill-panel__title {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+}
+.backfill-panel__close {
+  border: none;
+  background: none;
+  font-size: 20px;
+  line-height: 1;
+  cursor: pointer;
+  color: #9ca3af;
+}
+.backfill-panel__check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12.5px;
+  color: #4b5563;
+  margin: 10px 0;
+}
+.backfill-panel__actions {
+  display: flex;
+  gap: 8px;
+  margin: 12px 0;
+}
+.backfill-panel__btn {
+  flex: 1;
+  font-size: 13px;
+  padding: 8px 10px;
+  border: 1px solid #d1d5db;
+  border-radius: 8px;
+  background: #fff;
+  cursor: pointer;
+}
+.backfill-panel__btn--primary {
+  background: #111827;
+  border-color: #111827;
+  color: #fff;
+}
+.backfill-panel__btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.backfill-panel__plan {
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  padding: 10px 12px;
+  background: #f9fafb;
+}
+/* The number someone is about to commit to. Deliberately the loudest thing in
+   the panel. */
+.backfill-panel__count {
+  font-size: 18px;
+  font-weight: 700;
+  color: #111827;
+}
+.backfill-panel__count-sub {
+  font-size: 12px;
+  font-weight: 400;
+  color: #6b7280;
+}
+.backfill-panel__meta {
+  font-size: 11.5px;
+  color: #6b7280;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  margin-top: 2px;
+}
+.backfill-panel__occurrences {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+  font-size: 12px;
+  color: #374151;
+  font-variant-numeric: tabular-nums;
+}
+.backfill-panel__occurrence--ran {
+  color: #9ca3af;
+  text-decoration: line-through;
+}
+.backfill-panel__ran-tag {
+  text-decoration: none;
+  font-size: 10.5px;
+}
+.backfill-panel__more-note {
+  color: #9ca3af;
+  font-style: italic;
+}
+.backfill-panel__error {
+  font-size: 12.5px;
+  color: #991b1b;
+  background: #fef2f2;
+  border-radius: 6px;
+  padding: 8px 10px;
+  margin-top: 8px;
+}
+.backfill-panel__batches {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.backfill-panel__batch {
+  padding: 8px 0;
+  border-bottom: 1px solid #f3f4f6;
+}
+.backfill-panel__batch-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 11.5px;
+  color: #4b5563;
+  font-variant-numeric: tabular-nums;
+}
+.backfill-panel__cancel {
+  border: none;
+  background: none;
+  color: #b91c1c;
+  font-size: 11.5px;
+  cursor: pointer;
+  text-decoration: underline;
+}
+.backfill-panel__progress {
+  height: 5px;
+  background: #e5e7eb;
+  border-radius: 999px;
+  overflow: hidden;
+  margin: 5px 0 3px;
+}
+.backfill-panel__progress-bar {
+  height: 100%;
+  background: #2563eb;
+  transition: width 0.3s ease;
+}
+.backfill-panel__batch-meta {
+  font-size: 11px;
+  color: #6b7280;
+}
+.backfill-panel__failed {
+  color: #b91c1c;
 }

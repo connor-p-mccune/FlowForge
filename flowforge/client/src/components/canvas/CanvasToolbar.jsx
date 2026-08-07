@@ -9,6 +9,8 @@ export default function CanvasToolbar({
   onGenerate,
   onToggleWebhooks,
   onToggleRunSettings,
+  onToggleBackfill,
+  backfillOpen,
   onToggleInsights,
   insightsOpen,
   onToggleTests,
@@ -82,6 +84,14 @@ export default function CanvasToolbar({
         onClick={onToggleRunSettings}
       >
         ⏱ Settings
+      </button>
+      <button
+        className={`toolbar-btn toolbar-btn--backfill${backfillOpen ? ' toolbar-btn--active' : ''}`}
+        title="Backfill — re-run this schedule over a window of the past"
+        onClick={onToggleBackfill}
+        aria-pressed={backfillOpen}
+      >
+        ⏮ Backfill
       </button>
       <button
         className={`toolbar-btn toolbar-btn--insights${insightsOpen ? ' toolbar-btn--active' : ''}`}

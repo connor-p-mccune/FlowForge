@@ -32,6 +32,8 @@ describe('GET /api/v1/openapi.json', () => {
       '/executions/{executionId}/resume',
       '/search',
       '/workflows',
+      '/workflows/{workflowId}/backfill',
+      '/workflows/{workflowId}/backfills',
       '/workflows/{workflowId}/dependencies',
       '/workflows/{workflowId}/diff',
       '/workflows/{workflowId}/executions',
