@@ -1326,6 +1326,77 @@ Redis (the ping raced against a timeout, because ioredis queues commands
 indefinitely while disconnected) and 503s with per-check detail so an
 orchestrator holds traffic until the process can genuinely serve.
 
+### Distributed tracing (W3C trace context + OTLP)
+
+Correlation ids answer "what happened to request X?" *within* FlowForge. They
+stop at the process boundary, and so did everything else: the timeline renders
+every step, critical-path analysis names the chain that set the duration, and
+both go blind the moment a step calls out. A workflow that calls a service that
+calls two more shows "that HTTP step took 4 seconds", while the reason lives in
+somebody else's tracing backend, in a trace this run has no connection to.
+
+`services/tracing.js` closes that boundary in both directions.
+
+- **Inbound**, a webhook delivery carrying `traceparent` has its trace adopted
+  onto the execution row. That single act is what turns the run into a *child
+  span of the request that triggered it* instead of a separate trace someone
+  correlates by squinting at timestamps.
+- **Outbound**, every step is given its own span id **at row-creation time**,
+  before anything executes. That ordering is load-bearing: it lets a node
+  reference its own span before it runs, which is what the HTTP node needs to
+  inject a header naming *the step making the call*. The far side then hangs off
+  that exact node rather than off the run as a whole — which is the difference
+  between "this workflow was involved" and "this step, in this run, caused it".
+- **Export**, `GET /api/executions/:id/trace` emits OTLP/JSON: one root span for
+  the run, one child per executed step. It is the wire format an OpenTelemetry
+  collector already accepts, so shipping a run to Jaeger, Tempo, or Honeycomb is
+  a `curl … | curl -X POST $COLLECTOR/v1/traces -d @-` rather than a translation
+  layer someone has to keep working.
+
+**No OpenTelemetry SDK**, and the reason is the same one behind the metrics
+registry, the logger, and the cron engine: what is actually needed here is a
+55-character header with a strict grammar and a JSON shape with a published
+schema. Adopting a tracing framework — with its instrumentation machinery, its
+context propagation, its shutdown semantics — to produce those two artefacts
+would be a far larger and more permanent commitment than writing them.
+
+The decisions worth recording:
+
+- **Parsing is strict, and refusal is the safe outcome.** A malformed
+  `traceparent` means the *caller* is confused; adopting a half-understood
+  context attaches runs to the wrong parent, which is worse than starting a
+  fresh trace, because it corrupts someone else's data rather than merely
+  lacking a link. All-zero ids (the spec's "no trace" sentinel) and unknown
+  versions are refused, and null tells the engine to mint its own.
+
+- **An explicitly configured `traceparent` on a node always wins.** A user
+  hand-setting the header is deliberately joining a different trace; silently
+  overwriting it would break precisely the case they went out of their way to
+  build.
+
+- **A `caught` step is an error span.** The node really did fail — it was only
+  its *consequence* that was contained — and relabelling it would lie to whoever
+  debugs it later. Exactly the argument the engine already makes for recording
+  `caught` as its own step status rather than folding it into success.
+
+- **Skipped steps produce no span at all.** A span asserts "this happened", and
+  a dead branch didn't. Emitting zero-duration spans for skipped nodes would
+  fill a trace viewer with things that never ran.
+
+- **Timestamps are strings.** OTLP uses fixed64 nanoseconds; 1e18 exceeds
+  `Number.MAX_SAFE_INTEGER`, so a JS number would silently lose precision.
+  Recorded times have millisecond resolution, so the tail is zeros — honest
+  about the source rather than inventing precision it doesn't have.
+
+- **Historical runs still export coherently.** Rows written before tracing
+  existed get ids derived deterministically (SHA-256 of the row id), so an old
+  run is one connected trace rather than a root with orphaned children, and two
+  exports of it agree — which is the entire point of an id you correlate on.
+
+Cost rides the root span as an attribute, so a spend spike and a latency spike
+can be examined in the same view. That is usually where the cause of both turns
+out to be.
+
 ### Correlation ids and structured logs
 
 Every request gets an id (`middleware/requestContext.js`): a valid inbound

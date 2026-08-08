@@ -378,6 +378,21 @@ order while streaming live progress back to every collaborator on the canvas.
   **correlation id** (inbound `X-Request-Id` honored, echoed on the response,
   included in 500 bodies) and logs one **structured JSON line** — a
   user-reported failure maps to its log lines with one grep.
+- **Distributed tracing (W3C + OTLP)** — the timeline shows where time went
+  *inside* a run and goes blind the moment a step calls out. Now a run is a
+  participant in the wider trace instead of an opaque box beside it: a webhook
+  delivery carrying `traceparent` makes the run a **child span of the request
+  that triggered it**, every HTTP node injects the trace context for **its own
+  step** so the service it calls hangs off that exact node, and
+  `GET /executions/:id/trace` emits **OTLP/JSON** — the format an OpenTelemetry
+  collector already accepts, so pushing a run into Jaeger or Tempo is a curl,
+  not a translation layer. Built without an OTel SDK, because what's actually
+  needed is a 55-character header with a strict grammar and a JSON shape with a
+  published schema. Parsing is deliberately strict (a malformed header attaches
+  runs to the *wrong* parent, which is worse than starting a fresh trace), a
+  hand-set `traceparent` is never overwritten, and a `caught` step is exported
+  as an error span because the node really did fail. Run cost rides the root
+  span, so a spend spike and a latency spike are one query.
 - **Outbound circuit breaker** — a host that keeps failing stops being
   called: after N consecutive failures (connection errors or 5xx) its
   circuit **opens** and calls fast-fail with a clear error instead of
@@ -502,6 +517,7 @@ Copy `.env.example` to `.env` before running. **Never commit `.env`.**
 | `EXEC_MAX_PARALLEL` | no     | Max concurrently-executing nodes per run (default 4; 1 = sequential) |
 | `CONCURRENCY_RETRY_MS` | no  | How long a run parked at its workflow's concurrency cap waits before re-checking (default 1000) |
 | `COST_MODEL_PRICES` | no     | JSON override of the AI price table, e.g. `{"gpt-4o-mini":{"input":150000,"output":600000}}` (micro-USD per 1M tokens) |
+| `OTEL_SERVICE_NAME` | no     | `service.name` on exported OTLP spans (default `flowforge`) |
 | `METRICS_TOKEN`   | no       | Bearer token guarding `GET /metrics` (unguarded when unset) |
 | `LOG_LEVEL`       | no       | `debug` \| `info` (default) \| `warn` \| `error` \| `silent` |
 | `LOG_FORMAT`      | no       | `pretty` for human-readable dev logs (default: one JSON line per event) |
