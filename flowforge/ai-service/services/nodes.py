@@ -14,8 +14,11 @@ def _as_list(value):
 def run_llm_prompt(prompt, system=None):
     if not prompt:
         raise ValueError('prompt is required')
-    text = llm.chat(prompt, system=system, temperature=0.4)
-    return {'text': text}
+    text, usage = llm.chat_with_usage(prompt, system=system, temperature=0.4)
+    # `usage` rides back to the server, which prices it and records the cost on
+    # the step. It is metering, not node output — the server strips it before
+    # the value becomes data the next node can read.
+    return {'text': text, 'usage': usage}
 
 
 def classify_text(text, labels):
@@ -35,12 +38,13 @@ Text:
 
 Respond with ONLY the category name, exactly as written above."""
 
-    raw = llm.chat(prompt, temperature=0).strip()
+    raw, usage = llm.chat_with_usage(prompt, temperature=0)
+    raw = raw.strip()
     # Normalise the model's answer back to one of the provided labels.
     match = next((lbl for lbl in label_list if lbl.lower() == raw.lower()), None)
     if match is None:
         match = next((lbl for lbl in label_list if lbl.lower() in raw.lower()), raw)
-    return {'label': match}
+    return {'label': match, 'usage': usage}
 
 
 def extract_fields(text, fields):
@@ -60,6 +64,6 @@ Text:
 {text}
 \"\"\""""
 
-    raw = llm.chat(prompt, temperature=0)
+    raw, usage = llm.chat_with_usage(prompt, temperature=0)
     data = llm.parse_json(raw)
-    return {'data': data}
+    return {'data': data, 'usage': usage}

@@ -13,6 +13,11 @@ module.exports = async function runExtract(config, input) {
   if (!text) throw new Error('Extract node: text is required')
   if (!hasFields(config.fields)) throw new Error('Extract node: fields are required')
 
+  // `usage` is passed straight through when the AI service reports it: the
+  // engine reads it to price the step and strips it before the value becomes
+  // node output, so it never reaches downstream data. Omitted when absent, so a
+  // service that doesn't report usage yields a step with no cost row rather than
+  // a zero-token one that would look like a free call.
   const data = await callAiService('/extract', { text, fields: config.fields })
-  return { data: data.data }
+  return { data: data.data, ...(data.usage ? { usage: data.usage } : {}) }
 }

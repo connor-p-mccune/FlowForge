@@ -11,7 +11,8 @@ const { v4: uuidv4 } = require('uuid')
 const db = require('../config/database')
 const { buildAdjacency, topoSort } = require('./dagParser')
 const { decryptSecret } = require('./secretVault')
-const { recordExecution, recordStepCache } = require('./metrics')
+const { recordExecution, recordStepCache, recordStepCost } = require('./metrics')
+const costModel = require('./costModel')
 const stepCache = require('./stepCache')
 
 const runners = {
@@ -207,6 +208,17 @@ function redactDeep(value, redact) {
     return Object.fromEntries(Object.entries(value).map(([k, v]) => [k, redactDeep(v, redact)]))
   }
   return value
+}
+
+// Remove the reserved metering key from a runner's return value. Shallow by
+// design: `usage` is a contract between a runner and the engine at the top
+// level of the returned object, never something nested that a user's data
+// could accidentally collide with deeper down.
+function stripUsage(output) {
+  if (!output || typeof output !== 'object' || Array.isArray(output)) return output
+  if (!('usage' in output)) return output
+  const { usage: _usage, ...rest } = output
+  return rest
 }
 
 function defaultPublish(payload) {
@@ -425,6 +437,44 @@ async function runExecution(
     WHERE id = ?
   `)
 
+  // Cost accounting. A step's metered usage is recorded on its own row and
+  // accumulated for the run, so "what did this run cost?" is a column rather
+  // than a join over every step. Kept entirely separate from updateStep because
+  // it applies to a handful of step types and must never widen the hot path's
+  // write for the rest.
+  //
+  // Every call here is best-effort: metering is bookkeeping, and a run that
+  // would have succeeded must not fail because its invoice line couldn't be
+  // written.
+  const setStepCost = db.prepare(
+    'UPDATE execution_steps SET cost_micro_usd = ?, usage_json = ? WHERE id = ?'
+  )
+  let runCostMicroUsd = 0
+
+  function meterStep(node, output) {
+    try {
+      const metered = costModel.meterStep(node, output)
+      if (!metered) return
+      runCostMicroUsd += metered.microUsd
+      setStepCost.run(metered.microUsd, JSON.stringify(metered.usage), stepIdByNode[node.id])
+      recordStepCost(node.type, metered.microUsd)
+    } catch (err) {
+      console.error(`Cost metering failed for ${node.id}: ${err.message}`)
+    }
+  }
+
+  // Persist the run's total at every terminal path. A failed run still spent
+  // whatever it spent before it failed — a budget that only counted successes
+  // would be trivially defeated by a workflow that dies after its AI call.
+  function persistRunCost() {
+    try {
+      db.prepare('UPDATE executions SET cost_micro_usd = ? WHERE id = ?')
+        .run(runCostMicroUsd, executionId)
+    } catch (err) {
+      console.error(`Failed to persist run cost: ${err.message}`)
+    }
+  }
+
   function publishStep(nodeId, status, extra = {}) {
     pub({
       kind: 'step',
@@ -615,7 +665,14 @@ async function runExecution(
           parentNodeId: nodeId,
           publish: pub,
         }
-        const output = (await runWithRetries(node, config, input, dryRun, ctx)) ?? {}
+        const raw = (await runWithRetries(node, config, input, dryRun, ctx)) ?? {}
+        // Metering rides back from a runner on a reserved `usage` key, which is
+        // then stripped: cost accounting is a side channel from runner to
+        // engine, not data. Leaving it in would put token counts into the
+        // context every downstream node reads, into persisted step output, and
+        // into the run's return value — three places it has no business being.
+        meterStep(node, raw)
+        const output = stripUsage(raw)
         context[nodeId] = output
         nodeStatus[nodeId] = 'success'
         const outputJson = redact(JSON.stringify(output))
@@ -740,6 +797,7 @@ async function runExecution(
     // Everything that never launched is skipped, then the run fails. A failure
     // takes precedence over a concurrent cancel request — it says more.
     for (const nodeId of unscheduled) skipNode(nodeId)
+    persistRunCost()
     failExecution(
       `Node "${failure.node.data?.label || failure.node.id}" failed: ${failure.err.message}`
     )
@@ -748,6 +806,7 @@ async function runExecution(
 
   if (cancelled) {
     for (const nodeId of unscheduled) skipNode(nodeId)
+    persistRunCost()
     settleLeftoverCallbacks()
     updateExecution.run('cancelled', now(), now(), executionId)
     publishExecution('cancelled')
@@ -756,6 +815,7 @@ async function runExecution(
     return {}
   }
 
+  persistRunCost()
   settleLeftoverCallbacks()
   updateExecution.run('completed', new Date().toISOString(), new Date().toISOString(), executionId)
   publishExecution('completed')
@@ -786,4 +846,8 @@ module.exports = {
   loadWorkspaceVariables,
   buildRedactor,
   redactDeep,
+  // The node test bench drives runners directly, so it needs the same
+  // usage-stripping the engine applies — otherwise benching an AI node would
+  // show metering fields a real run never surfaces.
+  stripUsage,
 }

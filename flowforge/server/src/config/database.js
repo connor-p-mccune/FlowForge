@@ -190,6 +190,28 @@ ensureColumn('workflows', 'maintenance_duration_minutes', 'INTEGER')
 // keeps meaning that across a DST change instead of drifting by an hour.
 ensureColumn('workflows', 'maintenance_timezone', 'TEXT')
 
+// Run cost accounting (services/costModel.js). cost_micro_usd is integer
+// micro-USD (1e-6 USD) rather than a float: dollars accumulate rounding error
+// across thousands of steps and then disagree with themselves when the same
+// rows are summed two different ways. usage_json records what produced the
+// figure (token counts and model, or a call count), including whether it could
+// be priced at all — an unpriced step must be visible as a gap, not silently
+// folded into a total as zero.
+ensureColumn('execution_steps', 'cost_micro_usd', 'INTEGER')
+ensureColumn('execution_steps', 'usage_json', 'TEXT')
+// Denormalised sum of the run's steps, so "what did this run cost?" and the
+// workspace's monthly spend don't have to join through every step row.
+ensureColumn('executions', 'cost_micro_usd', 'INTEGER')
+
+// Per-workspace monthly spend cap (services/budget.js). budget_micro_usd is
+// the ceiling (NULL = no budget); budget_alert_pct is the fraction of it that
+// raises a warning before runs are blocked (default 0.8). budget_alerted_month
+// is the edge-trigger state — the 'YYYY-MM' the warning last fired for — so a
+// month of overspend alerts once, the same shape the heartbeat monitor uses.
+ensureColumn('workspaces', 'budget_micro_usd', 'INTEGER')
+ensureColumn('workspaces', 'budget_alert_pct', 'REAL')
+ensureColumn('workspaces', 'budget_alerted_month', 'TEXT')
+
 // Schedule backfill (services/backfill.js): re-running a scheduled workflow
 // over a historical window. logical_date is the scheduled instant a run
 // *represents*, which is not the instant it executes — a backfill of last

@@ -233,6 +233,26 @@ const runsRateLimited = counter(
   'Run submissions refused because the workflow was over its rate limit.'
 )
 
+// Run cost accounting (services/costModel.js). Labelled by node type rather
+// than by workspace or workflow: money is interesting per *kind of work*, and
+// a per-workspace label would let resource ids explode the series space —
+// the same cardinality rule the HTTP metrics follow. Per-workspace spend is a
+// database question, answered by GET /workspaces/:id/costs.
+const stepCostTotal = counter(
+  'flowforge_step_cost_micro_usd_total',
+  'Metered cost of executed steps in micro-USD (1e-6 USD), by node type.',
+  ['node_type']
+)
+
+// Runs refused because their workspace was over its monthly budget. A rising
+// counter is the signal that work is being shed for financial reasons — which
+// looks like an outage to whoever owns the workflow, so it needs to be visible
+// as its own cause rather than buried in the generic 409 rate.
+const runsBudgetBlocked = counter(
+  'flowforge_runs_budget_blocked_total',
+  'Run submissions refused because the workspace was over its budget.'
+)
+
 const processUptime = gauge('process_uptime_seconds', 'Process uptime in seconds.')
 const processMemory = gauge(
   'process_resident_memory_bytes',
@@ -301,6 +321,19 @@ function recordRateLimited() {
   runsRateLimited.inc({})
 }
 
+// Called by the engine for each metered step. A zero-cost step still counts as
+// an observation of that node type doing metered work; the counter's value is
+// the money, and its absence for a type means that type never spends.
+function recordStepCost(nodeType, microUsd) {
+  if (!Number.isFinite(microUsd) || microUsd <= 0) return
+  stepCostTotal.inc({ node_type: nodeType || 'unknown' }, microUsd)
+}
+
+// Called by the admission gate when a submission is refused over budget.
+function recordBudgetBlocked() {
+  runsBudgetBlocked.inc({})
+}
+
 module.exports = {
   counter,
   gauge,
@@ -316,6 +349,8 @@ module.exports = {
   recordStepCache,
   recordPausedSkip,
   recordRateLimited,
+  recordStepCost,
+  recordBudgetBlocked,
   queueJobs,
   webhookPending,
 }

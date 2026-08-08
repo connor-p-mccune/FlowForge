@@ -98,9 +98,16 @@ function checkRateLimit(workflow) {
 }
 
 // Enqueue-time admission gate. Returns { ok: true } or { ok: false, error,
-// reason } for the route to turn into a 409. Concurrency is checked first
-// (a full workflow is a full workflow regardless of rate), then the rate
-// limit; both are independent of each other and of the pause switch.
+// reason } for the route to turn into a 409.
+//
+// Three independent questions, checked in order of how blunt the answer is:
+// concurrency ("you're full"), rate ("you're too fast"), then budget ("you're
+// out of money"). Each is independent of the others and of the pause switch,
+// and every entry point gets all of them from this one call.
+//
+// Budget is checked last because it is the most expensive check (it sums the
+// month's runs) and the least likely to trip — no point pricing a submission
+// that a full queue was going to refuse anyway.
 function admitRun(workflow) {
   const concurrency = checkConcurrency(workflow)
   if (!concurrency.ok) return concurrency
@@ -109,6 +116,8 @@ function admitRun(workflow) {
     recordRateLimited()
     return rate
   }
+  const budget = require('./budget').checkBudget(workflow)
+  if (!budget.ok) return budget
   return { ok: true }
 }
 

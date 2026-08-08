@@ -5,13 +5,33 @@ import pytest
 
 from services.nodes import run_llm_prompt, classify_text, extract_fields
 
+# Every node function now also reports the call's token usage, so the server can
+# price the step. Tests patch `chat_with_usage` and assert on the payload
+# *without* the usage key, so they keep describing node behaviour rather than
+# turning into assertions about metering.
+USAGE = {'model': 'gpt-4o-mini', 'promptTokens': 12, 'completionTokens': 5}
+
+
+def replying(text):
+    """A chat_with_usage stand-in returning `text` with fixed usage."""
+    return lambda *args, **kwargs: (text, USAGE)
+
+
+def without_usage(result):
+    return {k: v for k, v in result.items() if k != 'usage'}
+
 
 class TestRunLlmPrompt:
-    @patch('services.llm.chat')
+    @patch('services.llm.chat_with_usage')
     def test_returns_text(self, mock_chat):
-        mock_chat.return_value = 'A short summary.'
+        mock_chat.side_effect = replying('A short summary.')
         result = run_llm_prompt('Summarize this', system='Be terse')
-        assert result == {'text': 'A short summary.'}
+        assert without_usage(result) == {'text': 'A short summary.'}
+
+    @patch('services.llm.chat_with_usage')
+    def test_reports_token_usage_for_pricing(self, mock_chat):
+        mock_chat.side_effect = replying('anything')
+        assert run_llm_prompt('Summarize this')['usage'] == USAGE
 
     def test_requires_prompt(self):
         with pytest.raises(ValueError):
@@ -19,17 +39,22 @@ class TestRunLlmPrompt:
 
 
 class TestClassifyText:
-    @patch('services.llm.chat')
+    @patch('services.llm.chat_with_usage')
     def test_normalises_to_a_provided_label(self, mock_chat):
-        mock_chat.return_value = 'Positive'
+        mock_chat.side_effect = replying('Positive')
         result = classify_text('I love it', ['positive', 'negative'])
-        assert result == {'label': 'positive'}
+        assert without_usage(result) == {'label': 'positive'}
 
-    @patch('services.llm.chat')
+    @patch('services.llm.chat_with_usage')
     def test_accepts_comma_separated_labels(self, mock_chat):
-        mock_chat.return_value = 'The answer is billing.'
+        mock_chat.side_effect = replying('The answer is billing.')
         result = classify_text('Why was I charged twice?', 'billing, support, sales')
-        assert result == {'label': 'billing'}
+        assert without_usage(result) == {'label': 'billing'}
+
+    @patch('services.llm.chat_with_usage')
+    def test_reports_token_usage_for_pricing(self, mock_chat):
+        mock_chat.side_effect = replying('positive')
+        assert classify_text('I love it', ['positive'])['usage'] == USAGE
 
     def test_requires_text_and_labels(self):
         with pytest.raises(ValueError):
@@ -75,9 +100,14 @@ class TestNodeRoutes:
         res = self._client().post('/extract', json={'text': 'hi'})
         assert res.status_code == 400
 
-    @patch('services.llm.chat')
+    @patch('services.llm.chat_with_usage')
     def test_llm_route_returns_text(self, mock_chat):
-        mock_chat.return_value = 'hello world'
+        mock_chat.side_effect = replying('hello world')
         res = self._client().post('/llm', json={'prompt': 'say hi'})
         assert res.status_code == 200
-        assert res.get_json() == {'text': 'hello world'}
+        body = res.get_json()
+        assert body['text'] == 'hello world'
+        # Usage rides the response so the server can price the step; it is
+        # metering, and the server strips it before the value becomes node
+        # output the next node could read.
+        assert body['usage'] == USAGE
