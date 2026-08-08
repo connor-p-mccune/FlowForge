@@ -670,6 +670,80 @@ converts that into a fast, honest failure.
   Critical-path analysis is retrospective; the forecast is the same math pointed
   the other way.
 
+### SLO error budgets and burn rates
+
+The SLA monitor above alerts on a run being bad, or on a success rate crossing a
+floor. Both share a blind spot: they treat every failure as equally urgent. A
+workflow with a 99% objective is **allowed** to fail 1% of the time — that
+allowance is precisely why one chooses 99% instead of 100% — so alerting on
+every dip pages someone for failures the objective already budgeted for, and
+alert fatigue finishes the job.
+
+`services/sloBudget.js` makes the allowance explicit. Over a rolling window, a
+99% objective across 1,000 runs permits 10 failures, and the interesting
+question stops being "did a run fail?" and becomes **"how fast are we spending
+the budget?"**:
+
+```
+burn rate = observed failure rate ÷ allowed failure rate
+```
+
+A burn rate of 1 exhausts the budget exactly at the end of the window, which is
+what an objective *means*. A burn rate of 14.4 exhausts a 28-day budget in under
+two days.
+
+**Why two windows.** This follows the multi-window, multi-burn-rate approach
+from Google's SRE Workbook, and the two-window part is the design rather than a
+detail:
+
+- A **short** window alone is jumpy. Ten failures in five minutes is an enormous
+  burn rate and usually nothing — a deploy, a blip, a dependency that recovered
+  on its own.
+- A **long** window alone is slow. An outage burning 5% of the budget per hour
+  runs for many hours before a 28-day average notices.
+
+Requiring **both** to exceed the threshold gives fast detection with far fewer
+false alarms: the short window supplies urgency, the long window supplies
+confirmation that it is not noise. Two tiers then separate severity — 14.4× over
+1h confirmed by 6h (page), 6× over 6h confirmed by 3d (ticket). The constants
+are the Workbook's and they are derived, not chosen: `14.4 = 0.02 × (28 days ÷
+1 hour)`, i.e. exactly the rate that consumes 2% of the window's budget within
+the alerting period.
+
+Five decisions carry the rest:
+
+- **A target of 1 is refused at the door.** "Never fail" has no error budget,
+  which makes every burn rate a division by zero. It is not an objective, it is
+  a wish — and the validation says so rather than storing it and producing
+  `Infinity` downstream.
+
+- **Too few runs returns `null`, never `0`.** "We are healthy" and "we don't
+  know" are different answers, and collapsing them into zero is how a dashboard
+  ends up confidently green during an outage that hasn't accumulated a sample
+  yet.
+
+- **Cancelled runs count as neither good nor bad.** A person stopping a run is
+  an intervention, not a service failure. Charging it to the budget would
+  penalise exactly the response you want during an incident — the same reasoning
+  the public status page uses for excluding them.
+
+- **The exhaustion projection uses the sustained window, not the fastest.** An
+  estimate built on the jumpiest measurement would swing between "fine" and "two
+  hours left" from one run to the next, which is not a number anyone can act on.
+  And an already-exhausted budget gets **no** projection: a number there invites
+  reading it as time remaining.
+
+- **Budget is reported in runs, not only as a percentage.** "10 failures left
+  this window" is a quantity an operator can reason about and plan against; "4%
+  consumed" is a number they have to convert first.
+
+The objective is deliberately independent of `sla_min_success_rate`. That is a
+floor that alerts the moment it is crossed; this budgets for failure and alerts
+on the *rate of spend*. A workflow may sensibly declare either, both, or
+neither, and clearing the target clears its window with it so a later objective
+cannot inherit forgotten config — the rule the maintenance window and the rate
+limit already follow.
+
 ### Heartbeat monitoring
 
 `services/heartbeatMonitor.js` covers the failure mode everything above is

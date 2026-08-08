@@ -303,6 +303,23 @@ order while streaming live progress back to every collaborator on the canvas.
   outage alerts once, not on every run. Available in the panel, via
   `flowforge insights`, and on the public API. See
   [docs/INSIGHTS.md](./docs/INSIGHTS.md).
+- **SLO error budgets & burn-rate alerts** — a 99% objective *allows* 1% of
+  runs to fail; that allowance is the whole reason for choosing 99% over 100%.
+  So instead of paging on every dip, declare an objective and FlowForge tracks
+  the **error budget**: how many failures the window permits, how many are
+  spent, and — the number that matters — **how fast**
+  (`burn rate = observed failure rate ÷ allowed failure rate`; a burn rate of 1
+  exhausts the budget exactly at the end of the window). Alerting is
+  **multi-window** in the Google SRE Workbook style, and that's the point: a
+  short window alone is jumpy (ten failures in five minutes is usually a deploy
+  that recovered), a long window alone is slow (a severe outage takes hours to
+  move a 28-day average), so a tier fires only when **both** agree — 14.4× over
+  1h pages, 6× over 6h files a ticket. Reported as runs, not just percentages
+  ("10 failures left" is actionable), with a projected exhaustion time computed
+  from the *sustained* rate rather than the jumpiest one. A target of 1 is
+  refused (no budget means every burn rate divides by zero), too few runs
+  reports "unknown" rather than "healthy", and cancelled runs count as neither
+  good nor bad — stopping a run is an intervention, not a service failure.
 - **Heartbeat monitoring** — a dead-man's switch per workflow: declare "a
   real run of me completes successfully every N minutes" in Run limits, and
   FlowForge alerts when the workflow **goes quiet** — the failure mode SLA
