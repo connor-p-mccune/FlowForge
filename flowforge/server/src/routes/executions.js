@@ -6,6 +6,7 @@ const { getExecutionQueue } = require('../config/queue')
 const { requestCancel } = require('../services/executionControl')
 const { admitRun } = require('../services/concurrencyGate')
 const { computeCriticalPath } = require('../services/criticalPath')
+const { buildTrace } = require('../services/tracing')
 const { compareRuns } = require('../services/runComparison')
 const { isValidPriority, resolvePriority, enqueueOpts } = require('../services/runPriority')
 const { forbidViewer } = require('../services/workspaceRoles')
@@ -182,6 +183,33 @@ router.get('/executions/:id', auth, (req, res) => {
     }
 
     res.json({ execution, steps, childExecutions, approvals, criticalPath })
+  } catch (err) {
+    console.error(err)
+    res.status(500).json({ error: 'Internal server error' })
+  }
+})
+
+// GET /api/executions/:id/trace — the run as OTLP/JSON spans.
+//
+// The response body is exactly what an OpenTelemetry collector's OTLP/HTTP
+// receiver accepts, so exporting a run is `curl … | curl -X POST
+// $COLLECTOR/v1/traces -d @-` rather than a translation layer somebody has to
+// maintain. Emitting the standard shape is also what makes the trace *joinable*:
+// a webhook-triggered run carries the caller's trace id, and the services this
+// run called carry the step's span id, so a viewer that already has those spans
+// assembles the whole picture without knowing anything about FlowForge.
+router.get('/executions/:id/trace', auth, (req, res) => {
+  try {
+    const execution = db.prepare('SELECT * FROM executions WHERE id = ?').get(req.params.id)
+    if (!execution) return res.status(404).json({ error: 'Execution not found' })
+    const workflow = getWorkflowForMember(execution.workflow_id, req.user.id)
+    if (!workflow) return res.status(404).json({ error: 'Execution not found' })
+
+    const steps = db
+      .prepare('SELECT * FROM execution_steps WHERE execution_id = ? ORDER BY rowid')
+      .all(execution.id)
+
+    res.json(buildTrace(execution, steps, workflow))
   } catch (err) {
     console.error(err)
     res.status(500).json({ error: 'Internal server error' })

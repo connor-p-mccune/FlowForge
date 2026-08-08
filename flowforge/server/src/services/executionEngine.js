@@ -14,6 +14,7 @@ const { decryptSecret } = require('./secretVault')
 const { recordExecution, recordStepCache, recordStepCost } = require('./metrics')
 const costModel = require('./costModel')
 const stepCache = require('./stepCache')
+const tracing = require('./tracing')
 
 const runners = {
   'action-http': require('./nodeRunners/httpRequest'),
@@ -368,6 +369,27 @@ async function runExecution(
     }
   }
 
+  // Distributed tracing. The run gets a trace id and a root span the moment it
+  // starts, so every step and every outbound call can hang off it. A run whose
+  // trigger carried a W3C `traceparent` adopts that trace instead of minting
+  // one — that adoption is what makes a webhook-triggered run a *child* of
+  // whatever called it, rather than an unrelated trace somebody has to
+  // correlate by timestamp.
+  //
+  // Written once, idempotently: a resumed or replayed run keeps the trace id it
+  // was given, so the lineage stays one trace rather than fragmenting per
+  // attempt.
+  const traceId = execution.trace_id || tracing.newTraceId()
+  const rootSpanId = execution.root_span_id || tracing.newSpanId()
+  if (!execution.trace_id) {
+    try {
+      db.prepare('UPDATE executions SET trace_id = ?, root_span_id = ? WHERE id = ?')
+        .run(traceId, rootSpanId, executionId)
+    } catch (err) {
+      console.error(`Failed to record trace context: ${err.message}`)
+    }
+  }
+
   const updateExecution = db.prepare(
     'UPDATE executions SET status = ?, started_at = COALESCE(started_at, ?), finished_at = ? WHERE id = ?'
   )
@@ -424,10 +446,23 @@ async function runExecution(
     'INSERT INTO execution_steps (id, execution_id, node_id, node_type, status) VALUES (?, ?, ?, ?, ?)'
   )
   const stepIdByNode = {}
+  // One span per step, minted up front with the row. Doing it here rather than
+  // at launch means a node can reference its own span id before it runs — which
+  // is what lets an HTTP node inject a header naming the step making the call.
+  const spanIdByNode = {}
   for (const nodeId of order) {
     const stepId = uuidv4()
     stepIdByNode[nodeId] = stepId
+    spanIdByNode[nodeId] = tracing.newSpanId()
     insertStep.run(stepId, executionId, nodeId, nodeById[nodeId]?.type ?? null, 'pending')
+  }
+  try {
+    const setSpan = db.prepare('UPDATE execution_steps SET span_id = ? WHERE id = ?')
+    for (const nodeId of order) setSpan.run(spanIdByNode[nodeId], stepIdByNode[nodeId])
+  } catch (err) {
+    // Tracing is observability: a run must not fail because a span id could
+    // not be stored. The export derives a stable id from the step id instead.
+    console.error(`Failed to record step spans: ${err.message}`)
   }
 
   const updateStep = db.prepare(`
@@ -664,6 +699,11 @@ async function runExecution(
           parentExecutionId: executionId,
           parentNodeId: nodeId,
           publish: pub,
+          // The W3C header identifying *this step* as the caller. A runner that
+          // reaches outside (the HTTP node today) forwards it, so the service on
+          // the other side records its work as a child of this exact step rather
+          // than of the run as a whole.
+          traceparent: tracing.formatTraceparent(traceId, spanIdByNode[nodeId], true),
         }
         const raw = (await runWithRetries(node, config, input, dryRun, ctx)) ?? {}
         // Metering rides back from a runner on a reserved `usage` key, which is

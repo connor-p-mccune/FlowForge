@@ -2,7 +2,15 @@ const { safeFetch } = require('../ssrfGuard')
 
 // isDryRun (test mode): build the request as normal but, instead of sending it,
 // report the method/url/headers/body that would have gone out.
-module.exports = async function runHttpRequest(config, _input, isDryRun) {
+//
+// ctx.traceparent carries the W3C trace context identifying this step, which is
+// forwarded so the service being called records its work as a child of this
+// exact node — the run stops being an opaque 4-second box in somebody else's
+// trace. An explicit `traceparent` in the node's own headers always wins: a
+// user hand-setting one is deliberately joining a different trace, and silently
+// overwriting it would break exactly the case they went out of their way to
+// build.
+module.exports = async function runHttpRequest(config, _input, isDryRun, ctx) {
   const { method = 'GET', url, headers = '{}', body = '' } = config
   if (!url) throw new Error('HTTP node: url is required')
 
@@ -13,6 +21,10 @@ module.exports = async function runHttpRequest(config, _input, isDryRun) {
       : headers || {}
   } catch {
     throw new Error('HTTP node: headers must be valid JSON')
+  }
+
+  if (ctx?.traceparent && !Object.keys(parsedHeaders).some((h) => h.toLowerCase() === 'traceparent')) {
+    parsedHeaders.traceparent = ctx.traceparent
   }
 
   const options = { method, headers: parsedHeaders }

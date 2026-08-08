@@ -8,6 +8,7 @@ const { webhookLimiter } = require('../middleware/rateLimit')
 const { getExecutionQueue } = require('../config/queue')
 const { generateSigningSecret, verifyWebhookSignature } = require('../services/webhookSignature')
 const { admitRun } = require('../services/concurrencyGate')
+const { parseTraceparent } = require('../services/tracing')
 const { resolvePriority, enqueueOpts } = require('../services/runPriority')
 const { analyze, evaluateBoolean, ExpressionError } = require('../services/expression')
 const { forbidViewer } = require('../services/workspaceRoles')
@@ -224,9 +225,21 @@ router.post('/webhooks/:key', webhookLimiter, async (req, res) => {
     const priority = resolvePriority(null, workflow)
     const executionId = uuidv4()
     const now = new Date().toISOString()
+    // W3C trace context: a sender that traces its own work sends `traceparent`,
+    // and adopting it is what makes this run a *child span of the request that
+    // triggered it* rather than an unrelated trace someone has to correlate by
+    // timestamp. A missing or malformed header just means the run starts its
+    // own trace — the engine mints one either way.
+    const inbound = parseTraceparent(req.headers.traceparent)
     db.prepare(
-      'INSERT INTO executions (id, workflow_id, status, triggered_by, trigger_type, trigger_data, priority, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
-    ).run(executionId, workflow.id, 'pending', null, 'webhook', JSON.stringify(triggerData), priority, now)
+      `INSERT INTO executions
+         (id, workflow_id, status, triggered_by, trigger_type, trigger_data, priority,
+          trace_id, parent_span_id, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(
+      executionId, workflow.id, 'pending', null, 'webhook', JSON.stringify(triggerData),
+      priority, inbound?.traceId ?? null, inbound?.parentSpanId ?? null, now
+    )
     db.prepare('UPDATE webhooks SET last_triggered_at = ? WHERE id = ?').run(now, webhook.id)
 
     await getExecutionQueue().add({

@@ -212,6 +212,25 @@ ensureColumn('workspaces', 'budget_micro_usd', 'INTEGER')
 ensureColumn('workspaces', 'budget_alert_pct', 'REAL')
 ensureColumn('workspaces', 'budget_alerted_month', 'TEXT')
 
+// Distributed tracing (services/tracing.js). trace_id is the W3C trace this
+// run belongs to — adopted from an inbound `traceparent` when a caller supplied
+// one, minted otherwise — and root_span_id is the run's own span. parent_span_id
+// is the caller's span, set only when the trace was adopted; NULL means this run
+// is a trace root, which is different from "parented to nothing" and is why the
+// export omits the field rather than writing zeros.
+ensureColumn('executions', 'trace_id', 'TEXT')
+ensureColumn('executions', 'root_span_id', 'TEXT')
+ensureColumn('executions', 'parent_span_id', 'TEXT')
+// Each step's span. An HTTP node injects this id into the request it makes, so
+// whatever the far side records hangs off the exact step that called it.
+ensureColumn('execution_steps', 'span_id', 'TEXT')
+
+// Correlating a run from a trace id seen in another system ("this Jaeger trace
+// touched FlowForge — which run was it?") is the whole point of storing it.
+db.exec(`
+  CREATE INDEX IF NOT EXISTS idx_executions_trace ON executions (trace_id);
+`)
+
 // Schedule backfill (services/backfill.js): re-running a scheduled workflow
 // over a historical window. logical_date is the scheduled instant a run
 // *represents*, which is not the instant it executes — a backfill of last
