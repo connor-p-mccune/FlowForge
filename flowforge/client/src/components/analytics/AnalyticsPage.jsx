@@ -1,11 +1,13 @@
 import { useState, useEffect } from 'react'
 import { apiFetch } from '../../services/api'
+import { useAuth } from '../../hooks/useAuth'
 import Skeleton from '../Skeleton'
 import SummaryCards from './SummaryCards'
 import TimelineChart from './TimelineChart'
 import NodeUsageChart from './NodeUsageChart'
 import WorkflowsTable from './WorkflowsTable'
 import StatusPageSection from './StatusPageSection'
+import CostSection from './CostSection'
 
 const RANGES = [7, 30, 90]
 
@@ -14,6 +16,23 @@ export default function AnalyticsPage({ workspaceId }) {
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
+  // Only an owner may change the spend cap; everyone may read the numbers.
+  // A failed lookup leaves it false, which hides an edit control rather than
+  // offering one the server would refuse — the server checks the role again
+  // regardless, so this is presentation, not authorization.
+  const { user } = useAuth()
+  const [isOwner, setIsOwner] = useState(false)
+
+  useEffect(() => {
+    let cancelled = false
+    apiFetch(`/api/workspaces/${workspaceId}/members`)
+      .then(({ members }) => {
+        if (cancelled) return
+        setIsOwner((members || []).some((m) => m.userId === user?.id && m.role === 'owner'))
+      })
+      .catch(() => {})
+    return () => { cancelled = true }
+  }, [workspaceId, user?.id])
 
   useEffect(() => {
     let cancelled = false
@@ -83,6 +102,10 @@ export default function AnalyticsPage({ workspaceId }) {
           <WorkflowsTable workflows={data.workflows} />
         </>
       )}
+      {/* Spend renders independently of the range buttons above: a budget is a
+          calendar-month commitment, and showing "7 days" of it against a
+          monthly cap would be two different questions in one panel. */}
+      <CostSection workspaceId={workspaceId} canEdit={isOwner} />
       {/* Sharing lives below the charts; it renders even while they load —
           publishing a status page doesn't depend on analytics data. */}
       <StatusPageSection workspaceId={workspaceId} />

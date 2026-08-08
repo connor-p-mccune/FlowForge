@@ -6594,3 +6594,160 @@ html, body, #root {
 .backfill-panel__failed {
   color: #b91c1c;
 }
+
+/* ---------------------------------------------------------------------------
+   Workspace spend. The budget meter changes colour *and* copy across its three
+   states, because "80% used" and "runs are being refused" call for different
+   actions and a bar colour alone wouldn't say which one you're in.
+   --------------------------------------------------------------------------- */
+.cost__budget {
+  border-radius: 8px;
+  padding: 12px 14px;
+  margin-bottom: 12px;
+  border: 1px solid #e5e7eb;
+  background: #f9fafb;
+  font-size: 13px;
+  color: #374151;
+}
+.cost__budget--warn {
+  background: #fffbeb;
+  border-color: #fde68a;
+}
+.cost__budget--blocked {
+  background: #fef2f2;
+  border-color: #fecaca;
+  color: #7f1d1d;
+}
+.cost__budget-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+}
+.cost__budget--none {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+}
+.cost__budget-edit {
+  border: none;
+  background: none;
+  color: #2563eb;
+  font-size: 12.5px;
+  cursor: pointer;
+  text-decoration: underline;
+  white-space: nowrap;
+}
+.cost__budget-bar {
+  height: 6px;
+  background: #e5e7eb;
+  border-radius: 999px;
+  overflow: hidden;
+  margin: 8px 0 6px;
+}
+.cost__budget-fill {
+  height: 100%;
+  background: #2563eb;
+  transition: width 0.3s ease;
+}
+.cost__budget--warn .cost__budget-fill {
+  background: #d97706;
+}
+.cost__budget--blocked .cost__budget-fill {
+  background: #dc2626;
+}
+.cost__budget-note {
+  font-size: 12px;
+  opacity: 0.85;
+}
+.cost__budget-form {
+  display: flex;
+  align-items: flex-end;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+  padding: 12px;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+}
+.cost__budget-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+  color: #4b5563;
+}
+.cost__budget-form input {
+  padding: 6px 8px;
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+  font-size: 13px;
+  min-width: 180px;
+}
+.cost__budget-actions {
+  display: flex;
+  gap: 6px;
+}
+.cost__budget-actions button {
+  font-size: 12.5px;
+  padding: 7px 12px;
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+  background: #fff;
+  cursor: pointer;
+}
+.cost__budget-actions button[type='submit'] {
+  background: #111827;
+  border-color: #111827;
+  color: #fff;
+}
+.cost__groupings {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 10px;
+  flex-wrap: wrap;
+}
+.cost__table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+.cost__table th {
+  text-align: left;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #9ca3af;
+  font-weight: 600;
+  padding: 6px 8px;
+  border-bottom: 1px solid #e5e7eb;
+}
+.cost__table td {
+  padding: 7px 8px;
+  border-bottom: 1px solid #f3f4f6;
+  color: #374151;
+}
+.cost__table tfoot td {
+  font-weight: 600;
+  border-bottom: none;
+  border-top: 1px solid #e5e7eb;
+}
+.cost__num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.cost__empty,
+.cost__note {
+  font-size: 12.5px;
+  color: #6b7280;
+  margin: 8px 0 0;
+  line-height: 1.5;
+}
+.cost__error {
+  font-size: 13px;
+  color: #991b1b;
+  background: #fef2f2;
+  border-radius: 8px;
+  padding: 12px 14px;
+}
