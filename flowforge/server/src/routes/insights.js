@@ -6,6 +6,7 @@
 // that feeds it plus a workspace-membership check.
 
 const express = require('express')
+const { computeSlo } = require('../services/sloBudget')
 const db = require('../config/database')
 const auth = require('../middleware/auth')
 const { summarizeDurations, classifyRuns, mannKendall, percentile } = require('../services/runStats')
@@ -295,6 +296,24 @@ router.get('/workflows/:id/insights', auth, (req, res) => {
     if (!workflow) return res.status(404).json({ error: 'Workflow not found' })
     const limit = parseLimit(req.query.limit)
     res.json({ workflowId: workflow.id, ...computeInsights(workflow.id, limit) })
+  } catch (err) {
+    console.error(err)
+    res.status(500).json({ error: 'Internal server error' })
+  }
+})
+
+// GET /api/workflows/:id/slo — the error budget: how much of the workflow's
+// permitted failure allowance this window has spent, the burn rates, and when
+// the budget runs out at the current rate.
+//
+// Read-only and cheap (two counted queries per burn tier), so it is safe to
+// poll from a dashboard — which is the point: an error budget is something you
+// watch trending, not something you check after an incident.
+router.get('/workflows/:id/slo', auth, (req, res) => {
+  try {
+    const workflow = getVisibleWorkflow(req.params.id, req.user.id)
+    if (!workflow) return res.status(404).json({ error: 'Workflow not found' })
+    res.json({ workflowId: workflow.id, ...computeSlo(workflow) })
   } catch (err) {
     console.error(err)
     res.status(500).json({ error: 'Internal server error' })

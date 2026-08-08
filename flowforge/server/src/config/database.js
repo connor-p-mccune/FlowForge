@@ -212,6 +212,15 @@ ensureColumn('workspaces', 'budget_micro_usd', 'INTEGER')
 ensureColumn('workspaces', 'budget_alert_pct', 'REAL')
 ensureColumn('workspaces', 'budget_alerted_month', 'TEXT')
 
+// SLO error budgets (services/sloBudget.js). slo_target is the *success*
+// fraction the workflow promises (0.99 = "99% of runs succeed") over
+// slo_window_days (default 28). Distinct from sla_min_success_rate, which is a
+// floor that alerts the moment it is crossed: an objective explicitly *budgets*
+// for failure, so the question becomes how fast the allowance is being spent
+// rather than whether anything failed at all. NULL = no objective declared.
+ensureColumn('workflows', 'slo_target', 'REAL')
+ensureColumn('workflows', 'slo_window_days', 'INTEGER')
+
 // Distributed tracing (services/tracing.js). trace_id is the W3C trace this
 // run belongs to — adopted from an inbound `traceparent` when a caller supplied
 // one, minted otherwise — and root_span_id is the run's own span. parent_span_id

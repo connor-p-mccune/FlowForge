@@ -297,6 +297,29 @@ function validateSla(body) {
   return null
 }
 
+// Optional SLO objective (services/sloBudget.js). Distinct from
+// sla_min_success_rate: that is a floor that alerts when crossed, while an
+// objective explicitly budgets for failure and alerts on how fast the budget is
+// being spent. Both nullable and independent — a workflow may sensibly declare
+// either, both, or neither. Returns an error string or null.
+function validateSlo(body) {
+  if ('slo_target' in body && body.slo_target !== null) {
+    const t = body.slo_target
+    // Strictly between 0 and 1: a target of 1 means "never fail", which has no
+    // error budget at all and would make every burn rate infinite.
+    if (typeof t !== 'number' || !Number.isFinite(t) || t <= 0 || t >= 1) {
+      return 'slo_target must be a number strictly between 0 and 1 (e.g. 0.99), or null to clear it'
+    }
+  }
+  if ('slo_window_days' in body && body.slo_window_days !== null) {
+    const d = body.slo_window_days
+    if (!Number.isInteger(d) || d < 1 || d > 90) {
+      return 'slo_window_days must be an integer between 1 and 90, or null for the 28-day default'
+    }
+  }
+  return null
+}
+
 // Optional heartbeat expectation (services/heartbeatMonitor.js). Nullable
 // (null clears it — and clears any outstanding alert with it, so a retired
 // expectation can't leave a stale "missed" state behind). Bounded to a week:
@@ -360,6 +383,8 @@ router.put('/workflows/:id', auth, validate(workflowRule), (req, res) => {
     if (slaError) return res.status(400).json({ error: slaError })
     const heartbeatError = validateHeartbeat(req.body)
     if (heartbeatError) return res.status(400).json({ error: heartbeatError })
+    const sloError = validateSlo(req.body)
+    if (sloError) return res.status(400).json({ error: sloError })
     const handlerError = validateErrorHandler(req.body, workflow)
     if (handlerError) return res.status(400).json({ error: handlerError })
     const priorityError = validatePriority(req.body)
@@ -412,6 +437,15 @@ router.put('/workflows/:id', auth, validate(workflowRule), (req, res) => {
     // the old alert answered the old promise.
     const heartbeatAlertedAt =
       heartbeatInterval === workflow.heartbeat_interval_minutes ? workflow.heartbeat_alerted_at : null
+    const sloTarget = 'slo_target' in req.body ? req.body.slo_target : workflow.slo_target
+    // Clearing the target clears the window with it: a window with no objective
+    // to measure is dead config the next objective would silently inherit.
+    const sloWindowDays =
+      sloTarget == null
+        ? null
+        : 'slo_window_days' in req.body
+          ? req.body.slo_window_days
+          : workflow.slo_window_days
     const errorWorkflowId =
       'error_workflow_id' in req.body ? req.body.error_workflow_id : workflow.error_workflow_id
     const defaultPriority =
@@ -423,8 +457,9 @@ router.put('/workflows/:id', auth, validate(workflowRule), (req, res) => {
          rate_limit_max = ?, rate_limit_window_seconds = ?,
          maintenance_cron = ?, maintenance_duration_minutes = ?, maintenance_timezone = ?,
          sla_max_duration_ms = ?, sla_min_success_rate = ?, heartbeat_interval_minutes = ?, heartbeat_alerted_at = ?,
+         slo_target = ?, slo_window_days = ?,
          error_workflow_id = ?, default_priority = ?, updated_at = ? WHERE id = ?`
-    ).run(name, description ?? workflow.description, maxConcurrent, policy, rateMax, rateWindow, maintenanceCron, maintenanceDuration, maintenanceTimezone, slaMaxDuration, slaMinSuccess, heartbeatInterval, heartbeatAlertedAt, errorWorkflowId, defaultPriority, now, req.params.id)
+    ).run(name, description ?? workflow.description, maxConcurrent, policy, rateMax, rateWindow, maintenanceCron, maintenanceDuration, maintenanceTimezone, slaMaxDuration, slaMinSuccess, heartbeatInterval, heartbeatAlertedAt, sloTarget, sloWindowDays, errorWorkflowId, defaultPriority, now, req.params.id)
 
     // Clearing (or removing) the window while it still holds a maintenance
     // pause would strand the workflow paused — the sweep no longer sees it to
