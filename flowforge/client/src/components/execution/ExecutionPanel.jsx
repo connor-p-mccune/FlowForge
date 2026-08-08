@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import TraceLink from './TraceLink'
 import ExecutionHistory from './ExecutionHistory'
 
 const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:3001'
@@ -161,6 +162,7 @@ export default function ExecutionPanel({ open, onClose, execution, steps, nodes,
           execution ? (
             <>
               {execution.error && <p className="exec-panel__error">{execution.error}</p>}
+              <TraceLink executionId={execution.id} traceId={execution.trace_id} />
               <StepList
                 steps={steps}
                 nodes={nodes}
