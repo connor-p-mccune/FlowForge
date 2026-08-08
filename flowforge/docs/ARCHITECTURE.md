@@ -13,6 +13,7 @@ relative to `flowforge/`.
 - [Run insights & SLA monitoring](#run-insights--sla-monitoring)
 - [The expression language](#the-expression-language)
 - [Static analysis (the linter)](#static-analysis-the-linter)
+- [Run cost accounting and budgets](#run-cost-accounting-and-budgets)
 - [The tamper-evident audit log](#the-tamper-evident-audit-log)
 - [Security architecture](#security-architecture)
 - [Observability](#observability)
@@ -1113,6 +1114,97 @@ with the name column weighted well above node_text, so a workflow *named*
 "stripe sync" beats one that merely mentions stripe in a config; each hit
 reports which field matched and an FTS5 `snippet()` with the matched terms
 bracketed, so the palette can show *why* a result surfaced.
+
+## Run cost accounting and budgets
+
+Every admission control in the previous sections bounds **load**: concurrency
+bounds simultaneity, the rate limit bounds frequency, pause stops everything.
+None of them bounds **money**. A workflow with an AI node inside a for-each over
+a list that grew, running on a schedule nobody watches, sits comfortably inside
+all three and still spends a fortune. `services/costModel.js` measures that;
+`services/budget.js` acts on it.
+
+### Measuring: what can honestly be priced
+
+Token usage is reported by the AI service from the call that incurred it
+(`llm.chat_with_usage`), because that is the only place the number is knowable
+— reconstructing it later from the response text would be a guess dressed up as
+a figure. The runners pass it through, and the engine prices it.
+
+The load-bearing decision is what is **not** priced. An HTTP node calling a
+third-party API costs money too, but FlowForge has no idea what that vendor
+charges, and inventing a rate would produce a total that looks authoritative
+and is fiction. External calls are therefore *counted*, never priced, unless
+the workflow author declares `costPerCall` on the node — they are the only
+party who could know it. That value is read from the **raw** config, like the
+`onError` and cache policies, so upstream data can never move an accounting
+figure.
+
+The same honesty runs through model pricing. Rates are matched by **longest
+prefix**, so a dated snapshot (`gpt-4o-mini-2024-07-18`) prices as its family
+rather than falling off the table — and so `gpt-4o-mini` is never priced as
+`gpt-4o`, a 16× error. An unknown model contributes **zero and carries
+`priced: false`**, so every surface showing a total can say how much of it is
+unknown. A visible gap beats a confident wrong number.
+
+Money is stored as integer **micro-USD** (1e-6 USD). Floating-point dollars
+accumulate rounding error across thousands of steps and then disagree with
+themselves when the same rows are summed two different ways; an integer count of
+millionths does not. Formatting happens once, at the edge, and keeps four
+decimals below a dollar because a single AI call routinely costs less than a
+cent and rounding every step to `$0.00` would make the per-step view useless
+exactly where it is most needed.
+
+**Metering is a side channel, not data.** A runner reports usage on a reserved
+key that the engine reads and then *strips* before the value becomes node
+output. Leaving it in would put token counts into the context every downstream
+node reads, into the persisted step row, and into the run's return value —
+three places it has no business being. Every call on this path is best-effort:
+a run that would have succeeded must never fail because its invoice line
+couldn't be computed.
+
+### Enforcing: a budget beside the other admission controls
+
+The check lives in `admitRun` — the chokepoint every entry point already calls —
+so manual runs, the public API, webhooks, schedules, backfills, replays,
+resumes, and error-handler escalations are covered with no per-route logic. It
+runs **last** of the three checks: it is the most expensive (it sums the
+month's runs) and the least likely to trip, and there is no point pricing a
+submission a full queue was going to refuse anyway.
+
+Four decisions mirror controls that already exist rather than inventing new
+shapes:
+
+- **Failed runs count toward the spend.** A run that died after its AI call
+  still spent the money; a budget that counted only successes would be
+  trivially defeated by a workflow that fails on its last step.
+- **Dry runs are exempt**, as they are from the concurrency cap, the rate limit,
+  and pause. An interactive test must not eat the production allowance — and the
+  person diagnosing *why* the budget blew is the last person who should be
+  blocked.
+- **In-flight runs are never killed.** A budget refuses new work; tearing down
+  half-finished work to save a fraction of a cent would leave the outside world
+  in an unknown state for no benefit. That is cancellation's job, and it stays a
+  human decision.
+- **The warning is edge-triggered through one column**
+  (`budget_alerted_month`), the same trick the heartbeat monitor uses: a month
+  of overspend alerts once, the column *is* the state, it survives restarts, and
+  changing the cap clears it because the old alert answered the old budget.
+
+The month is a **calendar** boundary in UTC rather than a rolling 30 days,
+because that is the boundary the invoice this mirrors uses — a rolling window
+would make "how much have we spent this month?" unanswerable against a bill.
+
+The spend query is slightly behind reality under heavy parallelism, since a
+run's cost lands when it settles. That is the right way to be wrong: it can
+briefly admit a run it would later refuse, but it can never refuse one it should
+have admitted.
+
+`/metrics` labels cost by **node type**, never by workspace or workflow — money
+is interesting per kind of work, and a per-resource label would let ids explode
+the series space, the same cardinality rule the HTTP metrics follow.
+Per-workspace spend is a database question, answered by
+`GET /workspaces/:id/costs`.
 
 ## The tamper-evident audit log
 

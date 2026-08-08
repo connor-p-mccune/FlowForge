@@ -232,6 +232,22 @@ order while streaming live progress back to every collaborator on the canvas.
   rate, typical duration, and last-run age. Deliberately unactionable — no
   ids, no error text, no drafts, no dry runs — so it's safe for an on-call
   channel or a client; rotate the link and every shared copy dies.
+- **Run cost accounting & budgets** — concurrency bounds how many runs go at
+  once, the rate limit bounds how often they start, pause stops everything —
+  and none of them bounds **money**. An AI node inside a for-each over a list
+  that grew, on a schedule nobody watches, sits inside all three limits and
+  still runs up a bill. So every run is metered: AI steps are priced from the
+  **token usage the provider reports**, totalled onto the run, and rolled up per
+  workflow, per node type, and per day. Set a **monthly budget** and FlowForge
+  warns at a threshold (once a month, not once a run) and then refuses new runs
+  at the same admission gate every other limit uses — while in-flight runs
+  finish and dry runs keep working, so whoever is diagnosing the overspend isn't
+  the one locked out. Failed runs count, because a run that died after its AI
+  call still spent the money. The accounting is deliberately honest about its
+  limits: only what can actually be known is priced, so a third-party API call
+  is **counted but not priced** unless you tell FlowForge your rate, and an
+  unpriced model shows as a visible gap rather than a confident zero. Stored as
+  integer micro-USD, so summing the same rows two ways always agrees.
 - **Tamper-evident audit log** — the activity feed tells your team what
   happened; this tells an auditor what changed and proves the record wasn't
   edited. Every governed action (secrets, variables, membership, API tokens,
@@ -485,6 +501,7 @@ Copy `.env.example` to `.env` before running. **Never commit `.env`.**
 | `SECRETS_ENCRYPTION_KEY` | no | Dedicated key material for workspace-secret encryption (falls back to `JWT_SECRET`) |
 | `EXEC_MAX_PARALLEL` | no     | Max concurrently-executing nodes per run (default 4; 1 = sequential) |
 | `CONCURRENCY_RETRY_MS` | no  | How long a run parked at its workflow's concurrency cap waits before re-checking (default 1000) |
+| `COST_MODEL_PRICES` | no     | JSON override of the AI price table, e.g. `{"gpt-4o-mini":{"input":150000,"output":600000}}` (micro-USD per 1M tokens) |
 | `METRICS_TOKEN`   | no       | Bearer token guarding `GET /metrics` (unguarded when unset) |
 | `LOG_LEVEL`       | no       | `debug` \| `info` (default) \| `warn` \| `error` \| `silent` |
 | `LOG_FORMAT`      | no       | `pretty` for human-readable dev logs (default: one JSON line per event) |
