@@ -263,6 +263,24 @@ const faultsInjected = counter(
   ['mode']
 )
 
+// Compensating transactions (services/compensation.js). Two counters rather
+// than one because they answer different questions: the per-compensation
+// counter says whether the undo actions themselves are healthy (a rising
+// `failed` means the compensating endpoint is broken, which is a page in its
+// own right — it is the thing that fires when everything else already went
+// wrong), while the per-rollback counter says how often runs are unwinding at
+// all, and how often they only partly manage it.
+const compensationsTotal = counter(
+  'flowforge_compensations_total',
+  'Compensating actions executed during a rollback, by outcome.',
+  ['status']
+)
+const rollbacksTotal = counter(
+  'flowforge_rollbacks_total',
+  'Runs unwound by compensating transactions, by rollback outcome.',
+  ['outcome']
+)
+
 const processUptime = gauge('process_uptime_seconds', 'Process uptime in seconds.')
 const processMemory = gauge(
   'process_resident_memory_bytes',
@@ -349,6 +367,16 @@ function recordFaultInjected(mode) {
   faultsInjected.inc({ mode })
 }
 
+// Called by the rollback pass for each compensating action it settles.
+function recordCompensation(status) {
+  compensationsTotal.inc({ status })
+}
+
+// Called once per rollback, with the verdict over all of its compensations.
+function recordRollback(outcome) {
+  rollbacksTotal.inc({ outcome })
+}
+
 module.exports = {
   counter,
   gauge,
@@ -367,6 +395,8 @@ module.exports = {
   recordStepCost,
   recordBudgetBlocked,
   recordFaultInjected,
+  recordCompensation,
+  recordRollback,
   queueJobs,
   webhookPending,
 }

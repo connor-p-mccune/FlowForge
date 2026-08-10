@@ -16,7 +16,10 @@ const {
   recordStepCache,
   recordStepCost,
   recordFaultInjected,
+  recordCompensation,
+  recordRollback,
 } = require('./metrics')
+const compensation = require('./compensation')
 const faultInjection = require('./faultInjection')
 const costModel = require('./costModel')
 const stepCache = require('./stepCache')
@@ -340,8 +343,17 @@ async function runExecution(
   // no step rows, and any edge touching one (only possible in a hand-edited
   // import — the UI renders notes without handles) is dropped with them.
   const noteIds = new Set((graph.nodes || []).filter((n) => n.type === 'note').map((n) => n.id))
-  const nodes = (graph.nodes || []).filter((n) => !noteIds.has(n.id))
-  const edges = (graph.edges || []).filter((e) => !noteIds.has(e.source) && !noteIds.has(e.target))
+  // Compensating transactions: a node that declares `compensates: <node-id>` is
+  // the undo for that node, not a step of this run. It is stripped from the
+  // forward graph exactly like a sticky note — no step row, no place in the
+  // topological order, never launched — and executes only if the run ends badly
+  // and the rollback pass reaches it. Keeping the plan here (rather than
+  // re-deriving it after the failure) means the graph is read once and the
+  // stripping and the unwinding can never disagree about which nodes are which.
+  const plan = compensation.compensationPlan(graph.nodes || [])
+  const excluded = new Set([...noteIds, ...plan.compensationIds])
+  const nodes = (graph.nodes || []).filter((n) => !excluded.has(n.id))
+  const edges = (graph.edges || []).filter((e) => !excluded.has(e.source) && !excluded.has(e.target))
   const nodeById = Object.fromEntries(nodes.map((n) => [n.id, n]))
 
   // Resume-from-failure: when this run continues an earlier failed/cancelled
@@ -521,6 +533,29 @@ async function runExecution(
     WHERE id = ?
   `)
 
+  // The run's real completion sequence. Stamped on a step the moment its runner
+  // returns — success, caught, or failure alike — so the column is set exactly
+  // when this run performed that node's work. A skipped, cached or reused step
+  // never gets one, which is precisely the set rollback must not compensate:
+  // their side effects belong to an earlier run that still owns them.
+  //
+  // Kept out of updateStep's parameter list because it is written once per node
+  // and that statement is the hot path for every status transition.
+  const setCompletedSeq = db.prepare('UPDATE execution_steps SET completed_seq = ? WHERE id = ?')
+  const completionOrder = [] // node ids, in the order their runners returned
+  function markCompleted(nodeId) {
+    const seq = completionOrder.length
+    completionOrder.push(nodeId)
+    try {
+      setCompletedSeq.run(seq, stepIdByNode[nodeId])
+    } catch (err) {
+      // The in-memory order still drives this run's own rollback; only a later
+      // manual rollback would read the column, and it degrades to skipping a
+      // step rather than unwinding in the wrong order.
+      console.error(`Failed to record completion order for ${nodeId}: ${err.message}`)
+    }
+  }
+
   // Cost accounting. A step's metered usage is recorded on its own row and
   // accumulated for the run, so "what did this run cost?" is a column rather
   // than a join over every step. Kept entirely separate from updateStep because
@@ -577,6 +612,12 @@ async function runExecution(
   // Nodes whose failure was caught under the 'branch' on-error policy. They
   // settle as routable successes, but activate only their 'error' handle.
   const caughtBranch = new Set()
+  // Every node whose failure was caught, under either policy. They settle with
+  // nodeStatus 'success' so the scheduler can route through them — which makes
+  // this set load-bearing for rollback: a caught node did *not* succeed, and
+  // compensating one would undo an effect its author already decided how to
+  // handle when they chose 'continue' or 'branch'.
+  const caughtNodes = new Set()
   const now = () => new Date().toISOString()
 
   const incomingByNode = {}
@@ -773,6 +814,7 @@ async function runExecution(
           now(), now(), stepIdByNode[nodeId]
         )
         publishStep(nodeId, 'succeeded', { output })
+        markCompleted(nodeId)
         // Only clean successes are memoised — a caught failure is data, not
         // a result worth replaying. cacheKey was derived in launchNode from
         // the same resolved config and input this attempt just ran with.
@@ -807,12 +849,14 @@ async function runExecution(
           }
           context[nodeId] = output
           nodeStatus[nodeId] = 'success'
+          caughtNodes.add(nodeId)
           if (policy === 'branch') caughtBranch.add(nodeId)
           updateStep.run(
             'caught', redact(JSON.stringify(input)), redact(JSON.stringify(output)),
             redact(err.message), now(), now(), stepIdByNode[nodeId]
           )
           publishStep(nodeId, 'caught', { output, error: err.message })
+          markCompleted(nodeId)
         } else {
           nodeStatus[nodeId] = 'failed'
           updateStep.run(
@@ -820,6 +864,7 @@ async function runExecution(
             now(), now(), stepIdByNode[nodeId]
           )
           publishStep(nodeId, 'failed', { error: err.message })
+          markCompleted(nodeId)
           if (!failure) failure = { node, err }
         }
       } finally {
@@ -885,6 +930,53 @@ async function runExecution(
   // Let in-flight siblings of a failed/cancelled run finish and record results.
   if (inFlight.size > 0) await Promise.all([...inFlight.values()])
 
+  // Compensating transactions: unwind the side effects this run already caused.
+  // Deliberately runs *after* the terminal status is written and published —
+  // the run failed, and that fact is not contingent on how well the cleanup
+  // goes. A watcher sees `failed`, then the compensations, then the rollback
+  // verdict, which is also the order the operator needs to reason in.
+  //
+  // Nested runs are not special-cased: a sub-workflow child that fails unwinds
+  // its own compensations, and the parent then unwinds its own, which is
+  // precisely how nested sagas are supposed to compose.
+  //
+  // Best-effort in full. A rollback that throws must never mask the run's real
+  // outcome — the record of what failed is worth more than the cleanup.
+  async function maybeRollback(reason) {
+    if (!compensation.shouldRollback(compensation.rollbackPolicy(workflow), reason)) return
+    if (plan.byTarget.size === 0 || completionOrder.length === 0) return
+    try {
+      await executeRollback({
+        executionId,
+        workflowId,
+        workspaceId: workflow.workspace_id,
+        graphNodes: graph.nodes || [],
+        plan,
+        // Genuine successes only: `caught` nodes settle as 'success' so the
+        // scheduler can route past them, but they failed — the manual path
+        // reaches the same set by selecting on the step's recorded status.
+        completedNodeIds: completionOrder.filter(
+          (id) => nodeStatus[id] === 'success' && !caughtNodes.has(id)
+        ),
+        context,
+        secrets,
+        vars,
+        redact,
+        publish: pub,
+        dryRun,
+        failureContext: {
+          nodeId: failure?.node?.id ?? null,
+          error: failure?.err?.message ?? null,
+          reason,
+        },
+        callStack,
+        traceparent: tracing.formatTraceparent(traceId, rootSpanId, true),
+      })
+    } catch (err) {
+      console.error(`Rollback failed for execution ${executionId}: ${err.message}`)
+    }
+  }
+
   if (failure) {
     // Everything that never launched is skipped, then the run fails. A failure
     // takes precedence over a concurrent cancel request — it says more.
@@ -893,6 +985,7 @@ async function runExecution(
     failExecution(
       `Node "${failure.node.data?.label || failure.node.id}" failed: ${failure.err.message}`
     )
+    await maybeRollback('failed')
     return
   }
 
@@ -904,6 +997,7 @@ async function runExecution(
     publishExecution('cancelled')
     logRunActivity('execution.cancelled')
     recordTerminal('cancelled')
+    await maybeRollback('cancelled')
     return {}
   }
 
@@ -926,8 +1020,274 @@ async function runExecution(
   return {}
 }
 
+// — the rollback pass ————————————————————————————————————————————————————
+//
+// Run the compensating actions for a run that ended badly, newest side effect
+// first. This is the saga unwind: strictly sequential, tolerant of its own
+// failures, and never repeating a compensation that already took.
+//
+// It is deliberately a plain function over explicit inputs rather than a method
+// on the run, because it has two callers with different provenance for the same
+// arguments: the engine hands it the live in-memory context immediately after a
+// failure, and the manual rollback endpoint rebuilds an equivalent one from the
+// persisted steps hours later. Both go through this one body, so "what a
+// rollback does" cannot drift between the automatic and the manual path.
+async function executeRollback({
+  executionId,
+  workflowId,
+  workspaceId,
+  graphNodes,
+  plan,
+  completedNodeIds,
+  context,
+  secrets = {},
+  vars = {},
+  redact = (s) => s,
+  publish,
+  dryRun = false,
+  already,
+  failureContext = {},
+  callStack = [],
+  traceparent = null,
+}) {
+  const byTarget = plan?.byTarget instanceof Map ? plan.byTarget : new Map()
+  const sequence = compensation.rollbackSequence(completedNodeIds, byTarget, { already })
+  if (sequence.length === 0) return { outcome: null, results: [] }
+
+  const pub = publish || defaultPublish
+  const insertCompensation = db.prepare(`
+    INSERT INTO execution_compensations
+      (id, execution_id, node_id, target_node_id, node_type, seq, status,
+       input_json, output_json, error, attempts, started_at, finished_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `)
+  const labelOf = (id) =>
+    graphNodes?.find?.((n) => n.id === id)?.data?.label || id
+
+  // What the compensating node can read about *why* it is running. The target's
+  // own output is already addressable as {{<target-id>.field}} — the whole run
+  // context is in scope, because a compensation runs after the fact and is not
+  // bound by the upstream rule that governs the forward pass. This adds the one
+  // thing the graph cannot express: the failure that caused the unwind, so a
+  // "post to the incident channel" compensation can say what happened.
+  const rollbackScope = {
+    executionId,
+    workflowId,
+    failedNode: failureContext.nodeId ?? null,
+    failedNodeLabel: failureContext.nodeId ? labelOf(failureContext.nodeId) : null,
+    error: failureContext.error ?? null,
+    reason: failureContext.reason ?? 'failed',
+  }
+
+  const publishCompensation = (node, targetId, seq, state, extra = {}) => {
+    pub({
+      kind: 'compensation',
+      workflowId,
+      executionId,
+      nodeId: node.id,
+      targetNodeId: targetId,
+      seq,
+      status: state,
+      output: extra.output != null ? redactDeep(extra.output, redact) : null,
+      error: extra.error != null ? redact(extra.error) : null,
+    })
+  }
+
+  const results = []
+  for (const [index, { node, targetId }] of sequence.entries()) {
+    const startedAt = new Date().toISOString()
+    // The compensation's input is the output of the step it is undoing: the
+    // charge id to refund, the reservation to release. Handing it the thing it
+    // has to reverse is the only input that is always meaningful.
+    const input = context?.[targetId] ?? {}
+    publishCompensation(node, targetId, index, 'running')
+
+    // Compensations retry on the same ladder as forward steps — the stakes are
+    // higher, not lower, since a forward step that stays failed fails a run
+    // while a compensation that stays failed leaves the outside world
+    // inconsistent. Spelled out here rather than reusing runWithRetries so the
+    // attempt count is *recorded*: "this refund went through on the third try"
+    // is exactly the sort of thing you want in the record when reconciling an
+    // incident, and a shared helper that swallows the count cannot provide it.
+    const maxAttempts = SINGLE_ATTEMPT_TYPES.has(node.type) ? 1 : MAX_ATTEMPTS
+    let attempts = 0
+    let status = 'succeeded'
+    let output = null
+    let error = null
+
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      attempts = attempt
+      try {
+        const config = resolveTemplates(node.data?.config || {}, {
+          ...context,
+          secrets,
+          vars,
+          rollback: rollbackScope,
+        })
+        const ctx = {
+          ancestorWorkflowIds: callStack,
+          parentExecutionId: executionId,
+          parentNodeId: node.id,
+          publish: pub,
+          traceparent,
+        }
+        output = stripUsage((await getRunner(node.type)(config, input, dryRun, ctx)) ?? {})
+        status = 'succeeded'
+        error = null
+        break
+      } catch (err) {
+        // A compensation that exhausts its retries does not stop the rollback.
+        // The run has already failed — there is no worse status to reach — and
+        // stopping here would strand every compensation *further back*, which
+        // protect the earliest and usually most expensive side effects. Record
+        // it, keep unwinding, and let the run settle as `partial`.
+        status = 'failed'
+        error = err.message
+        if (attempt < maxAttempts) await sleep(BASE_BACKOFF_MS * 2 ** (attempt - 1))
+      }
+    }
+
+    try {
+      insertCompensation.run(
+        uuidv4(), executionId, node.id, targetId, node.type, index, status,
+        redact(JSON.stringify(input)),
+        output == null ? null : redact(JSON.stringify(output)),
+        error == null ? null : redact(error),
+        attempts, startedAt, new Date().toISOString()
+      )
+    } catch (err) {
+      console.error(`Failed to record compensation for ${node.id}: ${err.message}`)
+    }
+    recordCompensation(status)
+    results.push({ nodeId: node.id, targetNodeId: targetId, status, attempts, error })
+    publishCompensation(node, targetId, index, status, { output, error })
+  }
+
+  const outcome = compensation.rollbackOutcome(results)
+  try {
+    db.prepare('UPDATE executions SET rollback_status = ? WHERE id = ?').run(outcome, executionId)
+  } catch (err) {
+    console.error(`Failed to record rollback status: ${err.message}`)
+  }
+  if (outcome) recordRollback(outcome)
+  pub({ kind: 'rollback', workflowId, executionId, status: outcome, compensated: results.length })
+
+  // A partial rollback is workspace-visible news: some of the run's side effects
+  // are still standing and a person has to decide what to do about them. A clean
+  // unwind is not — it is the machinery working, and an activity feed that
+  // announced every successful undo would bury the one that mattered.
+  if (outcome === 'partial' && !dryRun && workspaceId) {
+    try {
+      require('./activityService').logEvent(workspaceId, null, 'execution.rollback_partial', {
+        type: 'execution',
+        id: executionId,
+        name: rollbackScope.failedNodeLabel || 'run',
+        metadata: {
+          workflowId,
+          failed: results.filter((r) => r.status === 'failed').map((r) => r.nodeId),
+        },
+      })
+    } catch (err) {
+      console.error(`Failed to log partial rollback: ${err.message}`)
+    }
+  }
+
+  return { outcome, results }
+}
+
+// Manually unwind (or finish unwinding) a run that already settled.
+//
+// The endpoint behind `flowforge rollback`. Everything the engine held in
+// memory is reconstructed from the persisted run: the graph it executed, the
+// outputs its steps recorded, and the order they completed in. Two properties
+// follow from that reconstruction and are deliberate.
+//
+// The context is the *redacted* persisted output, exactly as resume-from-failure
+// adopts it — a secret echoed back by an API in the original run does not
+// survive into a compensation's config hours later.
+//
+// And the graph is re-read now, not as it was: a compensation node added or
+// repaired after the failure will run. That is the entire reason this endpoint
+// exists — the common case for a partial rollback is that the compensating
+// endpoint was itself broken, and retrying the old definition would simply fail
+// the same way.
+async function rollbackExecution(executionId, { publish, dryRun = false } = {}) {
+  const execution = db.prepare('SELECT * FROM executions WHERE id = ?').get(executionId)
+  if (!execution) throw new Error(`Execution ${executionId} not found`)
+  const workflow = db.prepare('SELECT * FROM workflows WHERE id = ?').get(execution.workflow_id)
+  if (!workflow) throw new Error(`Workflow ${execution.workflow_id} not found`)
+
+  const version = execution.graph_version_id
+    ? db.prepare('SELECT graph_json FROM workflow_versions WHERE id = ?').get(execution.graph_version_id)
+    : null
+  const graph = JSON.parse(version?.graph_json || workflow.graph_json)
+  const plan = compensation.compensationPlan(graph.nodes || [])
+
+  // Rebuild the run's data context from what the steps recorded. Every settled
+  // status that carries an output is included — a compensation may legitimately
+  // reference a cached or reused value even though those nodes are not
+  // themselves compensated.
+  const steps = db.prepare(
+    `SELECT node_id, status, output_json, error, completed_seq
+       FROM execution_steps WHERE execution_id = ?`
+  ).all(executionId)
+  const context = {}
+  for (const step of steps) {
+    if (!step.output_json) continue
+    try {
+      context[step.node_id] = JSON.parse(step.output_json)
+    } catch {
+      /* unparseable persisted output contributes nothing to the scope */
+    }
+  }
+
+  const completedNodeIds = steps
+    .filter((s) => s.completed_seq != null && s.status === 'succeeded')
+    .sort((a, b) => a.completed_seq - b.completed_seq)
+    .map((s) => s.node_id)
+
+  // Resume, never repeat: a compensation that already succeeded is not run
+  // again. Double-refunding a customer while cleaning up after a failure is a
+  // worse outcome than the failure was.
+  const already = new Set(
+    db.prepare(
+      "SELECT target_node_id FROM execution_compensations WHERE execution_id = ? AND status = 'succeeded'"
+    ).all(executionId).map((r) => r.target_node_id)
+  )
+
+  const failedStep = steps.find((s) => s.status === 'failed')
+  const secrets = loadWorkspaceSecrets(workflow.workspace_id)
+
+  return executeRollback({
+    executionId,
+    workflowId: workflow.id,
+    workspaceId: workflow.workspace_id,
+    graphNodes: graph.nodes || [],
+    plan,
+    completedNodeIds,
+    context,
+    secrets,
+    vars: loadWorkspaceVariables(workflow.workspace_id),
+    redact: buildRedactor(Object.values(secrets)),
+    publish,
+    dryRun,
+    already,
+    failureContext: {
+      nodeId: failedStep?.node_id ?? null,
+      error: failedStep?.error ?? null,
+      reason: execution.status === 'cancelled' ? 'cancelled' : 'failed',
+    },
+    callStack: [workflow.id],
+    traceparent: execution.trace_id && execution.root_span_id
+      ? tracing.formatTraceparent(execution.trace_id, execution.root_span_id, true)
+      : null,
+  })
+}
+
 module.exports = {
   runExecution,
+  executeRollback,
+  rollbackExecution,
   resolveTemplates,
   // Shared with the node test bench (routes/workflows.js test-node): running a
   // single node outside a run needs the same runner lookup, secret loading,

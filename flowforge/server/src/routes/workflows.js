@@ -709,6 +709,9 @@ router.post('/workflows/:id/lint', auth, (req, res) => {
         variableNames,
         workflowTargets,
         resolveWorkflow: graphResolver(workflow.workspace_id),
+        // So the panel can say "these compensations will never run" while the
+        // author is drawing them, rather than after the failure they exist for.
+        rollbackPolicy: workflow.rollback_policy,
       }),
       ...policyIssues(workflow, { graphJson: JSON.stringify(graph) }),
     ]

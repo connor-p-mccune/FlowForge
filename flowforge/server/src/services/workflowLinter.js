@@ -16,8 +16,9 @@
 const cron = require('node-cron')
 const { buildAdjacency, topoSort } = require('./dagParser')
 const { analyze } = require('./expression')
-const { inferGraphTypes } = require('./typeInference')
+const { inferGraphTypes, checkReferences } = require('./typeInference')
 const { CACHEABLE_TYPES, DEFAULT_TTL_SECONDS } = require('./stepCache')
+const { compensationPlan } = require('./compensation')
 
 const PLACEHOLDER = /\{\{\s*([\w-]+(?:\.[\w-]+)*)\s*\}\}/g
 
@@ -50,6 +51,99 @@ function collectRefs(config) {
   }
   walk(config || {})
   return refs
+}
+
+// Compensating transactions (services/compensation.js). A compensating node is
+// declared, not connected, so nothing about it is structurally visible — which
+// makes it precisely the kind of thing a lint pass has to guard. The failure
+// mode this exists to prevent is a compensation that looks armed on the canvas
+// and silently never runs: nobody notices until a run fails, and by then the
+// side effect it was supposed to undo is standing in production.
+//
+// Every finding below is therefore an error rather than a warning when it means
+// "this compensation cannot fire", and a warning only when it means "this
+// compensation will fire but something around it is redundant".
+function lintCompensations(plan, compensationNodes, rawEdges, rollbackPolicy) {
+  const issues = []
+
+  for (const { node, target } of plan.dangling) {
+    issues.push(
+      issue(
+        'error',
+        'dangling-compensation',
+        `${label(node)}: compensates "${target}", which is not a node in this workflow`,
+        node.id
+      )
+    )
+  }
+
+  for (const { node } of plan.invalidType) {
+    issues.push(
+      issue(
+        'error',
+        'invalid-compensation',
+        `${label(node)}: a ${node.type} node cannot be a compensation — rollback follows no edges, so a trigger has nothing to emit and a branching node has nowhere to route`,
+        node.id
+      )
+    )
+  }
+
+  for (const { node, target, winner } of plan.duplicates) {
+    issues.push(
+      issue(
+        'error',
+        'duplicate-compensation',
+        `${label(node)}: "${target}" is already compensated by ${label(winner)} — a node can have only one compensation`,
+        node.id
+      )
+    )
+  }
+
+  for (const { node, target } of plan.chained) {
+    issues.push(
+      issue(
+        'error',
+        'chained-compensation',
+        `${label(node)}: compensates "${target}", which is itself a compensation — a rollback is not itself rolled back`,
+        node.id
+      )
+    )
+  }
+
+  // Edges touching a compensation are dropped by the engine exactly like edges
+  // touching a sticky note. Legal, and almost certainly a misunderstanding: the
+  // author drew the undo into the flow, where it looks like it runs on the happy
+  // path and does not.
+  for (const node of compensationNodes) {
+    const wired = rawEdges.some((e) => e.source === node.id || e.target === node.id)
+    if (wired) {
+      issues.push(
+        issue(
+          'warning',
+          'wired-compensation',
+          `${label(node)}: a compensation runs only during a rollback — its connections are ignored`,
+          node.id
+        )
+      )
+    }
+  }
+
+  // A workflow whose rollback policy is 'off' still renders its compensations;
+  // they just never execute. That is a legitimate operational state (the kill
+  // switch exists for when the compensating endpoint is the broken thing), so
+  // it warns rather than errors — but silently drawing undo actions that cannot
+  // run is the exact confusion this pass exists to prevent.
+  if (rollbackPolicy === 'off' && plan.byTarget.size > 0) {
+    issues.push(
+      issue(
+        'warning',
+        'rollback-disabled',
+        `This workflow declares ${plan.byTarget.size} compensation${plan.byTarget.size === 1 ? '' : 's'}, but its rollback policy is off — none of them will run`
+      )
+    )
+  }
+
+  return issues
 }
 
 // Per-type required-config checks. Only fields the runner will definitely
@@ -366,15 +460,31 @@ function buildAncestors(order, incomingByNode) {
 //   resolveWorkflow — (id) => { nodes, edges } | null, so a sub-workflow node
 //                     can be typed from what its target actually returns
 //                     (services/graphLookup.js builds one)
-function lintGraph({ nodes: rawNodes = [], edges: rawEdges = [] } = {}, { secretNames, variableNames, workflowTargets, resolveWorkflow } = {}) {
+function lintGraph({ nodes: rawNodes = [], edges: rawEdges = [] } = {}, { secretNames, variableNames, workflowTargets, resolveWorkflow, rollbackPolicy } = {}) {
   const issues = []
 
   // Sticky notes are annotations: the engine drops them (and any edge touching
   // one) before building the DAG, so the linter sees exactly the graph that
   // will run — a note can't be "unreachable" or "missing config".
   const noteIds = new Set(rawNodes.filter((n) => n.type === 'note').map((n) => n.id))
-  const nodes = rawNodes.filter((n) => !noteIds.has(n.id))
-  const edges = rawEdges.filter((e) => !noteIds.has(e.source) && !noteIds.has(e.target))
+  const notelessNodes = rawNodes.filter((n) => !noteIds.has(n.id))
+
+  // Compensating nodes are stripped for the same reason and by the same rule
+  // the engine uses, so the structural passes below see exactly the forward
+  // graph that will execute. Everything specific to them — their declarations,
+  // their config, their references — is checked separately further down; what
+  // they must *not* be subjected to is the structural analysis, since being
+  // disconnected from every trigger is their defining property rather than a
+  // defect.
+  const plan = compensationPlan(notelessNodes)
+  const compensationNodes = notelessNodes.filter((n) => plan.compensationIds.has(n.id))
+  const nodes = notelessNodes.filter((n) => !plan.compensationIds.has(n.id))
+  const edges = rawEdges.filter(
+    (e) =>
+      !noteIds.has(e.source) && !noteIds.has(e.target) &&
+      !plan.compensationIds.has(e.source) && !plan.compensationIds.has(e.target)
+  )
+  issues.push(...lintCompensations(plan, compensationNodes, rawEdges, rollbackPolicy))
 
   if (nodes.length === 0) {
     issues.push(issue('warning', 'empty-graph', 'The workflow has no nodes yet'))
@@ -605,10 +715,61 @@ function lintGraph({ nodes: rawNodes = [], edges: rawEdges = [] } = {}, { secret
   for (const e of validEdges) (incomingByNode[e.target] ||= []).push(e)
   const ancestors = order ? buildAncestors(order, incomingByNode) : null
 
-  for (const node of nodes) {
+  // Compensating nodes are linted for config and references alongside the
+  // forward graph — they are real nodes with real runners, and a refund with no
+  // URL is as broken as any other HTTP node. Two rules differ for them, both
+  // flowing from the same fact: a compensation runs *after* the run, outside
+  // the DAG.
+  //
+  //   * The whole graph is in scope. There is no "upstream" of a node that has
+  //     no incoming edges, and the engine really does resolve a compensation's
+  //     templates against every node that ran — so the non-upstream warning is
+  //     not merely suppressed here, it would be wrong.
+  //   * `{{rollback.*}}` resolves: the failure that caused the unwind.
+  const ROLLBACK_SCOPE = new Set([
+    'executionId', 'workflowId', 'failedNode', 'failedNodeLabel', 'error', 'reason',
+  ])
+
+  for (const node of [...nodes, ...compensationNodes]) {
+    const isCompensation = plan.compensationIds.has(node.id)
     issues.push(...lintNodeConfig(node, { workflowTargets }))
 
     for (const ref of collectRefs(node.data?.config)) {
+      if (ref.head === 'rollback') {
+        if (!isCompensation) {
+          issues.push(
+            issue(
+              'error',
+              'rollback-scope-ref',
+              `${label(node)}: {{rollback.…}} is only in scope inside a compensating node`,
+              node.id
+            )
+          )
+        } else if (ref.rest[0] && !ROLLBACK_SCOPE.has(ref.rest[0])) {
+          issues.push(
+            issue(
+              'error',
+              'rollback-scope-ref',
+              `${label(node)}: {{rollback.${ref.rest[0]}}} doesn't exist — the rollback scope holds ${[...ROLLBACK_SCOPE].join(', ')}`,
+              node.id
+            )
+          )
+        }
+        continue
+      }
+      // A forward node cannot read a compensation's output: the compensation
+      // did not run, and by the time it does this node has already finished.
+      if (plan.compensationIds.has(ref.head) && !isCompensation) {
+        issues.push(
+          issue(
+            'error',
+            'compensation-ref',
+            `${label(node)}: {{${ref.head}…}} is a compensation — it produces nothing during the run`,
+            node.id
+          )
+        )
+        continue
+      }
       if (ref.head === 'secrets') {
         const secretName = ref.rest[0]
         if (secretNames && secretName && !secretNames.has(secretName)) {
@@ -667,6 +828,8 @@ function lintGraph({ nodes: rawNodes = [], edges: rawEdges = [] } = {}, { secret
             node.id
           )
         )
+      } else if (isCompensation) {
+        // Every node in the forward graph is legitimately in scope — see above.
       } else if (ancestors && !ancestors[node.id]?.has(ref.head)) {
         issues.push(
           issue(
@@ -691,7 +854,18 @@ function lintGraph({ nodes: rawNodes = [], edges: rawEdges = [] } = {}, { secret
   // a node that doesn't exist — and it stays silent about every value it cannot
   // prove the shape of, so a graph full of dynamic webhook payloads lints
   // exactly as it did before this existed.
-  for (const finding of inferGraphTypes({ nodes, edges: validEdges }, { resolveWorkflow }).diagnostics) {
+  const typing = inferGraphTypes({ nodes, edges: validEdges }, { resolveWorkflow })
+
+  // Compensating nodes can't be *inferred* — they have no upstream to infer an
+  // input from — but they read the outputs of nodes that were just typed, so
+  // their references get the same check against the same table. Without this a
+  // typo'd `{{charge-card.chrgId}}` inside a refund would be the one reference
+  // in the product nobody checks, in the node where being wrong costs the most.
+  for (const node of compensationNodes) {
+    checkReferences(node, { outputs: typing.outputs, nodeIds, diagnostics: typing.diagnostics })
+  }
+
+  for (const finding of typing.diagnostics) {
     issues.push(
       issue(
         finding.severity,

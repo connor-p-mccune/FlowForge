@@ -549,3 +549,38 @@ BEFORE DELETE ON audit_log
 BEGIN
   SELECT RAISE(ABORT, 'audit_log is append-only');
 END;
+
+-- Compensating transactions (services/compensation.js). One row per
+-- compensation the rollback pass attempted, for a run that failed (or was
+-- cancelled, under the 'failure-or-cancel' policy) after some of its steps had
+-- already taken effect.
+--
+-- Deliberately *not* rows in execution_steps. A compensation is not a step of
+-- the forward run: it has no place in the topological order, it runs after the
+-- run reached a terminal state, and it follows no edges. Recording it as a step
+-- would corrupt every aggregate that reads that table — the Gantt timeline, the
+-- critical path, per-node-type analytics, the resume pass that adopts succeeded
+-- steps, and the step cache — to save one join. seq is the position in the
+-- unwind order (0 = the last thing the run did, undone first), so the rollback
+-- reads back in the order it happened without re-deriving it.
+CREATE TABLE IF NOT EXISTS execution_compensations (
+  id             TEXT PRIMARY KEY,
+  execution_id   TEXT NOT NULL REFERENCES executions(id) ON DELETE CASCADE,
+  node_id        TEXT NOT NULL,
+  target_node_id TEXT NOT NULL,
+  node_type      TEXT,
+  seq            INTEGER NOT NULL,
+  status         TEXT NOT NULL,
+  input_json     TEXT,
+  output_json    TEXT,
+  error          TEXT,
+  attempts       INTEGER NOT NULL DEFAULT 1,
+  started_at     TEXT,
+  finished_at    TEXT
+);
+
+-- Both reads are per-run: the run detail lists a rollback in order, and a
+-- manual rollback asks which compensations already succeeded so it can resume
+-- rather than repeat.
+CREATE INDEX IF NOT EXISTS idx_execution_compensations_exec
+  ON execution_compensations (execution_id, seq);

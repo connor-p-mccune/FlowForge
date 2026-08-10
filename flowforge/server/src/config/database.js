@@ -307,6 +307,36 @@ db.exec(`
 // anyway. Chaos is an experiment, not a setting.
 ensureColumn('workflows', 'chaos_config', 'TEXT')
 
+// Compensating transactions (services/compensation.js). rollback_policy decides
+// what a run ending badly does about the side effects it already caused:
+// 'failure' (default) unwinds a failed run by running each succeeded node's
+// compensation in reverse completion order, 'failure-or-cancel' also unwinds a
+// cancelled one, and 'off' is the operator kill switch for when the compensating
+// endpoint is itself the thing that is broken. Stored as a policy rather than a
+// boolean because the cancel question has a genuine answer per workflow —
+// abandoning a half-done deploy is not the same as abandoning a half-done report.
+ensureColumn('workflows', 'rollback_policy', "TEXT NOT NULL DEFAULT 'failure'")
+
+// The position of a step in the run's real completion sequence — 0 for the
+// first node whose runner returned, 1 for the next, and so on. The DAG says
+// what *may* run in parallel; it does not record what actually finished first,
+// and with EXEC_MAX_PARALLEL > 1 two independent branches genuinely interleave.
+// Rollback unwinds in the order things happened, so the order has to be stored
+// rather than re-derived from a topological sort that never knew it.
+//
+// NULL carries a second meaning the compensation rule depends on: the column is
+// set exactly when this run *performed the node's work*, so a skipped, cached or
+// reused step is NULL and is therefore never compensated — undoing an effect
+// that an earlier run caused, and still owns, would be a data-loss bug wearing
+// a safety feature's clothes.
+ensureColumn('execution_steps', 'completed_seq', 'INTEGER')
+
+// The verdict of a run's rollback: NULL (never unwound — the overwhelming
+// majority of runs), 'completed' (every compensation succeeded), or 'partial'
+// (at least one failed after its retries, so the remaining inconsistency is
+// known and enumerated in execution_compensations rather than merely suspected).
+ensureColumn('executions', 'rollback_status', 'TEXT')
+
 // Two-factor authentication (TOTP). Optional, opt-in per user. totp_enabled stays
 // 0 until the user verifies a code from their authenticator, so a half-finished
 // setup never locks them out of login. totp_backup_codes is a JSON array of

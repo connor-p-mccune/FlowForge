@@ -682,7 +682,12 @@ function checkReferences(node, { outputs, nodeIds, diagnostics }) {
         if (seen.has(path)) continue
         seen.add(path)
         const [head, ...rest] = path.split('.')
-        if (head === 'secrets' || head === 'vars' || head === 'callbacks') continue
+        // Scope heads that aren't nodes: workspace secrets and variables, a
+        // wait-callback's minted URL, and — inside a compensating node — the
+        // failure that caused the rollback.
+        if (head === 'secrets' || head === 'vars' || head === 'callbacks' || head === 'rollback') {
+          continue
+        }
         if (!nodeIds.has(head) || rest.length === 0) continue
         const produced = outputs[head]
         if (!produced) continue
@@ -751,6 +756,13 @@ function fieldSummary(type, prefix = '', depth = 0) {
 module.exports = {
   inferGraphTypes,
   describeGraphTypes,
+  // Exported for the linter's compensation pass. A compensating node sits
+  // outside the DAG — it has no upstream, so it cannot be *inferred* — but it
+  // reads the outputs of nodes that are in the DAG, and those were just typed.
+  // Running this against the finished output table is what keeps
+  // `{{charge-card.chrgId}}` inside a refund node as much of a lint error as it
+  // would be anywhere else.
+  checkReferences,
   returnTypeOf,
   typeOfValue,
   itemEnv,

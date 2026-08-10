@@ -688,6 +688,7 @@ router.post('/workflows/:id/lint', tokenAuth('read'), (req, res) => {
         variableNames,
         workflowTargets,
         resolveWorkflow: graphResolver(workflow.workspace_id),
+        rollbackPolicy: workflow.rollback_policy,
       }),
       // Policy findings ride the same report, so `flowforge lint` is one gate
       // for "will it run?" and "is it allowed here?" rather than two commands.
