@@ -5,6 +5,12 @@ A deep dive into the design decisions behind FlowForge. The
 document covers **how it works and why it's built this way**. File paths are
 relative to `flowforge/`.
 
+Companion references: [EXPRESSIONS.md](./EXPRESSIONS.md) (the expression
+language), [TYPES.md](./TYPES.md) (static types over the canvas),
+[POLICIES.md](./POLICIES.md) (policy as code), [RELEASES.md](./RELEASES.md)
+(progressive delivery), [INSIGHTS.md](./INSIGHTS.md) (run statistics), and
+[API.md](./API.md) (the public API).
+
 - [The execution engine](#the-execution-engine)
 - [Real-time collaboration](#real-time-collaboration)
 - [Jobs and reliability](#jobs-and-reliability)

@@ -672,7 +672,14 @@ SMTP_USER=        SMTP_PASS=         EMAIL_FROM=flowforge@example.com
     auto-arrange a messy canvas, `Ctrl/⌘-D` to duplicate a node, and the
     minimap to move around large graphs.
 12. **Ship safely:** 🚀 Deploy snapshots a version; the History drawer previews,
-    **diffs against the live canvas**, and restores any of them.
+    **diffs against the live canvas**, and restores any of them. For a risky
+    change, 🐤 Canary sends a slice of runs to your canvas and the rest to the
+    last deployed version, then promotes or rolls back on the statistics
+    ([docs](./docs/RELEASES.md)).
+13. **Set the rules once:** a workspace owner declares **Policies** — approved
+    outbound hosts, signed webhooks, no credentials in config — and a deploy
+    that breaks one is refused with the reason
+    ([docs](./docs/POLICIES.md)).
 
 ---
 
@@ -751,7 +758,7 @@ flowforge/
 ├── server/        Express API, Socket.io, Bull worker, SQLite
 ├── ai-service/    Flask microservice for LLM-backed features
 ├── cli/           Zero-dependency terminal client for the public API
-├── docs/          API reference, architecture deep dive, FXL + type references
+├── docs/          API reference, architecture deep dive, FXL/types/policies/releases
 ├── docker-compose.yml
 ├── .env.example
 ├── .env.production.example
