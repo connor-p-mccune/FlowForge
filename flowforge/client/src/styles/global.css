@@ -1640,6 +1640,25 @@ html, body, #root {
   background: #e0e7ff;
 }
 
+/* The inferred type, riding inside the chip so a field's shape is visible
+   without a hover — picking `.status` when you wanted text is the mistake the
+   whole schema exists to prevent. */
+.var-explorer__chip-type {
+  color: #818cf8;
+  margin-left: 5px;
+  font-weight: 500;
+}
+
+/* The node's whole output shape, above its field chips. */
+.var-explorer__shape {
+  display: block;
+  font-size: 10.5px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  color: #6b7280;
+  margin-top: 3px;
+  overflow-wrap: anywhere;
+}
+
 .var-explorer__note {
   font-size: 11px;
   color: #888;

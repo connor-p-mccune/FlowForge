@@ -1101,7 +1101,14 @@ export default function NodeConfigPanel({
         )}
         {CATCHABLE_TYPES.has(node.type) && <OnErrorField config={config} setConfig={setConfig} />}
         {/* Notes are annotations — no upstream data to explore, nothing to bench. */}
-        {node.type !== 'note' && <VariableExplorer node={node} nodes={nodes} edges={edges} />}
+        {node.type !== 'note' && (
+          <VariableExplorer
+            node={node}
+            nodes={nodes}
+            edges={edges}
+            workflowId={currentWorkflowId}
+          />
+        )}
         {node.type !== 'note' && <NodeTester workflowId={currentWorkflowId} node={node} />}
         <div className="config-panel__node-id">
           Node ID: <code>{node.id}</code>
