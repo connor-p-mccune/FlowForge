@@ -15,6 +15,7 @@ const { recordExecution, recordStepCache, recordStepCost } = require('./metrics'
 const costModel = require('./costModel')
 const stepCache = require('./stepCache')
 const tracing = require('./tracing')
+const canary = require('./canary')
 
 const runners = {
   'action-http': require('./nodeRunners/httpRequest'),
@@ -286,7 +287,17 @@ async function runExecution(
   // plain config: no redaction, and they may appear in persisted steps.
   const vars = loadWorkspaceVariables(workflow.workspace_id)
   const redact = buildRedactor(Object.values(secrets))
-  const graph = JSON.parse(workflow.graph_json)
+
+  // Progressive delivery. While a canary is running, this run executes either
+  // the live canvas (the edits under test) or the pinned baseline version — and
+  // which one it got is recorded on the row, because that label is the entire
+  // experiment. Everything else below is unchanged: the engine reads one graph
+  // per run, it just no longer assumes that graph is the workflow's current
+  // one. Dry runs, resumes, and workflows with no canary all resolve to the
+  // live graph, so this is a no-op for every run that isn't in an experiment.
+  const release = canary.resolveRelease(execution, workflow, { dryRun })
+  canary.recordRelease(executionId, release)
+  const graph = JSON.parse(release.graphJson)
   // Sticky notes are canvas annotations, not steps: they never execute, get
   // no step rows, and any edge touching one (only possible in a hand-edited
   // import — the UI renders notes without handles) is dropped with them.

@@ -260,6 +260,41 @@ db.exec(`
     ON executions (backfill_id);
 `)
 
+// Progressive delivery (services/canary.js). While a canary runs, a slice of a
+// workflow's traffic executes the **live canvas** (the edits under test) and the
+// rest executes a pinned **version snapshot** (the last known-good deploy) —
+// which is what makes a rollback instant and non-destructive: stable was already
+// on the baseline, so rolling back is setting the percentage to zero.
+//
+// canary_baseline_version_id is that snapshot; canary_percent is the share of
+// runs the canary receives; canary_state is 'running' or 'rolled_back' (kept
+// rather than cleared, so the reason stays on screen); canary_min_runs is how
+// many canary runs must accumulate before a verdict; canary_auto opts into
+// automatic promote/rollback rather than reporting only. All NULL = no canary.
+ensureColumn('workflows', 'canary_baseline_version_id', 'TEXT REFERENCES workflow_versions(id) ON DELETE SET NULL')
+ensureColumn('workflows', 'canary_percent', 'INTEGER')
+ensureColumn('workflows', 'canary_state', 'TEXT')
+ensureColumn('workflows', 'canary_started_at', 'TEXT')
+ensureColumn('workflows', 'canary_min_runs', 'INTEGER')
+ensureColumn('workflows', 'canary_auto', 'INTEGER')
+
+// Which arm of the experiment a run belonged to ('canary' | 'stable'), and the
+// version it executed. graph_version_id NULL means the run used the live graph,
+// which is both what a canary run does and what every run of a workflow without
+// a canary does — so the column names a snapshot only when one was pinned.
+// release_channel NULL means the run was outside the experiment entirely (a dry
+// run, or any run before a canary existed), which is why the analysis can
+// select on it without restating the rules that produced it.
+ensureColumn('executions', 'release_channel', 'TEXT')
+ensureColumn('executions', 'graph_version_id', 'TEXT')
+
+// The canary analysis counts a workflow's settled runs per channel since the
+// experiment started — one indexed scan rather than a table walk per sweep.
+db.exec(`
+  CREATE INDEX IF NOT EXISTS idx_executions_release
+    ON executions (workflow_id, release_channel, created_at);
+`)
+
 // Two-factor authentication (TOTP). Optional, opt-in per user. totp_enabled stays
 // 0 until the user verifies a code from their authenticator, so a half-finished
 // setup never locks them out of login. totp_backup_codes is a JSON array of

@@ -79,6 +79,7 @@ app.use('/api', require('./routes/comments'))
 app.use('/api', require('./routes/activity'))
 app.use('/api', require('./routes/audit'))
 app.use('/api', require('./routes/costs'))
+app.use('/api', require('./routes/canary'))
 app.use('/api', require('./routes/policies'))
 app.use('/api', require('./routes/secrets'))
 app.use('/api', require('./routes/variables'))
@@ -121,6 +122,10 @@ if (process.env.NODE_ENV !== 'test') {
   // window and resume it after, reusing the pause kill switch. Reconciles once
   // at boot so a window spanning a restart takes effect immediately.
   require('./services/maintenanceWindow').startMaintenanceWindows()
+  // Progressive delivery: re-analyse running canaries and promote or roll them
+  // back. Another sweep for the same reason as the two above — "enough runs
+  // have accumulated to judge this" is the passage of time, not an event.
+  require('./services/canaryMonitor').startCanaryMonitor()
 
   // Graceful shutdown (services/shutdown.js): on SIGTERM/SIGINT, drain in
   // dependency order instead of dying mid-run. Sources of new work stop first
@@ -145,6 +150,7 @@ if (process.env.NODE_ENV !== 'test') {
   onShutdown('retention', () => require('./services/retention').stopRetention())
   onShutdown('heartbeat-monitor', () => require('./services/heartbeatMonitor').stopHeartbeatMonitor())
   onShutdown('maintenance-windows', () => require('./services/maintenanceWindow').stopMaintenanceWindows())
+  onShutdown('canary-monitor', () => require('./services/canaryMonitor').stopCanaryMonitor())
   onShutdown('socket-io', () => new Promise((resolve) => io.close(() => resolve())))
   onShutdown('redis', () => require('./config/redis').quit().catch(() => {}))
   onShutdown('database', () => require('./config/database').close())
