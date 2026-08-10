@@ -64,6 +64,7 @@ export FLOWFORGE_TOKEN=ffp_…
 | `flowforge compare <exec-id> <exec-id>` | Diff two runs of a workflow node by node — status changes, duration deltas, output changes ([docs](../docs/INSIGHTS.md#comparing-two-runs)) |
 | `flowforge cancel <exec-id>` | Stop a queued or running run (cooperative) |
 | `flowforge resume <exec-id> [--watch]` | Continue a failed/cancelled run — succeeded steps are reused, only the failed part re-runs |
+| `flowforge rollback <exec-id> [--yes]` | Undo a failed run's side effects by running its compensating actions, newest first — previews unless `--yes`, exits non-zero on a partial unwind ([docs](../docs/ROLLBACK.md)) |
 | `flowforge approvals [--status pending]` | Runs waiting on a human, across your workspaces |
 | `flowforge approve <id> [--note "…"]` | Wave a paused run through its approval gate (needs the `approve` scope) |
 | `flowforge reject <id> [--note "…"]` | Send it down the rejected branch instead |

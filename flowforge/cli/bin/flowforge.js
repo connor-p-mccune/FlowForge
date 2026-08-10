@@ -36,6 +36,7 @@ const COMMANDS = {
   compare: require('../src/commands/compare'),
   cancel: require('../src/commands/cancel'),
   resume: require('../src/commands/resume'),
+  rollback: require('../src/commands/rollback'),
   approvals: require('../src/commands/approvals'),
   approve: require('../src/commands/respond').approve,
   reject: require('../src/commands/respond').reject,
@@ -70,6 +71,7 @@ Usage:
   flowforge compare <execution-id> <execution-id>  Diff two runs node by node
   flowforge cancel <execution-id>                  Stop a queued or running run
   flowforge resume <execution-id> [--watch]        Re-run only the failed part of a run
+  flowforge rollback <execution-id> [--yes]        Undo a failed run's side effects (previews unless --yes)
   flowforge approvals [--status pending]           Runs waiting on a human
   flowforge approve <approval-id> [--note "…"]     Wave a paused run through
   flowforge reject <approval-id> [--note "…"]      Send it down the rejected branch
@@ -81,7 +83,9 @@ Configuration:
 Exit codes:
   0 success · 1 error, a watched run that failed/was cancelled, a
   'check' whose workflow breached its health thresholds, a 'diff'
-  that found drift, or an 'audit' whose chain failed verification
+  that found drift, an 'audit' whose chain failed verification, or a
+  'rollback' that only partly unwound (the world is inconsistent in
+  a known way — a pipeline should stop)
   2 'release' only — the canary has no verdict yet (keep waiting).
     Distinct from 1 on purpose: a pipeline that treats "not enough
     evidence" as failure rolls back every healthy young release.`
