@@ -236,6 +236,22 @@ order while streaming live progress back to every collaborator on the canvas.
   (one backed by a credential scanner), owner-managed, with every change —
   including a rule quietly disabled — in the tamper-evident audit log. See
   [docs/POLICIES.md](./docs/POLICIES.md).
+- **Chaos engineering (fault injection)** — a lot of this list only runs when
+  something breaks: retries, the per-node error branch, error-handler workflows,
+  the circuit breaker, SLA budgets, SLO burn rates, heartbeat alerts. None of it
+  can be exercised without a real dependency actually failing, so the error
+  branch someone wired up eighteen months ago is a guess. A **chaos profile**
+  makes the failure happen on purpose — `fail` a node, `delay` it, or `stub` its
+  output — and paired with the test scenarios it turns *"does my error branch
+  work?"* into an assertion that runs in CI. Four rules keep it a tool rather
+  than a hazard: it's **scoped to test runs by default** (widening it to real
+  traffic is owner-only, audited, and announced in the feed); every profile
+  **must expire** (capped at 7 days — chaos is an experiment, not a setting);
+  the randomness is **seeded on the run**, so a 30% failure probability is
+  reproducible and a *replay* reproduces the identical faults; and an injected
+  failure is **never disguised** — it says `[chaos]`, records as a real failure,
+  and lands on `/metrics`, so a failure spike beside a fault spike is an
+  experiment and the same spike without one is an outage.
 - **Workflow linter** — one click checks the canvas before you run it: cycles,
   dead branches, missing config, references to nodes that aren't upstream,
   unknown `{{secrets.*}}` / `{{vars.*}}` names, undeployed sub-workflow

@@ -1191,6 +1191,58 @@ The design is almost entirely reuse:
   delay node (which sleeps even in dry-run) reports *timed-out* rather than
   hanging the gate.
 
+### Deliberate fault injection
+
+`services/faultInjection.js` closes a gap the rest of this document makes
+obvious. An unusual amount of the engine only runs when something breaks —
+per-node retries, the `continue` and `branch` on-error policies, error-handler
+workflows, the circuit breaker, SLA duration budgets, SLO burn rates, heartbeat
+alerts — and none of it can be exercised without a real dependency actually
+failing. So the error branch someone wired up eighteen months ago is a guess,
+and the first anyone learns otherwise is the night it matters.
+
+A chaos profile makes the failure happen on purpose: `fail` a node, `delay` it,
+or `stub` its output. Combined with the test scenarios above, "does my error
+branch work?" becomes an assertion that runs in CI.
+
+Four decisions bound it:
+
+- **Safe by default.** A profile's scope is `dry-run` unless someone explicitly
+  widens it, so writing one cannot break production by accident — and dry-run is
+  where the test scenarios already live, which is where most of the value is.
+  `scope: 'all'` is genuine chaos engineering: owner-only, audited, and
+  announced in the activity feed, because a fault profile nobody can see is
+  indistinguishable from an incident.
+
+- **A profile expires, and the expiry is mandatory.** Chaos is an experiment,
+  not a setting. `expiresAt` is required and capped at seven days, so a profile
+  armed during an investigation disarms itself rather than quietly haunting the
+  workflow for a year. An expired profile reads as *absent* rather than as an
+  error, because expiry is the feature — and the read endpoint reports "armed"
+  and "in force" separately, since "I armed it, why is nothing failing?" needs a
+  direct answer.
+
+- **Randomness is seeded, not random.** A 30% failure probability makes a test
+  flaky and a bug unreproducible. The draw is a hash of (execution id, node id,
+  rule index), so the fault pattern is fixed for a run — and *replaying* that
+  run reproduces exactly the same faults. That is the difference between a chaos
+  failure you can debug and one you can only re-roll.
+
+- **An injected failure is never disguised.** The message carries `[chaos]`, the
+  step records it as the failure it is, and `flowforge_faults_injected_total`
+  counts it by mode — so a spike in execution failures beside a spike in that
+  counter is an experiment, and the same spike with it flat is an outage. A
+  timeline that hid the cause would make the two indistinguishable, which is
+  precisely backwards.
+
+Two smaller rules follow the same reasoning as the engine's own. The fault is
+resolved **once per node, not per attempt**, so a `fail` rule exercises the
+retry ladder rather than re-rolling its luck between attempts. And a rule must
+name a `nodeId` or a `nodeType`: a profile that matched everything by omission
+is exactly the accident this refuses. Triggers are excluded outright — a trigger
+has no work of its own, and making a run fail before it begins is what *not
+triggering it* already does.
+
 ### Cross-workflow dependency analysis
 
 The linter reasons about *one* graph; `services/workflowDependencies.js` reasons
