@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { apiFetch } from '../../services/api'
 import { useToast } from '../../hooks/useToast'
 import StatusBadgeSection from './StatusBadgeSection'
+import ChaosSection from './ChaosSection'
 import { listTimeZones } from '../../utils/timezones'
 
 // Rate-limit window units, in seconds. The panel stores a window in seconds
@@ -543,6 +544,7 @@ export default function RunSettingsPanel({ workflowId, open, onClose }) {
               >
                 {clearing ? 'Clearing…' : 'Clear cached results'}
               </button>
+              <ChaosSection workflowId={workflowId} />
               <StatusBadgeSection workflowId={workflowId} initialToken={workflow.badge_token} />
             </>
           )
