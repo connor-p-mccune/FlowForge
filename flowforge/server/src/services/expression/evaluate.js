@@ -17,7 +17,7 @@
 // run regardless of the exact JS engine.
 
 const { ExpressionError } = require('./errors')
-const { callFunction, toBool } = require('./functions')
+const { callFunction, toBool, looseEquals } = require('./functions')
 
 const BLOCKED_KEYS = new Set(['__proto__', 'prototype', 'constructor'])
 
@@ -41,24 +41,6 @@ function toNumber(value) {
     return Number(value)
   }
   throw new ExpressionError(`Cannot use ${describe(value)} as a number`)
-}
-
-function bothNumbers(a, b) {
-  return typeof a === 'number' && typeof b === 'number'
-}
-
-// Deterministic loose equality. Numbers compare numerically, objects/arrays by
-// structural JSON, null only equals null, and everything else by string form —
-// so `5 == "5"` and `true == "true"` are true, matching a rules author's
-// intuition, without JS `==`'s stranger corners.
-function looseEquals(a, b) {
-  if (bothNumbers(a, b)) return a === b
-  if (typeof a === 'boolean' && typeof b === 'boolean') return a === b
-  if (a == null || b == null) return a == null && b == null
-  if (typeof a === 'object' && typeof b === 'object') {
-    return JSON.stringify(a) === JSON.stringify(b)
-  }
-  return String(a) === String(b)
 }
 
 // -1 / 0 / 1 for relational operators. Numeric when both sides are (or coerce

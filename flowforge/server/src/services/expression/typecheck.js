@@ -143,6 +143,27 @@ const SIGNATURES = {
     returns: (args) => (T.is(args[0], 'string') ? T.STRING : T.arrayOf(elementOf(args[0]))),
   },
 
+  // — sets and patterns —
+  // The set helpers preserve their first argument's element type: filtering a
+  // list of strings still gives a list of strings, which is what lets a policy
+  // chain `len(notMatching(hosts, allowed)) == 0` and still typecheck.
+  without: { params: [ANY_ARRAY, ANY_ARRAY], returns: (args) => T.arrayOf(elementOf(args[0])) },
+  intersect: { params: [ANY_ARRAY, ANY_ARRAY], returns: (args) => T.arrayOf(elementOf(args[0])) },
+  flatten: {
+    params: [ANY_ARRAY],
+    // One level of unwrapping: an array element flattens to *its* elements,
+    // anything else stays as it is.
+    returns: (args) => {
+      const element = elementOf(args[0])
+      return T.arrayOf(element.kind === 'array' ? element.element : element)
+    },
+  },
+  matches: { params: [null, null], returns: T.BOOLEAN },
+  // The pattern argument is one glob or a list of them, so it is deliberately
+  // untyped rather than refused.
+  matching: { params: [ANY_ARRAY, null], returns: (args) => T.arrayOf(elementOf(args[0])) },
+  notMatching: { params: [ANY_ARRAY, null], returns: (args) => T.arrayOf(elementOf(args[0])) },
+
   // — objects — all tolerant: they answer for a non-object rather than throwing.
   keys: { params: [null], returns: STRING_ARRAY },
   values: { params: [null], returns: (args) => T.arrayOf(fieldValueType(args[0])) },

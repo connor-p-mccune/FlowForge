@@ -382,3 +382,64 @@ describe('FXL public API', () => {
     expect(FUNCTION_NAMES).toContain('coalesce')
   })
 })
+
+// Set and glob helpers. FXL has no lambdas, so a rule over a *collection*
+// ("is every host I call on the allow-list?") has to be expressible without
+// one — these are that vocabulary, and the policy engine is built on them.
+describe('set and glob helpers', () => {
+  it('without() removes every member of the second list', () => {
+    expect(evalExpr('without([1, 2, 3], [2])')).toEqual([1, 3])
+    expect(evalExpr('without(["a", "b"], ["a", "b"])')).toEqual([])
+    expect(evalExpr('without([1, 2], [])')).toEqual([1, 2])
+  })
+
+  it('without() and intersect() use the same loose equality as `in`', () => {
+    expect(evalExpr('without([1, 2], ["1"])')).toEqual([2])
+    expect(evalExpr('intersect([{ a: 1 }], [{ a: 1 }])')).toEqual([{ a: 1 }])
+  })
+
+  it('intersect() keeps the first list’s order and duplicates', () => {
+    expect(evalExpr('intersect([3, 1, 3], [3])')).toEqual([3, 3])
+  })
+
+  it('flatten() unwraps exactly one level', () => {
+    expect(evalExpr('flatten([[1, 2], [3], 4])')).toEqual([1, 2, 3, 4])
+    expect(evalExpr('flatten([[[1]]])')).toEqual([[1]])
+  })
+
+  it('matches() globs with * and ?', () => {
+    expect(evalExpr('matches("api.acme.com", "*.acme.com")')).toBe(true)
+    expect(evalExpr('matches("acme.com", "*.acme.com")')).toBe(false)
+    expect(evalExpr('matches("https://x/y", "https://*")')).toBe(true)
+    expect(evalExpr('matches("cat", "c?t")')).toBe(true)
+    expect(evalExpr('matches("coat", "c?t")')).toBe(false)
+    expect(evalExpr('matches("anything", "*")')).toBe(true)
+    expect(evalExpr('matches("", "*")')).toBe(true)
+  })
+
+  it('matches() backtracks correctly across several stars', () => {
+    expect(evalExpr('matches("aXbYc", "a*b*c")')).toBe(true)
+    expect(evalExpr('matches("aXbYd", "a*b*c")')).toBe(false)
+    // The pathological shape a regex would choke on resolves promptly.
+    expect(evalExpr('matches("aaaaaaaaaaaaaaaaaaaaaaaaaaaaab", "*a*a*a*a*a*a*c")')).toBe(false)
+  })
+
+  it('matching() / notMatching() split a list against one glob or many', () => {
+    expect(evalExpr('matching(["a.acme.com", "evil.net"], "*.acme.com")')).toEqual(['a.acme.com'])
+    expect(evalExpr('notMatching(["a.acme.com", "evil.net"], "*.acme.com")')).toEqual(['evil.net'])
+    expect(
+      evalExpr('notMatching(["a.acme.com", "api.stripe.com"], ["*.acme.com", "api.stripe.com"])')
+    ).toEqual([])
+  })
+
+  it('reads as the allow-list rule it exists for', () => {
+    const rule = 'len(notMatching(hosts, ["*.acme.com"])) == 0'
+    expect(evaluateBoolean(rule, { hosts: ['a.acme.com', 'b.acme.com'] })).toBe(true)
+    expect(evaluateBoolean(rule, { hosts: ['a.acme.com', 'evil.net'] })).toBe(false)
+  })
+
+  it('rejects a non-list where a list is required', () => {
+    expect(() => evalExpr('without("nope", [])')).toThrow(/expected an array/)
+    expect(() => evalExpr('matching(5, "*")')).toThrow(/expected an array/)
+  })
+})

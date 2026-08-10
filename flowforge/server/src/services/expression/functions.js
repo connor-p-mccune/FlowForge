@@ -154,6 +154,38 @@ const registry = {
     return requireArray(arr, 'slice').slice(num(start, 'slice'), end === undefined ? undefined : num(end, 'slice'))
   }],
 
+  // — sets and patterns — the shape a *rule over a collection* needs, in a
+  // language with no lambdas. FXL cannot express `list.every(fn)`, and adding
+  // closures to get it would undo the property that makes the evaluator safe.
+  // These four cover the same ground declaratively: "is every host I call on
+  // the allow-list?" is `len(notMatching(hosts, allowed)) == 0`, which reads
+  // closer to the policy than the loop would have.
+  without: [2, 2, (a, b) => {
+    const exclude = requireArray(b, 'without')
+    return requireArray(a, 'without').filter((v) => !exclude.some((x) => looseEquals(x, v)))
+  }],
+  intersect: [2, 2, (a, b) => {
+    const other = requireArray(b, 'intersect')
+    return requireArray(a, 'intersect').filter((v) => other.some((x) => looseEquals(x, v)))
+  }],
+  // One level only: nesting deeper than that is a data-modelling problem, and
+  // an unbounded recursive flatten is a way to blow the step budget.
+  flatten: [1, 1, (arr) => {
+    const out = []
+    for (const v of requireArray(arr, 'flatten')) {
+      if (Array.isArray(v)) out.push(...v)
+      else out.push(v)
+    }
+    return out
+  }],
+  // Glob matching: `*` for any run of characters, `?` for exactly one.
+  // Deliberately not a regular expression — a user-supplied pattern compiled
+  // to a regex is a denial-of-service waiting to happen, and globs are what
+  // host allow-lists and URL prefixes are actually written in.
+  matches: [2, 2, (value, pattern) => globMatch(str(value), str(pattern))],
+  matching: [2, 2, (arr, patterns) => filterByGlob(arr, patterns, 'matching', true)],
+  notMatching: [2, 2, (arr, patterns) => filterByGlob(arr, patterns, 'notMatching', false)],
+
   // — objects —
   keys: [1, 1, (obj) => (obj && typeof obj === 'object' ? Object.keys(obj) : [])],
   values: [1, 1, (obj) => (obj && typeof obj === 'object' ? Object.values(obj) : [])],
@@ -229,6 +261,58 @@ function toBool(value) {
   return Boolean(value)
 }
 
+// Deterministic loose equality — the semantics behind `==`, `in`, and the set
+// helpers above. Numbers compare numerically, objects/arrays by structural
+// JSON, null only equals null, and everything else by string form, so `5 == "5"`
+// and `true == "true"` are true (matching a rules author's intuition) without
+// JS `==`'s stranger corners. It lives here rather than in the evaluator
+// because both need it and the evaluator already depends on this module.
+function looseEquals(a, b) {
+  if (typeof a === 'number' && typeof b === 'number') return a === b
+  if (typeof a === 'boolean' && typeof b === 'boolean') return a === b
+  if (a == null || b == null) return a == null && b == null
+  if (typeof a === 'object' && typeof b === 'object') {
+    return JSON.stringify(a) === JSON.stringify(b)
+  }
+  return String(a) === String(b)
+}
+
+// Glob matching with backtracking pointers rather than a compiled regex: O(n·m)
+// worst case with no catastrophic blow-up, which matters because the pattern is
+// user input. `*` matches any run (including empty), `?` exactly one character.
+function globMatch(text, pattern) {
+  let t = 0
+  let p = 0
+  let starAt = -1
+  let matchAt = 0
+  while (t < text.length) {
+    if (p < pattern.length && (pattern[p] === '?' || pattern[p] === text[t])) {
+      t++
+      p++
+    } else if (p < pattern.length && pattern[p] === '*') {
+      starAt = p++
+      matchAt = t
+    } else if (starAt !== -1) {
+      // Backtrack: let the last `*` absorb one more character.
+      p = starAt + 1
+      t = ++matchAt
+    } else {
+      return false
+    }
+  }
+  while (p < pattern.length && pattern[p] === '*') p++
+  return p === pattern.length
+}
+
+// matching/notMatching share everything but the verdict. `patterns` may be one
+// glob or a list of them — a rule that allows a single host shouldn't have to
+// write a one-element array.
+function filterByGlob(arr, patterns, fnName, keep) {
+  const list = requireArray(arr, fnName)
+  const globs = (Array.isArray(patterns) ? patterns : [patterns]).map(str)
+  return list.filter((value) => globs.some((g) => globMatch(str(value), g)) === keep)
+}
+
 // min/max accept either loose args (min(1,2,3)) or a single array (min([1,2,3])).
 function flattenNums(vals, fnName) {
   const source = vals.length === 1 && Array.isArray(vals[0]) ? vals[0] : vals
@@ -298,4 +382,13 @@ const FUNCTION_ARITY = Object.freeze(
   Object.fromEntries(Object.entries(registry).map(([name, [min, max]]) => [name, [min, max]]))
 )
 
-module.exports = { callFunction, toBool, isEmpty, getPath, FUNCTION_NAMES, FUNCTION_ARITY }
+module.exports = {
+  callFunction,
+  toBool,
+  looseEquals,
+  isEmpty,
+  getPath,
+  globMatch,
+  FUNCTION_NAMES,
+  FUNCTION_ARITY,
+}

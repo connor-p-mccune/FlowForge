@@ -153,6 +153,29 @@ folds an empty array to `0`, like `avg`. Handy in a filter predicate —
 `first(arr)` · `last(arr)` · `join(arr, sep)` · `reverse(arr)` · `sort(arr)` ·
 `unique(arr)` · `slice(arr, start[, end])` · `len(arr)`.
 
+### Sets & patterns
+`without(a, b)` (everything in `a` that isn't in `b`) · `intersect(a, b)` ·
+`flatten(arr)` (one level) · `matches(text, pattern)` ·
+`matching(arr, patterns)` · `notMatching(arr, patterns)`.
+
+`matches` is a **glob**, not a regular expression: `*` matches any run of
+characters, `?` exactly one. That's what host allow-lists and URL prefixes are
+written in — and a user-supplied regex is a denial-of-service waiting to happen,
+so the language doesn't take one. `matching`/`notMatching` split a list against
+a single glob or a list of them.
+
+Together these express a rule over a *collection* in a language with no
+lambdas — FXL can't write `list.every(fn)`, and adding closures to get it would
+undo what makes the evaluator safe:
+
+```
+len(notMatching(hosts, ["*.acme.com", "api.stripe.com"])) == 0   // every host allow-listed
+len(intersect(labels, ["urgent", "p1"])) > 0                     // tagged either way
+matches(url, "https://*")                                        // TLS only
+```
+
+This is the vocabulary [workspace policies](./POLICIES.md) are written in.
+
 ### Objects
 `keys(obj)` · `values(obj)` · `has(obj, key)` ·
 `get(obj, "a.b.c"[, fallback])` (safe dotted-path lookup).
