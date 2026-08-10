@@ -56,7 +56,7 @@ its paste-ready references.
 | `{ a: number, … }` | an **open** object — it has at least `a`, and may carry more |
 | `A \| B` | either |
 | `any` | dynamic **by contract** — a parsed HTTP body, extracted AI data |
-| `unknown` | FlowForge has nothing to say — a sub-workflow's return value |
+| `unknown` | FlowForge has nothing to say — a node type with no contract, a sub-workflow whose target can't be resolved |
 
 `any` and `unknown` are different facts, and the distinction is worth keeping:
 one says "this is whatever the API sent", the other says "we couldn't work it
@@ -148,9 +148,9 @@ required even off a branch.
 edges, so downstream sees the union of both. Under `branch`, that error object
 travels only the error handle, and the normal handles keep the normal shape.
 
-**An untyped upstream opens the merge.** Merge a sub-workflow's `unknown` into an
-input and the result is open: the fields we do know are still listed, and
-nothing else is claimed.
+**An untyped upstream opens the merge.** Merge an `unknown` into an input and the
+result is open: the fields we do know are still listed, and nothing else is
+claimed.
 
 ---
 
@@ -193,7 +193,7 @@ and warns about expressions that are legal but useless:
 Deliberately, and often. There is **no** finding when:
 
 - the value is `any` or `unknown` — an HTTP body, extracted AI data, a
-  sub-workflow's return;
+  sub-workflow whose target can't be resolved;
 - the object is open — a webhook trigger's payload, or any merge that included
   something untyped;
 - the type is a union with a viable option — `number | object` might be a
