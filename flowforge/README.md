@@ -212,6 +212,30 @@ order while streaming live progress back to every collaborator on the canvas.
   picker is generated from it, `flowforge types <id>` prints it, and
   `GET /api/v1/workflows/:id/types` serves it. See
   [docs/TYPES.md](./docs/TYPES.md).
+- **Policy as code** — the linter asks "will this run?"; a policy asks **"is
+  this allowed here?"**, which is a different question and the one that appears
+  the moment more than one person builds workflows in the same place. A graph
+  calling an unapproved host, an unsigned webhook trigger, a scheduled job with
+  no dead-man's switch, an API key typed into a header instead of stored as a
+  secret — all lint perfectly, and all are things an organisation wants to
+  refuse **once** rather than in code review every time. A policy is one FXL
+  expression that must hold (`len(notMatching(httpHosts, ["*.acme.com"])) == 0`)
+  plus the message shown to whoever it blocks; **deny** refuses the deploy with a
+  422, **warn** records it. Because FXL has no lambdas, a workflow is flattened
+  into a **policy document** — the hosts it calls, the secrets it references, its
+  declared limits, its workspace's budget — and set/glob helpers express the
+  collection rules. Rules are **type-checked against that schema when saved**, so
+  a rule reading `httpHost` (singular) — which would quietly report every
+  workflow compliant forever — is refused with a spelling suggestion rather than
+  stored; evaluation **fails closed** for the same reason; and a violation
+  carries **evidence** (`blocked: evil.example.net`), because a finding you have
+  to investigate isn't one. Enforced where a workflow actually goes live (deploy,
+  and a version restore onto a deployed workflow), *reported* at import and in
+  the Issues panel while you edit, and never applied to runs — a governance edit
+  must not become an outage. Nine starter policies ship as editable templates
+  (one backed by a credential scanner), owner-managed, with every change —
+  including a rule quietly disabled — in the tamper-evident audit log. See
+  [docs/POLICIES.md](./docs/POLICIES.md).
 - **Workflow linter** — one click checks the canvas before you run it: cycles,
   dead branches, missing config, references to nodes that aren't upstream,
   unknown `{{secrets.*}}` / `{{vars.*}}` names, undeployed sub-workflow

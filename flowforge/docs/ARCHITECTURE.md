@@ -13,6 +13,7 @@ relative to `flowforge/`.
 - [Run insights & SLA monitoring](#run-insights--sla-monitoring)
 - [The expression language](#the-expression-language)
 - [The type system](#the-type-system)
+- [Policy as code](#policy-as-code)
 - [Static analysis (the linter)](#static-analysis-the-linter)
 - [Run cost accounting and budgets](#run-cost-accounting-and-budgets)
 - [The tamper-evident audit log](#the-tamper-evident-audit-log)
@@ -946,6 +947,84 @@ drifted past switch, validate, filter, map, and aggregate. It now asks
 `POST /workflows/:id/types` with the *live* canvas, which is both correct and
 strictly more capable: field types, nested paths, and shapes that depend on
 config rather than on node type.
+
+---
+
+## Policy as code
+
+`services/policyEngine.js` (pure) and `services/policyGate.js` (the database
+half) answer a question the linter structurally cannot. Lint asks *will this
+run?*; a policy asks *is this allowed here?* — and the second question appears
+the moment more than one person builds workflows in the same place. The
+user-facing reference is [POLICIES.md](./POLICIES.md); the decisions:
+
+- **Policies are FXL, not a bespoke rule format.** The workspace already has a
+  safe expression language with a parser, a static analyser, a type checker, and
+  an inline playground. A second rules dialect would need all four again and be
+  worse at each of them, and every author who already writes conditions would
+  have to learn it.
+
+- **The document is pre-aggregated, because FXL has no lambdas.** Handing a rule
+  the raw graph with no way to traverse it would make every real policy
+  impossible, and adding closures to fix that would undo the property that makes
+  the evaluator safe. So `buildDocument` flattens a workflow into the facts
+  policies are written about — node types, hosts called, secrets referenced,
+  declared limits, what its workspace has configured — and six [set and glob
+  helpers](./EXPRESSIONS.md#sets--patterns) express the collection rules:
+  `len(notMatching(httpHosts, allowed)) == 0` reads closer to the policy than the
+  loop would have. `buildDocument` is a pure function of a workflow row plus a
+  context object, so it is testable without a database and the gate stays a thin
+  layer over it.
+
+- **A rule is type-checked against the document's schema when it is saved.**
+  This is where the type system pays for itself twice: `len(httpHost) == 0`
+  (singular) would evaluate to `undefined`, report every workflow compliant, and
+  never say a word — a control that is silently off is worse than no control, so
+  it is refused at the door with a spelling suggestion. The schema is written out
+  by hand rather than derived from a sample, because a sample workflow with no
+  HTTP nodes would type `httpHosts` as `unknown[]` and lose exactly that check; a
+  test holds the two together.
+
+- **Evaluation fails closed**, for the same reason. A rule that throws at
+  admission time is an anomaly (it was validated when stored), and the safe
+  reading of an anomaly in a security control is "no".
+
+- **Violations name their evidence.** A policy may carry a second expression,
+  evaluated only on failure, whose value rides with the violation. "blocked:
+  evil.example.net" is a finding someone can act on; "a host is not allowed" is a
+  finding someone has to investigate.
+
+- **One enforcement point, chosen deliberately.** Deploy is where a workflow
+  becomes something the organisation runs, so that is where a `deny` refuses —
+  with `422`, not `403`, because the caller *is* permitted to deploy and it is
+  the document that is unacceptable. Restoring a version onto a *deployed*
+  workflow publishes a graph without touching that button, so the gate is
+  repeated there; a draft restore is unchecked, because refusing to load the
+  definition someone needs in order to fix it would be backwards. Import reports
+  rather than blocks (it lands a draft, and refusing it would keep a
+  non-compliant definition permanently out of the environment where it could be
+  repaired). Runs are not gated at all: a policy governs what may be published,
+  and blocking a deployed workflow's runs would turn a governance edit into an
+  outage — the pause switch and the budget are the controls for stopping traffic.
+
+- **The limit is stated rather than glossed.** Saving the canvas of a deployed
+  workflow does change what runs, and that path is *not* gated, because blocking
+  every save would make the canvas unusable. It is covered by the Issues panel
+  instead — which is also why policy findings render as lint issues rather than
+  as a separate surface: an author should meet a policy problem while editing,
+  not at the deploy button.
+
+- **The starter library ships as templates, not built-ins.** Adding one copies it
+  into the workspace where it can be edited. Every workspace's allow-list is its
+  own, and a rule nobody can change is a rule nobody trusts — they would write a
+  second one beside it instead.
+
+One template rests on a small credential scanner: provider-prefixed literals
+(`sk-`, `ghp_`, `xoxb-`, `AKIA`, …) and credential-shaped keys holding long
+literal values, skipping anything containing `{{` because a secret reference is
+precisely the behaviour being asked for. It is named as a heuristic in its own
+comment, because its job is to say "put that in secrets", not to prove what a
+string is.
 
 ---
 
