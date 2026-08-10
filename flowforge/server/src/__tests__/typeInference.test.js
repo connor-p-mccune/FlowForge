@@ -238,11 +238,27 @@ describe('the on-error policy changes what flows downstream', () => {
     edges: [edge('t', 'h'), edge('h', 'l', handle)],
   })
 
-  it('unions the error object into a "continue" node’s own output', () => {
-    // The engine settles { failed, error } as the node's output and carries on
-    // down the normal edges, so downstream really can see either.
-    expect(outputOf(base('continue'), 'h')).toMatch(/failed\?: boolean/)
-    expect(outputOf(base('continue'), 'h')).toMatch(/status\?: number/)
+  it('unions the error object into a catching node’s own output', () => {
+    // The engine settles { failed, error } as the node's context value under
+    // *either* catching policy, so `{{h.error.message}}` is a real reference on
+    // both — the policies differ in which edges activate, not in what the node
+    // holds.
+    for (const policy of ['continue', 'branch']) {
+      expect(outputOf(base(policy), 'h')).toMatch(/failed\?: boolean/)
+      expect(outputOf(base(policy), 'h')).toMatch(/status\?: number/)
+    }
+  })
+
+  it('lets a caught node’s own error be referenced without complaint', () => {
+    const graph = {
+      nodes: [
+        node('t', 'trigger-manual'),
+        node('h', 'action-http', { onError: 'branch' }),
+        node('l', 'output-log', { message: 'failed: {{h.error.message}}' }),
+      ],
+      edges: [edge('t', 'h'), edge('h', 'l', 'error')],
+    }
+    expect(codes(graph)).toEqual([])
   })
 
   it('sends only the error object down a "branch" node’s error handle', () => {
@@ -251,8 +267,16 @@ describe('the on-error policy changes what flows downstream', () => {
     )
   })
 
-  it('leaves the normal handle carrying the normal shape', () => {
-    expect(inputOf(base('branch', null), 'l')).toMatch(/^\{ status: number/)
+  it('leaves the normal handle carrying the normal shape, not the union', () => {
+    // A normal edge stays dark on a caught failure, so what reaches the next
+    // node down it can only be the node's own output.
+    expect(inputOf(base('branch', null), 'l')).toBe(
+      '{ status: number, body: any, dryRun?: boolean, wouldHaveSent?: object }'
+    )
+  })
+
+  it('carries the union down a "continue" node’s normal edge — either can arrive', () => {
+    expect(inputOf(base('continue', null), 'l')).toMatch(/failed\?: boolean/)
   })
 
   it('ignores a policy on a node whose failure can never be caught', () => {

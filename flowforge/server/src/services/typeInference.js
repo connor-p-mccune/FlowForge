@@ -438,6 +438,9 @@ function inferGraphTypes({ nodes: rawNodes = [], edges: rawEdges = [] } = {}) {
   for (const e of edges) incomingByNode[e.target].push(e)
 
   const outputs = {}
+  // What a node's *normal* outgoing edges carry, which is not always what
+  // `{{node.field}}` sees — see the on-error handling below.
+  const normalOutputs = {}
   const inputs = {}
   const diagnostics = []
 
@@ -457,6 +460,25 @@ function inferGraphTypes({ nodes: rawNodes = [], edges: rawEdges = [] } = {}) {
     if (e.sourceHandle === 'error') return false
     if (BRANCHING_TYPES.has(source?.type)) return false
     return errorPolicy(source) !== 'branch'
+  }
+
+  // What actually travels an edge, which the on-error policies make more
+  // interesting than "the source's output":
+  //
+  //   * `branch` — the error handle carries the engine's error object and
+  //     nothing else, while the normal handles stay dark on a caught failure
+  //     and therefore carry only the node's own shape.
+  //   * `continue` — there is no error handle; the normal edges carry whichever
+  //     of the two the node settled, so they carry the union.
+  const edgePayload = (e) => {
+    const source = nodeById[e.source]
+    const policy = errorPolicy(source)
+    if (policy === 'branch') {
+      return e.sourceHandle === 'error'
+        ? CAUGHT_ERROR
+        : normalOutputs[e.source] || T.UNKNOWN
+    }
+    return outputs[e.source] || T.UNKNOWN
   }
 
   // A `{{path}}` reference's type. Reserved heads resolve to what the engine
@@ -510,14 +532,10 @@ function inferGraphTypes({ nodes: rawNodes = [], edges: rawEdges = [] } = {}) {
     // this node running at all — which is why a single incoming edge is always
     // certain (if the node is executing, that edge is how it got there) while
     // one of several is certain only when it can never be dark.
-    const contributions = incoming.map((e) => {
-      const sourceNode = nodeById[e.source]
-      const branchError = e.sourceHandle === 'error' && errorPolicy(sourceNode) === 'branch'
-      return {
-        type: branchError ? CAUGHT_ERROR : outputs[e.source] || T.UNKNOWN,
-        certain: incoming.length === 1 || edgeAlwaysActive(e),
-      }
-    })
+    const contributions = incoming.map((e) => ({
+      type: edgePayload(e),
+      certain: incoming.length === 1 || edgeAlwaysActive(e),
+    }))
 
     let input
     if (node.type.startsWith('trigger-') || incoming.length === 0) {
@@ -552,11 +570,14 @@ function inferGraphTypes({ nodes: rawNodes = [], edges: rawEdges = [] } = {}) {
         })
       : T.UNKNOWN
 
-    // A node whose failure is *caught and continued* settles the engine's error
-    // object as its output instead of its own shape, and the run proceeds down
-    // the same edges — so downstream sees either. Under `branch` the two shapes
-    // travel down different edges, which the input merge above already splits.
-    if (errorPolicy(node) === 'continue') output = T.join(output, CAUGHT_ERROR)
+    // A node whose failure is caught — under *either* policy — settles the
+    // engine's `{ failed, error }` object as its context value instead of its
+    // own shape, so `{{node.error.message}}` is a legitimate reference on any
+    // catching node. The policies differ only in which *edges* activate, which
+    // `edgePayload` handles: the union below is what a reference sees, and
+    // `normalOutputs` is what a non-error edge carries.
+    normalOutputs[nodeId] = output
+    if (errorPolicy(node) !== 'fail') output = T.join(output, CAUGHT_ERROR)
 
     outputs[nodeId] = output
 
