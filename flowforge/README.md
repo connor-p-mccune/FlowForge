@@ -152,6 +152,34 @@ order while streaming live progress back to every collaborator on the canvas.
   3am page. Retries still run first; the step records a distinct **caught**
   status so the timeline never hides that the failure happened, and the
   linter flags a wired error branch whose policy can never route to it.
+- **Compensating transactions (saga rollback)** — every control in this list
+  bounds *whether* something runs. None of them undoes what already ran. A run
+  that reserves inventory, charges a card, then fails while shipping leaves the
+  reservation and the charge standing, and the platform's whole contribution is
+  a red badge in the history list. So a node can declare its **compensation** —
+  another node on the same canvas that reverses it — and a run that ends badly
+  unwinds: each succeeded step's compensation runs, newest effect first, until
+  the run is undone. It's a real node with real config, so it inherits the
+  linter, the type checker, the data picker and secrets; it's stripped from the
+  forward DAG exactly like a sticky note, so it never runs on the happy path.
+  The semantics are the interesting part. Unwinding is in **reverse completion
+  order, not reverse topological order** — the DAG says what *may* run in
+  parallel, only the run knows what actually finished first — and it is
+  **sequential even where the graph would permit otherwise**, because the
+  failure mode here is a half-undone state rather than slowness. A step that did
+  no work *this run* is never compensated: a `cached` or `reused` step adopted an
+  earlier run's output, and undoing an effect another execution still owns is
+  data loss wearing a safety feature's clothes (the column that records
+  completion order is set exactly when the work happened, so the rule and the
+  data are the same fact). A `caught` step is skipped for the mirror reason — it
+  didn't succeed, and its author already chose what its failure means. And a
+  **failing compensation does not stop the rollback**: stopping would strand the
+  ones further back, which guard the earliest and most expensive effects, so the
+  run settles **`partial`** — a distinct state naming exactly what is still
+  outstanding, retryable from the run detail or `flowforge rollback` without
+  ever repeating one that already took. Paired with a chaos profile it becomes
+  testable: force the failure, assert the undo. See
+  [docs/ROLLBACK.md](./docs/ROLLBACK.md).
 - **Error-handler workflows** — escalation is also just a workflow: designate
   another workflow to run whenever a real run of this one **fails**, receiving
   the failure (workflow, run id, failed node, error message) as its trigger
@@ -774,7 +802,7 @@ flowforge/
 ├── server/        Express API, Socket.io, Bull worker, SQLite
 ├── ai-service/    Flask microservice for LLM-backed features
 ├── cli/           Zero-dependency terminal client for the public API
-├── docs/          API reference, architecture deep dive, FXL/types/policies/releases
+├── docs/          API reference, architecture deep dive, FXL/types/policies/releases/rollback
 ├── docker-compose.yml
 ├── .env.example
 ├── .env.production.example

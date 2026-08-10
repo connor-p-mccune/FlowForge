@@ -8,10 +8,12 @@ relative to `flowforge/`.
 Companion references: [EXPRESSIONS.md](./EXPRESSIONS.md) (the expression
 language), [TYPES.md](./TYPES.md) (static types over the canvas),
 [POLICIES.md](./POLICIES.md) (policy as code), [RELEASES.md](./RELEASES.md)
-(progressive delivery), [INSIGHTS.md](./INSIGHTS.md) (run statistics), and
+(progressive delivery), [ROLLBACK.md](./ROLLBACK.md) (compensating
+transactions), [INSIGHTS.md](./INSIGHTS.md) (run statistics), and
 [API.md](./API.md) (the public API).
 
 - [The execution engine](#the-execution-engine)
+  - [Compensating transactions](#compensating-transactions)
 - [Real-time collaboration](#real-time-collaboration)
 - [Jobs and reliability](#jobs-and-reliability)
 - [Schedule backfill](#schedule-backfill)
@@ -140,6 +142,53 @@ The design leans on decisions already made elsewhere:
   nodeType, message }`) — the engine stores no run-level error column, and
   the step row is already secret-redacted, so the handler workflow can't
   learn anything the run detail wouldn't show.
+
+### Compensating transactions
+
+Per-node policies are the recovery path *inside* a run and error handlers are
+the escalation path *after* it; neither reverses anything the run already did.
+`services/compensation.js` plus the engine's rollback pass add the saga
+pattern's unwind, and the whole design follows from refusing to invent a second
+execution model for it.
+
+A compensation is **a node with a field set** (`compensates: <node-id>`). The
+engine strips those nodes before `buildAdjacency` — the same list that drops
+sticky notes — so they never enter the topological order, never get a step row,
+and never launch on the happy path. Everything an author already knows about
+nodes (config, templates, secrets, the linter, the type checker, the test
+bench) therefore applies to them unchanged.
+
+Three engine details carry the semantics:
+
+- **`execution_steps.completed_seq`** is stamped when a runner returns, for
+  successes, caught failures and hard failures alike. It records the run's real
+  completion sequence, which the DAG cannot: with `EXEC_MAX_PARALLEL > 1`,
+  independent branches interleave, and unwinding in an order the run never
+  happened in can release a resource a later step still holds. It also does
+  double duty as a fact rather than a rule — the column is non-null exactly when
+  *this run performed that node's work*, so `cached` and `reused` steps (whose
+  effects belong to an earlier run that still owns them) are excluded from
+  rollback by the same data that orders it.
+- **The pass runs after the terminal status is written and published.** The run
+  failed; that is not contingent on how well the cleanup goes, and a watcher
+  should see `failed` → compensations → verdict in that order.
+- **It is sequential and failure-tolerant.** One compensation at a time, because
+  the failure mode is a half-undone state rather than slowness; and a
+  compensation that exhausts its retries is recorded while the unwind continues,
+  because stopping would strand the compensations *further back*, which guard
+  the earliest and most expensive effects. The run settles `partial`.
+
+`executeRollback` is a plain function over explicit inputs precisely because it
+has two callers with different provenance for the same arguments: the engine
+hands it the live in-memory context, and `rollbackExecution` (behind
+`POST /executions/:id/rollback`) reconstructs an equivalent one from the
+persisted steps hours later. Both go through one body, so the automatic and
+manual paths cannot drift. The manual path re-reads the *graph* (a repaired
+compensation is the reason it exists) but uses the *persisted, redacted* step
+outputs as its data scope, exactly as resume-from-failure does — so a secret an
+API echoed back during the run does not survive into a compensation's config.
+
+See [ROLLBACK.md](./ROLLBACK.md).
 
 ### Cooperative cancellation
 
