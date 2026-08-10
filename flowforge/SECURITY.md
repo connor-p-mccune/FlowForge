@@ -29,6 +29,9 @@ Bull worker. The notable trust boundaries and the threats against them:
 | T10 | **API token compromise** | A personal access token for the public `/api/v1` API leaks (CI logs, dotfiles) and is replayed. | **Mitigated** — hash-only storage, scopes, expiry, revocation, per-token rate limit. |
 | T11 | **Operational-data disclosure via metrics** | `GET /metrics` (Prometheus) exposes traffic patterns and run volumes to anyone who can reach the port. | **Mitigated** — metric labels are route *patterns* (never resource ids or user data), and setting `METRICS_TOKEN` gates scrapes behind a bearer token; recommended whenever the server has a public domain. |
 | T12 | **Status-badge surface** | `GET /api/workflows/:id/badge.svg` is unauthenticated (embedded by a caching image proxy), so it could leak run status or confirm which workflow ids exist. | **Mitigated** — opt-in per-workflow token compared in constant time; a missing/invalid token returns a neutral `unknown` badge with `200` (no existence oracle); output is XML-escaped; rate-limited; dry runs excluded. |
+| T13 | **Governance controls silently disabled** | Workspace policies gate what may be deployed. An attacker (or a hurried teammate) disables a rule, ships something it would have blocked, and re-enables it. | **Mitigated** — policy management is owner-only; create/update/delete are appended to the tamper-evident audit log, with disabling called out explicitly in the entry's metadata; a policy that fails to evaluate **fails closed** rather than passing. |
+| T14 | **Deliberate faults reaching production** | A chaos profile injects failures. Armed carelessly (or maliciously) against real traffic it is a self-inflicted outage that looks like a dependency problem. | **Mitigated** — profiles are scoped to test runs by default; widening one to real runs is owner-only, audited, and announced in the workspace feed; every profile carries a mandatory expiry capped at 7 days; injected failures are labelled `[chaos]` and counted separately on `/metrics`, so they are never mistaken for an incident. |
+| T15 | **Release gate bypass via canary** | A canary sends real traffic to an undeployed definition, which would otherwise route around the deploy-time policy gate. | **Mitigated** — starting a canary and promoting one both run the same policy check a deploy does; a resumed run re-executes its original definition; dry runs never enter the experiment. |
 
 ---
 
@@ -319,6 +322,57 @@ the session API, so it's built to leak nothing:
   token revokes the URL immediately.
 
 Tested in `server/src/__tests__/statusBadge.test.js`.
+
+---
+
+### Policy engine — fail-closed governance (T13)
+
+`services/policyEngine.js` decides whether a workflow may be deployed. Three
+properties keep it from becoming decorative:
+
+- **Rules are validated when stored, not when they fire.** A rule must parse,
+  call only stdlib functions, and **type-check against the policy document's
+  schema**. A rule reading `httpHost` (singular) would evaluate to `undefined`
+  and report every workflow compliant forever; it is refused at the door with a
+  spelling suggestion instead.
+- **Evaluation fails closed.** A rule that throws at admission time produces a
+  violation at its declared severity rather than a pass. Given the validation
+  above, reaching that state is an anomaly — and the safe reading of an anomaly
+  in a security control is "no".
+- **Management is owner-only and fully audited.** `policy.created`,
+  `policy.updated`, and `policy.deleted` join the hash chain, and *disabling* is
+  flagged in the entry metadata rather than buried in a field diff, because a
+  control switched off the day before a bad deploy is precisely what an incident
+  review is looking for.
+
+The rules themselves are FXL, so they inherit the language's safety properties
+in full: no `eval`, no host reach, bounded evaluation. See
+[docs/POLICIES.md](./docs/POLICIES.md). Tested in
+`server/src/__tests__/policyEngine.test.js` and `__tests__/policies.test.js`.
+
+### Fault injection — a loaded gun with a safety (T14)
+
+`services/faultInjection.js` deliberately breaks workflow steps, which makes it
+the one feature in the system whose *purpose* is to cause failures. Four
+constraints keep that contained:
+
+- **Test runs only, by default.** A profile's scope is `dry-run` unless someone
+  explicitly widens it. Authoring one cannot affect production by accident.
+- **Widening is an owner decision.** `scope: "all"` requires the workspace owner
+  role, is recorded in the audit log (`chaos.armed` / `chaos.disarmed`), and is
+  announced in the workspace activity feed — a fault profile nobody can see is
+  indistinguishable from an incident.
+- **Mandatory expiry, capped at 7 days.** Chaos is an experiment, not a setting.
+  A profile armed during an investigation disarms itself.
+- **Never disguised.** Injected failures carry `[chaos]` in the message, record
+  as ordinary failures on the step, and increment
+  `flowforge_faults_injected_total` by mode — so a failure spike beside a fault
+  spike is an experiment, and the same spike with the counter flat is an outage.
+
+Triggers cannot be targeted, and a rule must name a `nodeId` or `nodeType`: a
+profile that matched everything by omission is exactly the accident this
+refuses. Tested in `server/src/__tests__/faultInjection.test.js`; the canary's
+matching gate (T15) in `__tests__/canary.test.js`.
 
 ---
 
