@@ -19,8 +19,9 @@
 const { parse } = require('./parser')
 const { evaluate } = require('./evaluate')
 const { analyze } = require('./analyze')
+const { checkTypes, typeCheck } = require('./typecheck')
 const { ExpressionError } = require('./errors')
-const { toBool, FUNCTION_NAMES } = require('./functions')
+const { toBool, FUNCTION_NAMES, FUNCTION_ARITY } = require('./functions')
 
 // Parse + evaluate in one call. Throws ExpressionError on a syntax or runtime
 // problem. `scope` provides the identifiers the expression may reference.
@@ -70,8 +71,14 @@ module.exports = {
   compile,
   check,
   analyze,
+  // Static *typing*, one layer beyond `analyze`'s parse-and-unknown-calls pass:
+  // given what the surrounding graph proves about the data in scope, does this
+  // expression compute something coherent? See ./typecheck.js.
+  checkTypes,
+  typeCheck,
   evaluateExpression,
   evaluateBoolean,
   ExpressionError,
   FUNCTION_NAMES,
+  FUNCTION_ARITY,
 }

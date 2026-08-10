@@ -16,6 +16,13 @@
 //   { type: 'Binary', op, left, right }
 //   { type: 'Logical', op, left, right }               // && ||
 //   { type: 'Conditional', test, consequent, alternate }
+//
+// Every node also carries `position`: the source offset of the token that most
+// identifies it — the property name in a member access, the operator in a
+// binary expression, the callee in a call. A syntax error already points at a
+// character; this lets a *semantic* finding (a type mismatch, a field that
+// doesn't exist) point at one too, so the editor can render the same caret for
+// both classes of problem.
 
 const { tokenize } = require('./lexer')
 const { ExpressionError } = require('./errors')
@@ -47,10 +54,11 @@ function parse(source) {
 
   const peek = () => tokens[pos]
   const next = () => tokens[pos++]
-  const node = (obj) => {
+  const node = (obj, position) => {
     if (++nodeCount > MAX_NODES) {
       throw new ExpressionError('Expression is too large')
     }
+    if (position !== undefined) obj.position = position
     return obj
   }
 
@@ -84,17 +92,18 @@ function parse(source) {
         // Right-associative: recurse at the ternary's own precedence so
         // `a ? b : c ? d : e` parses as `a ? b : (c ? d : e)`.
         const alternate = parseExpression(prec)
-        left = node({ type: 'Conditional', test: left, consequent, alternate })
+        left = node({ type: 'Conditional', test: left, consequent, alternate }, t.position)
         continue
       }
 
-      const op = next().value
+      const opToken = next()
+      const op = opToken.value
       // Left-associative binary operators: the right operand may only absorb
       // operators that bind strictly tighter.
       const right = parseExpression(prec + 1)
       left = LOGICAL_OPS.has(op)
-        ? node({ type: 'Logical', op, left, right })
-        : node({ type: 'Binary', op, left, right })
+        ? node({ type: 'Logical', op, left, right }, opToken.position)
+        : node({ type: 'Binary', op, left, right }, opToken.position)
     }
 
     return left
@@ -104,7 +113,7 @@ function parse(source) {
     const t = peek()
     if (t.type === 'op' && PREFIX_OPS.has(t.value)) {
       next()
-      return node({ type: 'Unary', op: t.value, argument: parseUnary() })
+      return node({ type: 'Unary', op: t.value, argument: parseUnary() }, t.position)
     }
     return parsePostfix()
   }
@@ -122,12 +131,20 @@ function parse(source) {
           throw new ExpressionError('Expected a property name after "."', name.position)
         }
         next()
-        target = node({ type: 'Member', object: target, property: name.value, computed: false })
+        // Point at the property name, not the dot: "no field `bdy`" reads
+        // better with the caret under `bdy`.
+        target = node(
+          { type: 'Member', object: target, property: name.value, computed: false },
+          name.position
+        )
       } else if (t.type === 'punct' && t.value === '[') {
         next()
         const index = parseExpression(0)
         expectPunct(']')
-        target = node({ type: 'Member', object: target, property: index, computed: true })
+        target = node(
+          { type: 'Member', object: target, property: index, computed: true },
+          t.position
+        )
       } else if (t.type === 'punct' && t.value === '(') {
         // Only bare names resolve to functions — there are no methods on values,
         // so `obj.fn()` or `(expr)()` is rejected. This is what keeps evaluation
@@ -137,7 +154,7 @@ function parse(source) {
         }
         next()
         const args = parseArguments()
-        target = node({ type: 'Call', callee: target.name, args })
+        target = node({ type: 'Call', callee: target.name, args }, target.position ?? t.position)
       } else {
         break
       }
@@ -172,10 +189,10 @@ function parse(source) {
       case 'boolean':
       case 'null':
         next()
-        return node({ type: 'Literal', value: t.value })
+        return node({ type: 'Literal', value: t.value }, t.position)
       case 'ident':
         next()
-        return node({ type: 'Identifier', name: t.value })
+        return node({ type: 'Identifier', name: t.value }, t.position)
       case 'punct':
         if (t.value === '(') {
           next()
@@ -198,7 +215,7 @@ function parse(source) {
             }
           }
           expectPunct(']')
-          return node({ type: 'Array', elements })
+          return node({ type: 'Array', elements }, t.position)
         }
         if (t.value === '{') {
           next()
@@ -219,7 +236,7 @@ function parse(source) {
                 throw new ExpressionError('Expected ":" after a property name', colon.position)
               }
               next() // ':'
-              properties.push(node({ key, value: parseExpression(0) }))
+              properties.push(node({ key, value: parseExpression(0) }, keyToken.position))
               const sep = peek()
               if (sep.type === 'punct' && sep.value === ',') {
                 next()
@@ -229,7 +246,7 @@ function parse(source) {
             }
           }
           expectPunct('}')
-          return node({ type: 'Object', properties })
+          return node({ type: 'Object', properties }, t.position)
         }
         break
       default:

@@ -289,4 +289,13 @@ function callFunction(name, args) {
 // Names only, for the linter / editor. (Signatures live in docs/EXPRESSIONS.md.)
 const FUNCTION_NAMES = Object.keys(registry).sort()
 
-module.exports = { callFunction, toBool, isEmpty, getPath, FUNCTION_NAMES }
+// { name: [minArgs, maxArgs] }, derived from the registry rather than restated.
+// The type checker needs arity to report a miscall statically, and deriving it
+// here means the two can never disagree about how many arguments a function
+// takes — the check would otherwise be a second copy of the truth, silently
+// stale the first time a function grows an optional parameter.
+const FUNCTION_ARITY = Object.freeze(
+  Object.fromEntries(Object.entries(registry).map(([name, [min, max]]) => [name, [min, max]]))
+)
+
+module.exports = { callFunction, toBool, isEmpty, getPath, FUNCTION_NAMES, FUNCTION_ARITY }
