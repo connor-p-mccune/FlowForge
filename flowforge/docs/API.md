@@ -295,6 +295,46 @@ report includes.
 Requires the `read` scope. From the CLI: `flowforge types <id> [--node <id>]
 [--json]`. Full reference: [TYPES.md](./TYPES.md).
 
+### Canary releases
+
+Progressive delivery from a pipeline. `GET .../canary` reports the running
+release; `recommendation` is `promote`, `rollback`, or `wait` — the value a job
+branches on, rather than something to be inferred from a p-value.
+
+```bash
+curl -s https://your-flowforge-host/api/v1/workflows/6f0c…/canary   -H "Authorization: Bearer $FLOWFORGE_TOKEN"
+```
+
+```json
+{
+  "workflowId": "6f0c…",
+  "active": true,
+  "state": "running",
+  "percent": 10,
+  "verdict": "healthy",
+  "recommendation": "promote",
+  "reason": "40 canary runs with no detectable regression",
+  "canary": { "runs": 40, "failures": 0, "failureRate": 0,
+              "failureRateInterval": { "point": 0, "lower": 0, "upper": 0.087 } },
+  "stable": { "runs": 400, "failures": 8, "failureRate": 0.02,
+              "failureRateInterval": { "point": 0.02, "lower": 0.01, "upper": 0.039 } },
+  "successTest":  { "pValue": 0.83, "significant": false },
+  "durationTest": { "pValue": 0.44, "significant": false }
+}
+```
+
+`POST .../canary/promote` makes the canary definition the deployed one, and
+`POST .../canary/rollback` sends every run back to the baseline without moving
+or overwriting anything. Both need the **`manage`** scope — the same one
+importing a definition needs — so a `trigger` token can start runs but can never
+change what runs. A promotion a workspace policy blocks is refused with `422`.
+
+Starting a canary and changing its traffic share are app-only: they are
+authoring decisions, and the pipeline's job is to decide whether the release
+that is already running is good. Full reference: [RELEASES.md](./RELEASES.md).
+From the CLI: `flowforge release <id> [--promote] [--rollback] [--wait N]`,
+which exits **0** promote, **1** roll back, **2** keep waiting.
+
 ### Trigger a workflow
 
 ```bash

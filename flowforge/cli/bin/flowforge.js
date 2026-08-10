@@ -20,6 +20,7 @@ const COMMANDS = {
   diff: require('../src/commands/diff'),
   lint: require('../src/commands/lint'),
   types: require('../src/commands/types'),
+  release: require('../src/commands/release'),
   trigger: require('../src/commands/trigger'),
   pause: require('../src/commands/pause'),
   unpause: require('../src/commands/resume-workflow'),
@@ -53,6 +54,7 @@ Usage:
   flowforge diff <workflow-id> <file>              Compare the live workflow against an exported file (exits non-zero on drift)
   flowforge lint <workflow-id> [file] [--strict]   Lint the live workflow — or an exported file against its workspace (exits non-zero on errors)
   flowforge types <workflow-id> [--node <id>]      Inferred data schema per node — what each one produces (exits non-zero on a type error)
+  flowforge release <id> [--promote|--rollback]   Canary release status — exits 0 promote, 1 roll back, 2 keep waiting
   flowforge trigger <workflow-id> [--data <json>] [--key <idempotency-key>] [--priority high|normal|low] [--watch]
   flowforge pause <workflow-id>                    Hold all new runs (kill switch) — needs a manage token
   flowforge unpause <workflow-id>                  Release the pause and accept runs again
@@ -79,7 +81,10 @@ Configuration:
 Exit codes:
   0 success · 1 error, a watched run that failed/was cancelled, a
   'check' whose workflow breached its health thresholds, a 'diff'
-  that found drift, or an 'audit' whose chain failed verification`
+  that found drift, or an 'audit' whose chain failed verification
+  2 'release' only — the canary has no verdict yet (keep waiting).
+    Distinct from 1 on purpose: a pipeline that treats "not enough
+    evidence" as failure rolls back every healthy young release.`
 
 async function main() {
   const argv = process.argv.slice(2)

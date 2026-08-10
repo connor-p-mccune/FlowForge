@@ -29,6 +29,8 @@ const { diffGraphs, presentDiff } = require('../services/graphDiff')
 const { lintGraph } = require('../services/workflowLinter')
 const { describeGraphTypes } = require('../services/typeInference')
 const { checkWorkflow, policyIssues } = require('../services/policyGate')
+const canary = require('../services/canary')
+const { snapshotVersion } = require('../services/canaryMonitor')
 const { forbidViewer, memberRole } = require('../services/workspaceRoles')
 const { isPaused, PAUSED_ERROR, pauseWorkflow, resumeWorkflow } = require('../services/workflowPause')
 const { computeDependencies } = require('../services/workflowDependencies')
@@ -723,6 +725,67 @@ router.get('/workflows/:id/types', tokenAuth('read'), (req, res) => {
       /* unparseable stored graph — describe the empty shape */
     }
     res.json({ workflowId: workflow.id, ...describeGraphTypes(graph) })
+  } catch (err) {
+    console.error(err)
+    res.status(500).json({ error: 'Internal server error' })
+  }
+})
+
+// GET /api/v1/workflows/:id/canary — the running release and its statistical
+// comparison. The CI-shaped question this answers is "is it safe to promote
+// yet?", which is why `recommendation` is a top-level string a pipeline can
+// branch on rather than something to be inferred from the numbers.
+router.get('/workflows/:id/canary', tokenAuth('read'), (req, res) => {
+  try {
+    const workflow = getWorkflowForMember(req.params.id, req.user.id)
+    if (!workflow) return res.status(404).json({ error: 'Workflow not found' })
+    res.json({ workflowId: workflow.id, ...canary.analyze(workflow) })
+  } catch (err) {
+    console.error(err)
+    res.status(500).json({ error: 'Internal server error' })
+  }
+})
+
+// POST /api/v1/workflows/:id/canary/promote — ship it. Requires `manage`, the
+// same scope importing a definition needs, because both make something live;
+// `trigger` deliberately cannot, so a token that starts runs can never change
+// what runs.
+router.post('/workflows/:id/canary/promote', tokenAuth('manage'), (req, res) => {
+  try {
+    const workflow = getWorkflowForMember(req.params.id, req.user.id)
+    if (!workflow) return res.status(404).json({ error: 'Workflow not found' })
+    if (forbidViewer(res, workflow.workspace_id, req.user.id)) return
+    if (!canary.activeCanary(workflow)) {
+      return res.status(404).json({ error: 'No canary is running for this workflow' })
+    }
+    const policy = checkWorkflow(workflow)
+    if (policy.blocked) {
+      return res.status(422).json({
+        error: 'Promotion blocked by workspace policy',
+        violations: policy.violations,
+      })
+    }
+    const { version } = canary.promote(workflow, { snapshot: () => snapshotVersion(workflow) })
+    res.json({ promoted: true, version: version.version })
+  } catch (err) {
+    console.error(err)
+    res.status(500).json({ error: 'Internal server error' })
+  }
+})
+
+// POST /api/v1/workflows/:id/canary/rollback — stop sending traffic to the
+// canary. Nothing is restored and nothing is overwritten.
+router.post('/workflows/:id/canary/rollback', tokenAuth('manage'), (req, res) => {
+  try {
+    const workflow = getWorkflowForMember(req.params.id, req.user.id)
+    if (!workflow) return res.status(404).json({ error: 'Workflow not found' })
+    if (forbidViewer(res, workflow.workspace_id, req.user.id)) return
+    if (!canary.activeCanary(workflow)) {
+      return res.status(404).json({ error: 'No canary is running for this workflow' })
+    }
+    const reason = req.body?.reason ? String(req.body.reason).slice(0, 500) : 'rolled back via API'
+    canary.rollback(workflow.id, { reason })
+    res.json({ rolledBack: true, reason })
   } catch (err) {
     console.error(err)
     res.status(500).json({ error: 'Internal server error' })

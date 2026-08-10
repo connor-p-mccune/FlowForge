@@ -1001,6 +1001,114 @@ const spec = {
         },
       },
     },
+    '/workflows/{workflowId}/canary': {
+      get: {
+        tags: ['workflows'],
+        summary: 'Canary release status and comparison',
+        description:
+          'The running canary and how it compares against the baseline: run ' +
+          'counts, failure rates with Wilson intervals, and the two ' +
+          'significance tests (a one-sided two-proportion z-test on failures, ' +
+          'Mann-Whitney U on durations). `recommendation` is `promote`, ' +
+          '`rollback`, or `wait` — the value a pipeline branches on. Requires ' +
+          'the `read` scope.',
+        operationId: 'getCanary',
+        parameters: [{ $ref: '#/components/parameters/WorkflowId' }],
+        responses: {
+          200: {
+            description: 'The canary status (`active: false` when none is running).',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/CanaryReport' } },
+            },
+          },
+          401: { $ref: '#/components/responses/Unauthorized' },
+          403: { $ref: '#/components/responses/Forbidden' },
+          404: { $ref: '#/components/responses/NotFound' },
+          429: { $ref: '#/components/responses/RateLimited' },
+        },
+      },
+    },
+    '/workflows/{workflowId}/canary/promote': {
+      post: {
+        tags: ['workflows'],
+        summary: 'Promote the canary',
+        description:
+          'The canary definition becomes the deployed one — an ordinary deploy, ' +
+          'snapshotting a new version. Requires the `manage` scope (the same one ' +
+          'importing a definition needs), so a token that starts runs can never ' +
+          'change what runs. Refused with 422 if a workspace policy blocks it.',
+        operationId: 'promoteCanary',
+        parameters: [{ $ref: '#/components/parameters/WorkflowId' }],
+        responses: {
+          200: {
+            description: 'Promoted; the new version number is returned.',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    promoted: { type: 'boolean' },
+                    version: { type: 'integer' },
+                  },
+                },
+              },
+            },
+          },
+          401: { $ref: '#/components/responses/Unauthorized' },
+          403: { $ref: '#/components/responses/Forbidden' },
+          404: { $ref: '#/components/responses/NotFound' },
+          422: {
+            description: 'Blocked by a workspace policy.',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } },
+          },
+          429: { $ref: '#/components/responses/RateLimited' },
+        },
+      },
+    },
+    '/workflows/{workflowId}/canary/rollback': {
+      post: {
+        tags: ['workflows'],
+        summary: 'Roll the canary back',
+        description:
+          'Traffic goes to 0% and every run takes the baseline version. Nothing ' +
+          'is restored and nothing is overwritten — the canary definition is ' +
+          'still on the canvas, so it can be fixed and the release resumed. ' +
+          'Requires the `manage` scope.',
+        operationId: 'rollbackCanary',
+        parameters: [{ $ref: '#/components/parameters/WorkflowId' }],
+        requestBody: {
+          required: false,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                properties: { reason: { type: 'string', maxLength: 500 } },
+              },
+            },
+          },
+        },
+        responses: {
+          200: {
+            description: 'Rolled back.',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    rolledBack: { type: 'boolean' },
+                    reason: { type: 'string' },
+                  },
+                },
+              },
+            },
+          },
+          401: { $ref: '#/components/responses/Unauthorized' },
+          403: { $ref: '#/components/responses/Forbidden' },
+          404: { $ref: '#/components/responses/NotFound' },
+          429: { $ref: '#/components/responses/RateLimited' },
+        },
+      },
+    },
     '/workflows/{workflowId}/types': {
       get: {
         tags: ['workflows'],
@@ -1826,6 +1934,71 @@ const spec = {
               errors: { type: 'integer' },
               warnings: { type: 'integer' },
             },
+          },
+        },
+      },
+      CanaryReport: {
+        type: 'object',
+        properties: {
+          workflowId: { type: 'string' },
+          active: { type: 'boolean' },
+          state: { type: 'string', enum: ['running', 'rolled_back'], nullable: true },
+          percent: { type: 'integer', description: 'Share of runs going to the canary.' },
+          auto: { type: 'boolean', description: 'Whether the sweep may act on the verdict.' },
+          verdict: {
+            type: 'string',
+            enum: ['healthy', 'degraded', 'failing', 'pending'],
+          },
+          recommendation: { type: 'string', enum: ['promote', 'rollback', 'wait'] },
+          reason: { type: 'string' },
+          canary: { $ref: '#/components/schemas/CanaryArm' },
+          stable: { $ref: '#/components/schemas/CanaryArm' },
+          successTest: {
+            type: 'object',
+            nullable: true,
+            description: 'One-sided two-proportion z-test on failure rates.',
+            properties: {
+              z: { type: 'number' },
+              pValue: { type: 'number' },
+              significant: { type: 'boolean' },
+            },
+          },
+          durationTest: {
+            type: 'object',
+            nullable: true,
+            description: 'Tie-corrected Mann-Whitney U on completed-run durations.',
+            properties: {
+              z: { type: 'number' },
+              pValue: { type: 'number' },
+              significant: { type: 'boolean' },
+              effect: {
+                type: 'number',
+                description: 'P(a random canary run is slower than a random stable one). 0.5 = no difference.',
+              },
+            },
+          },
+        },
+      },
+      CanaryArm: {
+        type: 'object',
+        properties: {
+          runs: { type: 'integer' },
+          failures: { type: 'integer' },
+          failureRate: { type: 'number', nullable: true },
+          failureRateInterval: {
+            type: 'object',
+            nullable: true,
+            description: '95% Wilson score interval — never zero-width, even at 0 failures.',
+            properties: {
+              point: { type: 'number' },
+              lower: { type: 'number' },
+              upper: { type: 'number' },
+            },
+          },
+          durations: {
+            type: 'array',
+            description: 'Completed-run durations in milliseconds.',
+            items: { type: 'integer' },
           },
         },
       },

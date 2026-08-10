@@ -48,6 +48,7 @@ export FLOWFORGE_TOKEN=ffp_…
 | `flowforge diff <id> <file>` | Compare the **live** workflow against an exported file — exits non-zero on drift, so CI catches the promotion someone forgot (or the hand-edit someone made) |
 | `flowforge lint <id> [file] [--strict]` | Run the app's linter as a CI gate — over the live workflow, or over an exported file against its target workspace (real secret/variable names, sub-workflow targets); exits non-zero on errors, `--strict` fails warnings too |
 | `flowforge types <id> [--node <id>] [--json]` | The workflow's inferred data schema — what each node produces and the exact `{{node.path}}` references it offers; exits non-zero on a type error ([docs](../docs/TYPES.md)) |
+| `flowforge release <id> [--promote] [--rollback] [--wait N]` | Canary release status — exits **0** promote, **1** roll back, **2** keep waiting, so a pipeline branches on the verdict without parsing a p-value ([docs](../docs/RELEASES.md)) |
 | `flowforge search <query> [--limit N]` | Find workflows by name **or by what's inside them** — node labels, config strings, sticky notes ([docs](../docs/API.md#search-workflows)) |
 | `flowforge trigger <id> [--data <json>] [--key <k>] [--priority high\|normal\|low] [--watch]` | Start a run; `--key` sets an [`Idempotency-Key`](../docs/API.md#trigger-a-workflow) so retries are safe; `--priority` picks the queue lane |
 | `flowforge pause <id>` | Kill switch — hold **all** new runs (manual, API, webhook, schedule, error-handler) while in-flight runs settle; wrap a deploy window so no cron tick fires into a half-migrated system (needs the `manage` scope) |
@@ -120,6 +121,25 @@ http-1
 
 `--json` prints the machine-readable lattice, which is the useful form for
 diffing a schema across a promotion.
+
+## Ship a canary from CI
+
+`release` reports the running canary and exits by its recommendation, so the
+pipeline reads as the decision rather than as arithmetic:
+
+```yaml
+- run: |
+    npx --prefix cli flowforge release $WORKFLOW_ID --wait 900
+    case $? in
+      0) npx --prefix cli flowforge release $WORKFLOW_ID --promote ;;
+      1) npx --prefix cli flowforge release $WORKFLOW_ID --rollback "canary regressed"; exit 1 ;;
+      2) echo "No verdict yet — leaving the canary running." ;;
+    esac
+```
+
+Exit **2** for "not enough evidence yet" is deliberate and distinct from 1: a
+job that treated it as failure would roll back every healthy release that
+happens to be young.
 
 ## Gate a deploy on definition drift
 
