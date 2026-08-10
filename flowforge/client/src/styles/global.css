@@ -6808,3 +6808,180 @@ html, body, #root {
   opacity: 0.6;
   cursor: default;
 }
+
+/* Workspace policies. Sibling of the secrets/variables pages (whose styles
+   these extend) with the extra pieces a rule editor needs: severity badges, the
+   starter-template catalogue, and the try-it panel. */
+.policy-page__actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 14px;
+  flex-wrap: wrap;
+}
+
+.policy-page__count {
+  font-size: 12px;
+  color: #777;
+  margin-left: auto;
+}
+
+.policy-badge {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  border-radius: 4px;
+  padding: 2px 6px;
+  margin-right: 8px;
+}
+
+.policy-badge--deny {
+  background: #fee2e2;
+  color: #b91c1c;
+}
+
+.policy-badge--warn {
+  background: #fef3c7;
+  color: #92400e;
+}
+
+.policy-badge--off {
+  background: #eee;
+  color: #888;
+}
+
+.policy-item__head {
+  display: flex;
+  align-items: center;
+  font-size: 13.5px;
+}
+
+.policy-item__description {
+  font-size: 12px;
+  color: #666;
+  margin: 4px 0 6px;
+}
+
+.policy-templates {
+  list-style: none;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  background: #fafafa;
+  margin-bottom: 16px;
+  overflow: hidden;
+}
+
+.policy-templates__item {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  border-bottom: 1px solid #eee;
+}
+
+.policy-templates__item:last-child {
+  border-bottom: none;
+}
+
+.policy-templates__name {
+  font-size: 13px;
+  font-weight: 600;
+  color: #333;
+}
+
+.policy-templates__description {
+  font-size: 11.5px;
+  color: #777;
+  margin: 2px 0 4px;
+}
+
+.policy-templates__rule,
+.policy-editor__code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11.5px;
+}
+
+.policy-templates__rule {
+  color: #4338ca;
+  overflow-wrap: anywhere;
+}
+
+.policy-editor {
+  border: 1px solid #c7d2fe;
+  border-radius: 10px;
+  background: #f8f9ff;
+  padding: 14px;
+  margin-bottom: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.policy-editor__grid {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.policy-editor__code {
+  width: 100%;
+  border: 1px solid #ddd;
+  border-radius: 6px;
+  padding: 7px 9px;
+  resize: vertical;
+}
+
+.policy-editor .secrets-page__field em {
+  color: #999;
+  font-style: normal;
+  font-weight: 400;
+}
+
+.policy-editor__try {
+  border-top: 1px dashed #c7d2fe;
+  padding-top: 10px;
+}
+
+.policy-editor__try-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  font-size: 12.5px;
+}
+
+.policy-editor__result {
+  font-size: 12.5px;
+  margin-top: 8px;
+}
+
+.policy-editor__result--pass {
+  color: #15803d;
+}
+
+.policy-editor__result--fail {
+  color: #b45309;
+}
+
+.policy-editor__result--error {
+  color: #b91c1c;
+}
+
+.policy-editor__document {
+  margin-top: 8px;
+  max-height: 260px;
+  overflow: auto;
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+  padding: 8px;
+  font-size: 11px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+.policy-editor__buttons {
+  display: flex;
+  gap: 8px;
+}

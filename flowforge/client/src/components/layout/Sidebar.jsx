@@ -24,6 +24,7 @@ export default function Sidebar({ open = false, onNavigate }) {
   const onAudit = location.pathname.endsWith('/audit')
   const onSecrets = location.pathname.endsWith('/secrets')
   const onVariables = location.pathname.endsWith('/variables')
+  const onPolicies = location.pathname.endsWith('/policies')
   const onWebhooks = location.pathname.endsWith('/webhooks')
 
   const [workspaces, setWorkspaces] = useState([])
@@ -108,6 +109,7 @@ export default function Sidebar({ open = false, onNavigate }) {
     else if (onAudit) navigate(`/workspace/${id}/audit`)
     else if (onSecrets) navigate(`/workspace/${id}/secrets`)
     else if (onVariables) navigate(`/workspace/${id}/variables`)
+    else if (onPolicies) navigate(`/workspace/${id}/policies`)
     else if (onWebhooks) navigate(`/workspace/${id}/webhooks`)
   }
 
@@ -306,6 +308,14 @@ export default function Sidebar({ open = false, onNavigate }) {
             onClick={() => { navigate(`/workspace/${activeWorkspaceId}/variables`); onNavigate?.() }}
           >
             <span aria-hidden="true">🧩</span> Variables
+          </button>
+        )}
+        {activeWorkspaceId && (
+          <button
+            className={`sidebar__nav-link${onPolicies ? ' sidebar__nav-link--active' : ''}`}
+            onClick={() => { navigate(`/workspace/${activeWorkspaceId}/policies`); onNavigate?.() }}
+          >
+            <span aria-hidden="true">⚖️</span> Policies
           </button>
         )}
         {activeWorkspaceId && (

@@ -8,6 +8,7 @@ import ActivityPage from './components/activity/ActivityPage'
 import AuditPage from './components/audit/AuditPage'
 import SecretsPage from './components/secrets/SecretsPage'
 import VariablesPage from './components/variables/VariablesPage'
+import PoliciesPage from './components/policies/PoliciesPage'
 import WebhooksPage from './components/webhooks/WebhooksPage'
 import SettingsPage from './components/settings/SettingsPage'
 import WorkflowCanvas from './components/canvas/WorkflowCanvas'
@@ -70,6 +71,15 @@ function VariablesRoute() {
   )
 }
 
+function PoliciesRoute() {
+  const { wsId } = useParams()
+  return (
+    <AppShell>
+      <PoliciesPage workspaceId={wsId} />
+    </AppShell>
+  )
+}
+
 function WebhooksRoute() {
   const { wsId } = useParams()
   return (
@@ -97,6 +107,7 @@ export default function App() {
               <Route path="/workspace/:wsId/audit" element={<AuditRoute />} />
               <Route path="/workspace/:wsId/secrets" element={<SecretsRoute />} />
               <Route path="/workspace/:wsId/variables" element={<VariablesRoute />} />
+              <Route path="/workspace/:wsId/policies" element={<PoliciesRoute />} />
               <Route path="/workspace/:wsId/webhooks" element={<WebhooksRoute />} />
               <Route
                 path="/settings"
