@@ -254,6 +254,47 @@ ride along for `--strict` consumers:
 Requires the `read` scope — analysis changes nothing. From the CLI:
 `flowforge lint <id> [file] [--strict]`.
 
+### Inferred data schema
+
+What each node in the workflow receives and produces, derived from the runners'
+output contracts and propagated across the graph. No run history is consulted,
+so a workflow that has never executed still reports a full schema.
+
+```bash
+curl -s https://your-flowforge-host/api/v1/workflows/6f0c…/types \
+  -H "Authorization: Bearer $FLOWFORGE_TOKEN"
+```
+
+```json
+{
+  "workflowId": "6f0c…",
+  "order": ["trigger-1", "http-1", "log-1"],
+  "nodes": {
+    "http-1": {
+      "input":  { "described": "{ triggered: boolean, … }", "type": { "kind": "object" } },
+      "output": {
+        "described": "{ status: number, body: any }",
+        "type": { "kind": "object" },
+        "fields": [
+          { "path": "status", "type": "number", "optional": false },
+          { "path": "body",   "type": "any",    "optional": false }
+        ]
+      }
+    }
+  },
+  "diagnostics": []
+}
+```
+
+`described` is the human rendering, `type` is the machine-readable lattice value
+(stable JSON, so two exports of the same graph are diffable), and `fields`
+flattens the pickable `{{node.path}}` references one level past each object.
+`diagnostics` carries the same `unknown-field` / `type-error` findings the lint
+report includes.
+
+Requires the `read` scope. From the CLI: `flowforge types <id> [--node <id>]
+[--json]`. Full reference: [TYPES.md](./TYPES.md).
+
 ### Trigger a workflow
 
 ```bash

@@ -12,6 +12,7 @@ relative to `flowforge/`.
 - [Outbound webhooks](#outbound-webhooks)
 - [Run insights & SLA monitoring](#run-insights--sla-monitoring)
 - [The expression language](#the-expression-language)
+- [The type system](#the-type-system)
 - [Static analysis (the linter)](#static-analysis-the-linter)
 - [Run cost accounting and budgets](#run-cost-accounting-and-budgets)
 - [The tamper-evident audit log](#the-tamper-evident-audit-log)
@@ -837,6 +838,114 @@ function of `(ast, scope)` with no side effects, the authoring UI can expose it
 directly: `POST /api/expressions/evaluate` runs the very same pipeline against
 caller-supplied sample data, so the canvas's "Try this expression" playground
 computes exactly what a node would — no separate interpreter to drift.
+
+---
+
+## The type system
+
+The canvas is a dataflow graph, and every runner in `services/nodeRunners/`
+returns a shape it guarantees. Nothing wrote that down, so the two most common
+authoring mistakes were invisible until a run made them expensive: a reference
+to a field that doesn't exist (`{{http-1.bdy}}`, which resolves to empty string
+and quietly poisons whatever consumed it) and an expression that computes
+nonsense against the data it will actually see (`amount * customer`).
+
+Three modules answer that: `services/types.js` is the vocabulary,
+`services/typeInference.js` recovers the graph's types, and
+`services/expression/typecheck.js` checks FXL against them. The user-facing
+reference is [TYPES.md](./TYPES.md); this is the how-and-why.
+
+### The lattice, and why `unknown` is not `any`
+
+Types are plain JSON objects — `unknown`, `any`, the four primitives,
+`array<T>`, an object with per-field optionality and an `open` flag, and
+normalised unions. Inspectable, cacheable, and sendable to the client, exactly
+like the FXL AST.
+
+The distinction that carries the design is between `unknown` ("the analysis has
+nothing to say" — a sub-workflow's return value) and `any` ("dynamic by
+contract" — a parsed HTTP body). Both silence every check, so they behave
+identically to a rule; they differ to a *reader*, and a schema panel that
+collapsed them would be lying about which one it knows.
+
+`unknown` is additionally the **neutral element of the join**, so one opaque
+branch doesn't erase what the other branches proved. What it does contribute is
+uncertainty: joining it against an object opens the object, because the branch
+we can't see may carry fields we haven't listed.
+
+### Member access has two meanings, and conflating them would be wrong
+
+The engine's `{{a.b}}` resolver walks with plain JavaScript property access, so
+`items.length` is a number. FXL's `readMember` refuses every non-integer key on
+an array, so `items.length` is silently `undefined`. Both are correct in their
+own context, so `lookup()` takes a mode — and the FXL case is exactly the sort
+of bug nothing else in the product would ever surface, since it neither throws
+nor logs; it just compares `undefined` and takes the wrong branch forever.
+
+### Inference mirrors the engine rather than approximating it
+
+The output table is **transcribed** from the runners. A schema that drifts from
+what a node really returns converts the checker into a generator of false
+alarms, which is strictly worse than no checker — so where a runner has two
+shapes (a real call and a dry-run preview) the preview's keys are recorded as
+optional rather than pretended away.
+
+A node's input is `Object.assign` over its active upstream outputs, and
+`mergeAssign` models that specifically:
+
+- **Certainty is conditional on the target running.** A node with a single
+  incoming edge always got that edge — if it is executing, that is how it got
+  there — so its fields stay required even off a branch. One of several is
+  certain only when it can never be dark, which is decided by a
+  topologically-computed "does this node always run?" that the edge check reads.
+- **The on-error policy changes the payload.** `continue` settles the engine's
+  `{ failed, error }` object as the node's output and proceeds down the normal
+  edges, so downstream sees the union; `branch` sends that object down the error
+  handle only, leaving the normal handles carrying the normal shape. Each is one
+  line here because it is one line in the engine.
+- **A Transform node's template is a schema**, and the only one a user writes by
+  hand. It is parsed and read as one: a value that is exactly `{{ref}}` keeps the
+  referenced type (matching `resolveTemplates`, which preserves the value), and
+  an interpolated one is a string.
+- **A Map node's element type is whatever its mapping expression computes**,
+  which comes straight back from the FXL checker — the two directions of the
+  analysis feeding each other.
+
+### The checker is a synthesis pass, not an inference engine
+
+`typecheck.js` walks the AST bottom-up: each node's type comes from its
+children's, is checked against what the operator or function requires, and is
+handed back up. There are no inference variables and no unification, because FXL
+has no lambdas and no let-bindings — every expression's type is fully determined
+by its leaves, so synthesis is the whole algorithm. Function *arity* is read from
+the stdlib registry rather than restated, and a test pins that every stdlib name
+has a signature, so the two cannot come to disagree.
+
+### Silence is the design
+
+Every rule begins at `possibleKinds`, which returns null for a dynamic type, and
+any rule facing a null stands down. There is no finding when a value is `any` or
+`unknown`, when an object is open, when a union still has a viable option, when
+a node isn't wired up yet, or when the graph has a cycle (the linter already
+reports that, and inference over a cycle would be fiction).
+
+That restraint is what makes the feature usable rather than annoying. A checker
+that occasionally cries wolf gets switched off within a week and takes its true
+findings with it — so the failure mode here is always silence, never a maybe,
+and the severity contract matches the linter's exactly: **error** for something
+that will misfire, **warning** for something legal that computes what nobody
+wanted (ordering two objects stringifies both to `[object Object]`, so every
+comparison reports equal).
+
+### What it replaced
+
+The config panel's "insert data from upstream" list used to be a hand-maintained
+table in the React component mapping each node type to the keys it emits — a
+second copy of a truth that lives in the runners, and one that had already
+drifted past switch, validate, filter, map, and aggregate. It now asks
+`POST /workflows/:id/types` with the *live* canvas, which is both correct and
+strictly more capable: field types, nested paths, and shapes that depend on
+config rather than on node type.
 
 ---
 

@@ -190,6 +190,28 @@ order while streaming live progress back to every collaborator on the canvas.
   `--junit <file>` writes a report GitHub/GitLab/Jenkins render natively) or
   the public `POST /api/v1/workflows/:id/tests/run` endpoint — the same testing
   discipline the codebase applies to itself, pointed at the workflows you build.
+- **Static types over the canvas** — a visual builder usually finds out its
+  data doesn't line up by running. FlowForge knows the shape of what flows
+  between nodes and checks against it first: every runner's output is a
+  contract (`{ status: number, body: any }`), those shapes propagate across the
+  DAG, and a `{{http-1.bdy}}` becomes a lint error with a **spelling
+  suggestion** instead of an empty string nobody notices. Expressions get the
+  same treatment against the scope the graph proves they'll have — so
+  `amount * customer` (arithmetic on an object), `sum(status)`, and
+  `dateAdd(t, 1, "weeks")` are caught statically, as is `items.length`, which is
+  a number in a `{{…}}` template and silently `undefined` in an expression
+  because the two read paths have genuinely different member semantics. It's a
+  real type lattice — unions, per-field optionality, structural join — and it
+  mirrors the engine rather than approximating it: a branch's contribution to a
+  join is optional because the branch may not fire, a node whose `onError` is
+  `continue` types as the union of its output and the engine's error object, and
+  a Transform node's template is read as the schema it literally is. The whole
+  thing is built on **not guessing**: `any` (dynamic by contract) and `unknown`
+  (nothing to say) are different facts and both silence every check, so a graph
+  full of webhook payloads reports nothing at all. The config panel's data
+  picker is generated from it, `flowforge types <id>` prints it, and
+  `GET /api/v1/workflows/:id/types` serves it. See
+  [docs/TYPES.md](./docs/TYPES.md).
 - **Workflow linter** — one click checks the canvas before you run it: cycles,
   dead branches, missing config, references to nodes that aren't upstream,
   unknown `{{secrets.*}}` / `{{vars.*}}` names, undeployed sub-workflow
@@ -682,7 +704,7 @@ flowforge/
 ├── server/        Express API, Socket.io, Bull worker, SQLite
 ├── ai-service/    Flask microservice for LLM-backed features
 ├── cli/           Zero-dependency terminal client for the public API
-├── docs/          API reference, architecture deep dive, FXL reference
+├── docs/          API reference, architecture deep dive, FXL + type references
 ├── docker-compose.yml
 ├── .env.example
 ├── .env.production.example
