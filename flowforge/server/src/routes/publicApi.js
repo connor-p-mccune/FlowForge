@@ -28,6 +28,7 @@ const { searchWorkflows } = require('../services/workflowSearch')
 const { diffGraphs, presentDiff } = require('../services/graphDiff')
 const { lintGraph } = require('../services/workflowLinter')
 const { describeGraphTypes } = require('../services/typeInference')
+const { checkWorkflow, policyIssues } = require('../services/policyGate')
 const { forbidViewer, memberRole } = require('../services/workspaceRoles')
 const { isPaused, PAUSED_ERROR, pauseWorkflow, resumeWorkflow } = require('../services/workflowPause')
 const { computeDependencies } = require('../services/workflowDependencies')
@@ -229,9 +230,21 @@ router.post('/workspaces/:id/workflows/import', tokenAuth('manage'), (req, res) 
     ).run(id, req.params.id, name.trim(), null, graphJson, req.user.id, now, now)
 
     const workflow = db.prepare(
-      'SELECT id, name, description, status, workspace_id, updated_at FROM workflows WHERE id = ?'
+      'SELECT id, name, description, status, workspace_id, updated_at, graph_json FROM workflows WHERE id = ?'
     ).get(id)
-    res.status(201).json({ workflow })
+    // Workspace policies are *reported* here, not enforced. The import lands as
+    // a draft, so nothing the organisation runs has changed yet — and refusing
+    // the import would prevent bringing a definition in to fix it. Deploy is
+    // where "may this be live?" is answered; this exists so a promotion
+    // pipeline learns about a blocking policy at the import step rather than
+    // one command later. `blocked` is the flag a CI job keys on.
+    const policy = checkWorkflow(workflow)
+    const { graph_json: _graph, ...summary } = workflow
+    res.status(201).json({
+      workflow: summary,
+      policyViolations: policy.violations,
+      policyBlocked: policy.blocked,
+    })
   } catch (err) {
     console.error(err)
     res.status(500).json({ error: 'Internal server error' })
@@ -666,7 +679,12 @@ router.post('/workflows/:id/lint', tokenAuth('read'), (req, res) => {
         .map((r) => [r.id, { name: r.name, status: r.status }])
     )
 
-    const issues = lintGraph(graph, { secretNames, variableNames, workflowTargets })
+    const issues = [
+      ...lintGraph(graph, { secretNames, variableNames, workflowTargets }),
+      // Policy findings ride the same report, so `flowforge lint` is one gate
+      // for "will it run?" and "is it allowed here?" rather than two commands.
+      ...policyIssues(workflow, { graphJson: JSON.stringify(graph) }),
+    ]
     const errors = issues.filter((i) => i.severity === 'error').length
     const warnings = issues.filter((i) => i.severity === 'warning').length
     res.json({

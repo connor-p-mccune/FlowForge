@@ -10,6 +10,7 @@ const scheduler = require('../services/scheduler')
 const activityService = require('../services/activityService')
 const { lintGraph } = require('../services/workflowLinter')
 const { describeGraphTypes } = require('../services/typeInference')
+const { checkWorkflow, policyIssues } = require('../services/policyGate')
 const stepCache = require('../services/stepCache')
 const { isValidPriority } = require('../services/runPriority')
 const { forbidViewer } = require('../services/workspaceRoles')
@@ -164,7 +165,12 @@ router.post('/workspaces/:wsId/workflows/import', auth, validate(importRule), (r
       type: 'workflow', id, name: workflow.name,
       metadata: { nodes: graph_data.nodes.length },
     })
-    res.status(201).json({ workflow })
+    // Policy violations are *reported*, not enforced, on import. An import
+    // lands as a draft — nothing the organisation runs yet — and refusing to
+    // let a definition in would prevent bringing it here to fix it. The deploy
+    // gate is where "may this be live?" is answered; this is so a promotion
+    // pipeline finds out at the import step rather than one command later.
+    res.status(201).json({ workflow, policyViolations: checkWorkflow(workflow).violations })
   } catch (err) {
     console.error(err)
     res.status(500).json({ error: 'Internal server error' })
@@ -693,7 +699,13 @@ router.post('/workflows/:id/lint', auth, (req, res) => {
         .map((r) => [r.id, { name: r.name, status: r.status }])
     )
 
-    const issues = lintGraph(graph, { secretNames, variableNames, workflowTargets })
+    // Policy findings ride the same panel: an author should see "this workflow
+    // isn't allowed here" while editing, not when the deploy button refuses.
+    // Judged against the graph on screen, like every other rule above.
+    const issues = [
+      ...lintGraph(graph, { secretNames, variableNames, workflowTargets }),
+      ...policyIssues(workflow, { graphJson: JSON.stringify(graph) }),
+    ]
     res.json({
       issues,
       summary: {
@@ -998,6 +1010,23 @@ router.post('/workflows/:id/deploy', auth, (req, res) => {
       })
     }
 
+    // Workspace policies: deploy is the moment a workflow becomes something the
+    // organisation runs, so it is the moment "is this allowed here?" is asked.
+    // A `deny` refuses with 422 and the violations — 422 rather than 403,
+    // because the caller *is* permitted to deploy; the document is what is
+    // unacceptable. Warnings pass through and are visible in the Issues panel.
+    const policy = checkWorkflow(workflow)
+    if (policy.blocked) {
+      activityService.logEvent(workflow.workspace_id, req.user.id, 'workflow.deploy_blocked', {
+        type: 'workflow', id: workflow.id, name: workflow.name,
+        metadata: { policies: policy.violations.filter((v) => v.severity === 'deny').map((v) => v.name) },
+      })
+      return res.status(422).json({
+        error: 'Deploy blocked by workspace policy',
+        violations: policy.violations,
+      })
+    }
+
     const now = new Date().toISOString()
     const version = db.transaction(() => {
       const v = snapshotVersion(workflow, req.user.id)
@@ -1088,6 +1117,20 @@ router.post('/workflows/:id/versions/:versionId/restore', auth, (req, res) => {
       'SELECT * FROM workflow_versions WHERE id = ? AND workflow_id = ?'
     ).get(req.params.versionId, req.params.id)
     if (!target) return res.status(404).json({ error: 'Version not found' })
+
+    // Restoring onto a *deployed* workflow publishes a graph without passing
+    // the deploy gate, so the gate is applied here too. A draft restore is
+    // unchecked — nothing is running, and refusing to load a definition you
+    // need to fix would be exactly backwards.
+    if (workflow.status === 'deployed') {
+      const policy = checkWorkflow(workflow, { graphJson: target.graph_json })
+      if (policy.blocked) {
+        return res.status(422).json({
+          error: 'Restore blocked by workspace policy',
+          violations: policy.violations,
+        })
+      }
+    }
 
     const now = new Date().toISOString()
     db.transaction(() => {
