@@ -426,10 +426,13 @@ const MAX_DESCRIBED_FIELDS = 6
 function describe(type, depth = 0) {
   const t = type || UNKNOWN
   switch (t.kind) {
+    // An array is a wrapper, not a level of nesting: `{ rows: {a: number}[] }`
+    // should print its element, and only *object* nesting counts toward the
+    // depth cut-off below.
     case 'array':
       return t.element.kind === 'union'
-        ? `(${describe(t.element, depth + 1)})[]`
-        : `${describe(t.element, depth + 1)}[]`
+        ? `(${describe(t.element, depth)})[]`
+        : `${describe(t.element, depth)}[]`
     case 'object': {
       if (depth >= 2) return 'object'
       const names = Object.keys(t.fields)
