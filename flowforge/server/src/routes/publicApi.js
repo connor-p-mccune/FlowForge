@@ -18,6 +18,7 @@ const { publicApiLimiter } = require('../middleware/rateLimit')
 const { getExecutionQueue } = require('../config/queue')
 const { requestCancel } = require('../services/executionControl')
 const { rollbackExecution } = require('../services/executionEngine')
+const { describeLineage, analyzeLineage, traceProvenance, traceImpact } = require('../services/lineage')
 const { recordAudit } = require('../services/auditLog')
 const { respondToApproval } = require('../services/approvals')
 const { admitRun } = require('../services/concurrencyGate')
@@ -737,6 +738,49 @@ router.get('/workflows/:id/types', tokenAuth('read'), (req, res) => {
       workflowId: workflow.id,
       ...describeGraphTypes(graph, { resolveWorkflow: graphResolver(workflow.workspace_id) }),
     })
+  } catch (err) {
+    console.error(err)
+    res.status(500).json({ error: 'Internal server error' })
+  }
+})
+
+// GET /api/v1/workflows/:id/lineage — the workflow's dataflow: where each
+// node's data comes from, what reads it, and which config fields let data
+// leave (services/lineage.js).
+//
+// `?node=<id>` narrows to one node's provenance and impact — the CI-shaped
+// question being "we're about to change this node; what depends on it?".
+// Read-only and pure, so `read` is the whole authorisation story.
+router.get('/workflows/:id/lineage', tokenAuth('read'), (req, res) => {
+  try {
+    const workflow = getWorkflowForMember(req.params.id, req.user.id)
+    if (!workflow) return res.status(404).json({ error: 'Workflow not found' })
+    let graph = { nodes: [], edges: [] }
+    try {
+      const parsed = JSON.parse(workflow.graph_json)
+      graph = {
+        nodes: Array.isArray(parsed.nodes) ? parsed.nodes : [],
+        edges: Array.isArray(parsed.edges) ? parsed.edges : [],
+      }
+    } catch {
+      /* unparseable stored graph — describe an empty dataflow */
+    }
+
+    if (req.query.node) {
+      const lineage = analyzeLineage(graph)
+      if (!lineage.ok) return res.json({ workflowId: workflow.id, ok: false, reason: lineage.reason })
+      if (!lineage.nodes[req.query.node]) {
+        return res.status(404).json({ error: 'Node not found in graph' })
+      }
+      return res.json({
+        workflowId: workflow.id,
+        ok: true,
+        provenance: traceProvenance(lineage, req.query.node),
+        impact: traceImpact(lineage, req.query.node),
+      })
+    }
+
+    res.json({ workflowId: workflow.id, ...describeLineage(graph) })
   } catch (err) {
     console.error(err)
     res.status(500).json({ error: 'Internal server error' })

@@ -1169,6 +1169,77 @@ const spec = {
         },
       },
     },
+    '/workflows/{workflowId}/lineage': {
+      get: {
+        tags: ['workflows'],
+        summary: 'Trace the workflow’s dataflow',
+        description:
+          'Where each node’s data comes from, what reads it, and which config ' +
+          'fields let data leave the system. `?node=<id>` narrows to one ' +
+          'node’s **provenance** (what feeds it, back to the trigger field or ' +
+          'API response it started as) and **impact** (what breaks if it ' +
+          'changes). Origins carry a `trust` level — `untrusted` for a webhook ' +
+          'body or callback payload, `external` for a third party’s response, ' +
+          '`internal` for authored config, variables and secrets — which is ' +
+          'what the taint findings in `lint` are computed from. Read-only and ' +
+          'pure; requires the `read` scope.',
+        operationId: 'getWorkflowLineage',
+        parameters: [
+          { $ref: '#/components/parameters/WorkflowId' },
+          {
+            name: 'node',
+            in: 'query',
+            required: false,
+            schema: { type: 'string' },
+            description: 'Narrow to one node’s provenance and impact.',
+          },
+        ],
+        responses: {
+          200: {
+            description: 'The dataflow, or one node’s provenance and impact.',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    workflowId: { type: 'string' },
+                    ok: {
+                      type: 'boolean',
+                      description:
+                        'false when the graph has a cycle — there is no dataflow ' +
+                        'to report, and inventing an order would produce ' +
+                        'confident nonsense.',
+                    },
+                    nodes: {
+                      type: 'array',
+                      items: { $ref: '#/components/schemas/LineageNode' },
+                    },
+                    sinks: {
+                      type: 'array',
+                      description: 'Config fields where data leaves, and the origins reaching them.',
+                      items: { $ref: '#/components/schemas/LineageSink' },
+                    },
+                    secretReach: {
+                      type: 'object',
+                      additionalProperties: true,
+                      description: 'Secret name → the nodes that can read it.',
+                    },
+                    findings: {
+                      type: 'array',
+                      items: { $ref: '#/components/schemas/LintIssue' },
+                    },
+                  },
+                },
+              },
+            },
+          },
+          401: { $ref: '#/components/responses/Unauthorized' },
+          403: { $ref: '#/components/responses/Forbidden' },
+          404: { $ref: '#/components/responses/NotFound' },
+          429: { $ref: '#/components/responses/RateLimited' },
+        },
+      },
+    },
     '/executions/{executionId}': {
       get: {
         tags: ['executions'],
@@ -2008,19 +2079,7 @@ const spec = {
           issues: {
             type: 'array',
             description: 'Errors first, then warnings.',
-            items: {
-              type: 'object',
-              properties: {
-                severity: { type: 'string', enum: ['error', 'warning'] },
-                code: { type: 'string', example: 'unknown-secret' },
-                message: { type: 'string' },
-                nodeId: {
-                  type: 'string',
-                  nullable: true,
-                  description: 'Null for graph-level problems (cycles, dangling edges).',
-                },
-              },
-            },
+            items: { $ref: '#/components/schemas/LintIssue' },
           },
           summary: {
             type: 'object',
@@ -2029,6 +2088,98 @@ const spec = {
               warnings: { type: 'integer' },
             },
           },
+        },
+      },
+      LintIssue: {
+        type: 'object',
+        properties: {
+          severity: { type: 'string', enum: ['error', 'warning'] },
+          code: { type: 'string', example: 'unknown-secret' },
+          message: { type: 'string' },
+          nodeId: {
+            type: 'string',
+            nullable: true,
+            description: 'Null for graph-level problems (cycles, dangling edges).',
+          },
+        },
+      },
+      LineageNode: {
+        type: 'object',
+        properties: {
+          nodeId: { type: 'string' },
+          label: { type: 'string' },
+          nodeType: { type: 'string' },
+          origins: {
+            type: 'array',
+            description:
+              'Where this node’s *output* data can have come from. A node whose ' +
+              'output is written by something outside the graph — an HTTP ' +
+              'response, a model, a callback payload — carries that one origin ' +
+              'and not the origins of anything it read, because the far side ' +
+              'wrote the value.',
+            items: {
+              type: 'object',
+              properties: {
+                kind: {
+                  type: 'string',
+                  enum: [
+                    'webhook', 'callback', 'response', 'model',
+                    'manual', 'schedule', 'secret', 'variable', 'config', 'unknown',
+                  ],
+                },
+                trust: { type: 'string', enum: ['untrusted', 'external', 'internal', 'unknown'] },
+                label: { type: 'string', example: 'the webhook payload' },
+              },
+            },
+          },
+          reads: {
+            type: 'array',
+            description: 'The `{{node.path}}` references this node’s config makes.',
+            items: {
+              type: 'object',
+              properties: {
+                nodeId: { type: 'string' },
+                reference: { type: 'string', example: 'http-1.body.email' },
+                where: { type: 'string', description: 'The config key carrying it.', example: 'url' },
+              },
+            },
+          },
+          readBy: {
+            type: 'array',
+            items: { type: 'string' },
+            description: 'Nodes that reference this node’s output.',
+          },
+          secrets: { type: 'array', items: { type: 'string' } },
+          variables: { type: 'array', items: { type: 'string' } },
+        },
+      },
+      LineageSink: {
+        type: 'object',
+        description: 'A config field where data leaves FlowForge.',
+        properties: {
+          nodeId: { type: 'string' },
+          label: { type: 'string' },
+          key: { type: 'string', example: 'url' },
+          kind: {
+            type: 'string',
+            enum: [
+              'http-url', 'http-headers', 'http-body',
+              'email-recipient', 'email-body', 'email-subject',
+              'slack-webhook', 'slack-message', 'workflow-target', 'log',
+            ],
+          },
+          sensitivity: {
+            type: 'string',
+            enum: ['high', 'medium', 'low'],
+            description:
+              'What an attacker gains by controlling it, not how secret the data ' +
+              'is. An HTTP URL whose *authority* is pinned by the author drops to ' +
+              '`medium`: the destination cannot be redirected, only the path or ' +
+              'query varies.',
+          },
+          what: { type: 'string', example: 'the address this request is sent to' },
+          via: { type: 'array', items: { type: 'string' } },
+          origins: { type: 'array', items: { type: 'string' } },
         },
       },
       CanaryReport: {

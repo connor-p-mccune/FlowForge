@@ -62,6 +62,7 @@ export FLOWFORGE_TOKEN=ffp_…
 | `flowforge test <id> [--junit <file>]` | Run the workflow's test scenarios (FXL assertions over a dry-run) — exits non-zero on any failure; `--junit` writes a report CI renders natively |
 | `flowforge run <exec-id> [--watch]` | One run with its steps |
 | `flowforge compare <exec-id> <exec-id>` | Diff two runs of a workflow node by node — status changes, duration deltas, output changes ([docs](../docs/INSIGHTS.md#comparing-two-runs)) |
+| `flowforge lineage <id> [--node <id>] [--strict]` | Where data comes from and where it leaves — provenance, impact, and caller-controlled sinks; `--strict` gates CI ([docs](../docs/LINEAGE.md)) |
 | `flowforge cancel <exec-id>` | Stop a queued or running run (cooperative) |
 | `flowforge resume <exec-id> [--watch]` | Continue a failed/cancelled run — succeeded steps are reused, only the failed part re-runs |
 | `flowforge rollback <exec-id> [--yes]` | Undo a failed run's side effects by running its compensating actions, newest first — previews unless `--yes`, exits non-zero on a partial unwind ([docs](../docs/ROLLBACK.md)) |

@@ -15,6 +15,7 @@ const { checkWorkflow, policyIssues } = require('../services/policyGate')
 const stepCache = require('../services/stepCache')
 const { isValidPriority } = require('../services/runPriority')
 const { ROLLBACK_POLICIES } = require('../services/compensation')
+const { describeLineage, analyzeLineage, traceProvenance, traceImpact } = require('../services/lineage')
 const { forbidViewer } = require('../services/workspaceRoles')
 const { pauseWorkflow, resumeWorkflow } = require('../services/workflowPause')
 const { computeDependencies } = require('../services/workflowDependencies')
@@ -775,6 +776,51 @@ router.post('/workflows/:id/types', auth, (req, res) => {
       workflowId: workflow.id,
       ...describeGraphTypes(graph, { resolveWorkflow: graphResolver(workflow.workspace_id) }),
     })
+  } catch (err) {
+    console.error(err)
+    res.status(500).json({ error: 'Internal server error' })
+  }
+})
+
+// POST /api/workflows/:id/lineage — where every value came from and where it
+// ends up (services/lineage.js).
+//
+// Same body contract as lint and types, for the same reason: the canvas asks
+// about the graph on screen. `?node=<id>` narrows it to one node's provenance
+// (what feeds this) and impact (what breaks if this changes), which is what the
+// panel opens with when someone clicks a node — the whole-graph view is a map,
+// but the question is almost always about one node.
+router.post('/workflows/:id/lineage', auth, (req, res) => {
+  try {
+    const workflow = db.prepare('SELECT * FROM workflows WHERE id = ?').get(req.params.id)
+    if (!workflow || !isMember(workflow.workspace_id, req.user.id)) {
+      return res.status(404).json({ error: 'Workflow not found' })
+    }
+
+    let graph
+    if (req.body && Array.isArray(req.body.nodes) && Array.isArray(req.body.edges)) {
+      if (req.body.nodes.length > 2000 || req.body.edges.length > 5000) {
+        return res.status(400).json({ error: 'Graph too large to analyse' })
+      }
+      graph = { nodes: req.body.nodes, edges: req.body.edges }
+    } else {
+      graph = parseGraphData(workflow.graph_json)
+    }
+
+    const nodeId = req.query.node
+    if (nodeId) {
+      const lineage = analyzeLineage(graph)
+      if (!lineage.ok) return res.json({ workflowId: workflow.id, ok: false, reason: lineage.reason })
+      if (!lineage.nodes[nodeId]) return res.status(404).json({ error: 'Node not found in graph' })
+      return res.json({
+        workflowId: workflow.id,
+        ok: true,
+        provenance: traceProvenance(lineage, nodeId),
+        impact: traceImpact(lineage, nodeId),
+      })
+    }
+
+    res.json({ workflowId: workflow.id, ...describeLineage(graph) })
   } catch (err) {
     console.error(err)
     res.status(500).json({ error: 'Internal server error' })
