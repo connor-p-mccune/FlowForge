@@ -198,17 +198,19 @@ const OUTPUT_RULES = {
   'output-log': () => T.objectOf({ message: T.STRING }),
   'output-return': (node, input) => withFields(input, {}),
 
-  // A sub-workflow's output is whatever the target workflow returns. Resolving
-  // that would mean inferring another graph — worth doing one day, wrong to
-  // guess at today.
-  'sub-workflow': () => T.UNKNOWN,
+  // A sub-workflow's output is whatever the target workflow returns, so this
+  // recurses into that workflow's own graph — see returnTypeOf.
+  'sub-workflow': (node, input, ctx) => ctx.subWorkflowType(node.data?.config?.workflowId),
 
-  'for-each': () =>
+  // For-each runs the target workflow once per item, so `results` is a list of
+  // whatever that workflow returns — the same resolution the sub-workflow rule
+  // makes, one level of array out.
+  'for-each': (node, input, ctx) =>
     T.objectOf({
       count: T.NUMBER,
       succeeded: T.NUMBER,
       failed: T.NUMBER,
-      results: T.arrayOf(T.UNKNOWN),
+      results: T.arrayOf(ctx.subWorkflowType(node.data?.config?.workflowId)),
       errors: {
         type: T.arrayOf(T.objectOf({ index: T.NUMBER, error: T.STRING })),
         optional: true,
@@ -405,17 +407,47 @@ function expressionFields(node, input, ctx) {
 
 // — the pass ————————————————————————————————————————————————————————————
 
+// How deep sub-workflow resolution will recurse. Bounded rather than
+// unbounded-with-a-cycle-guard alone, because a legitimately deep call tree is
+// still work done on every lint of every keystroke — and past a few levels the
+// answer is `unknown` in practice anyway.
+const MAX_SUBWORKFLOW_DEPTH = 3
+
+// The type a workflow's run returns, mirroring the engine's own rule exactly:
+// the output-return node's output when the graph has one, otherwise the last
+// node in execution order that produced anything, otherwise `{}`. Getting this
+// wrong in either direction would be worse than not resolving it at all, so it
+// is one function rather than an approximation at each call site.
+function returnTypeOf({ order, outputs }, nodeById) {
+  const returnId = order.find((id) => nodeById[id]?.type === 'output-return')
+  if (returnId && outputs[returnId]) return outputs[returnId]
+  for (let i = order.length - 1; i >= 0; i--) {
+    if (outputs[order[i]]) return outputs[order[i]]
+  }
+  return T.objectOf({})
+}
+
 // Infer every node's input and output type, and report what that makes
-// checkable. Options mirror the linter's workspace context:
+// checkable. Options:
 //
-//   secretNames / variableNames — so `{{secrets.X}}` types as a string rather
-//                                 than an unresolvable reference
+//   resolveWorkflow(id) → { nodes, edges } | null
+//     Look up another workflow's graph, so a sub-workflow node can be typed
+//     from what its target actually returns. Omitted (the default) leaves
+//     those nodes `unknown`, which is what keeps this module usable without a
+//     database — the caller supplies the lookup, exactly as the policy engine's
+//     document builder does.
+//
+//   callStack — workflow ids already being inferred, for the cycle guard.
+//               Callers don't pass this; the recursion does.
 //
 // Returns { order, inputs, outputs, diagnostics } where diagnostics are
 // `{ severity, code, message, nodeId, field?, position? }`. A graph that can't
 // be ordered (a cycle) yields no types and no diagnostics — the linter already
 // reports the cycle, and inference over a cycle would be fiction.
-function inferGraphTypes({ nodes: rawNodes = [], edges: rawEdges = [] } = {}) {
+function inferGraphTypes(
+  { nodes: rawNodes = [], edges: rawEdges = [] } = {},
+  { resolveWorkflow = null, callStack = [], depth = 0 } = {}
+) {
   const noteIds = new Set(rawNodes.filter((n) => n.type === 'note').map((n) => n.id))
   const nodes = rawNodes.filter((n) => !noteIds.has(n.id))
   const nodeIds = new Set(nodes.map((n) => n.id))
@@ -493,6 +525,42 @@ function inferGraphTypes({ nodes: rawNodes = [], edges: rawEdges = [] } = {}) {
     return resolved.exists === 'no' ? T.UNKNOWN : resolved.type
   }
 
+  // The type a sub-workflow (or for-each) node's target returns.
+  //
+  // Three refusals, and each is the honest answer rather than a limitation:
+  // a target already on the call stack is a cycle — the engine rejects that at
+  // run time and the dependency analyser reports it statically, so producing a
+  // type for it would be inventing one; past the depth cap the analysis stops
+  // rather than walking an arbitrary call tree on every keystroke; and a target
+  // the caller can't resolve (deleted, another workspace, undeployed) is a lint
+  // error elsewhere, not a shape.
+  const subWorkflowCache = new Map()
+  function subWorkflowType(targetId) {
+    if (!targetId || !resolveWorkflow) return T.UNKNOWN
+    if (subWorkflowCache.has(targetId)) return subWorkflowCache.get(targetId)
+    if (callStack.includes(targetId) || depth >= MAX_SUBWORKFLOW_DEPTH) return T.UNKNOWN
+
+    let resolved = T.UNKNOWN
+    try {
+      const graph = resolveWorkflow(targetId)
+      if (graph) {
+        const inner = inferGraphTypes(graph, {
+          resolveWorkflow,
+          callStack: [...callStack, targetId],
+          depth: depth + 1,
+        })
+        const innerNodes = Object.fromEntries((graph.nodes || []).map((n) => [n.id, n]))
+        resolved = returnTypeOf(inner, innerNodes)
+      }
+    } catch {
+      // A target that can't be read types as unknown, like any other value the
+      // analysis has nothing to say about.
+      resolved = T.UNKNOWN
+    }
+    subWorkflowCache.set(targetId, resolved)
+    return resolved
+  }
+
   // Type an FXL source, folding its diagnostics into the caller's list.
   function makeExprTyper(nodeId, fieldLabel) {
     return (source, env) => {
@@ -549,7 +617,7 @@ function inferGraphTypes({ nodes: rawNodes = [], edges: rawEdges = [] } = {}) {
     }
     inputs[nodeId] = input
 
-    const ctx = { refType, exprType: makeExprTyper(nodeId, 'expression') }
+    const ctx = { refType, subWorkflowType, exprType: makeExprTyper(nodeId, 'expression') }
 
     // Type the node's FXL fields first: `map`'s output depends on the type its
     // mapping expression computes, so the expressions have to be walked before
@@ -564,6 +632,7 @@ function inferGraphTypes({ nodes: rawNodes = [], edges: rawEdges = [] } = {}) {
     let output = rule
       ? rule(node, input, {
           refType,
+          subWorkflowType,
           // The map rule re-types its mapping; reuse the value already computed
           // so the diagnostics aren't emitted twice.
           exprType: () => (mappedTypeSource === null ? T.UNKNOWN : mappedTypeSource),
@@ -648,8 +717,8 @@ function label(node) {
 
 // A serialisable view of the inference, for the API and the canvas data picker:
 // each node's input/output type plus a rendered description and its field list.
-function describeGraphTypes(graph) {
-  const { order, inputs, outputs, diagnostics } = inferGraphTypes(graph)
+function describeGraphTypes(graph, options = {}) {
+  const { order, inputs, outputs, diagnostics } = inferGraphTypes(graph, options)
   const nodes = {}
   for (const nodeId of order) {
     nodes[nodeId] = {
@@ -682,6 +751,7 @@ function fieldSummary(type, prefix = '', depth = 0) {
 module.exports = {
   inferGraphTypes,
   describeGraphTypes,
+  returnTypeOf,
   typeOfValue,
   itemEnv,
   inputEnv,
@@ -689,4 +759,5 @@ module.exports = {
   OUTPUT_RULES,
   BRANCHING_TYPES,
   CAUGHT_ERROR,
+  MAX_SUBWORKFLOW_DEPTH,
 }

@@ -363,7 +363,10 @@ function buildAncestors(order, incomingByNode) {
 //   variableNames   — Set of the workspace's variable names, for {{vars.*}}
 //   workflowTargets — Map(workflowId -> { name, status }) for sub-workflow /
 //                     for-each target validation
-function lintGraph({ nodes: rawNodes = [], edges: rawEdges = [] } = {}, { secretNames, variableNames, workflowTargets } = {}) {
+//   resolveWorkflow — (id) => { nodes, edges } | null, so a sub-workflow node
+//                     can be typed from what its target actually returns
+//                     (services/graphLookup.js builds one)
+function lintGraph({ nodes: rawNodes = [], edges: rawEdges = [] } = {}, { secretNames, variableNames, workflowTargets, resolveWorkflow } = {}) {
   const issues = []
 
   // Sticky notes are annotations: the engine drops them (and any edge touching
@@ -688,7 +691,7 @@ function lintGraph({ nodes: rawNodes = [], edges: rawEdges = [] } = {}, { secret
   // a node that doesn't exist — and it stays silent about every value it cannot
   // prove the shape of, so a graph full of dynamic webhook payloads lints
   // exactly as it did before this existed.
-  for (const finding of inferGraphTypes({ nodes, edges: validEdges }).diagnostics) {
+  for (const finding of inferGraphTypes({ nodes, edges: validEdges }, { resolveWorkflow }).diagnostics) {
     issues.push(
       issue(
         finding.severity,

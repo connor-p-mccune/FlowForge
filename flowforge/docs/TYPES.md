@@ -90,8 +90,28 @@ this table is what has to grow with it.
 | Return output | its input |
 | Approval | `{ result: boolean, outcome: string, respondedBy?, note? }` |
 | Wait for callback | `{ result: string, payload: any, receivedAt? }` |
-| For each | `{ count, succeeded, failed, results: unknown[], errors? }` |
-| Sub-workflow | `unknown` |
+| For each | `{ count, succeeded, failed, results: T[], errors? }` — `T` from the target workflow |
+| Sub-workflow | **the target workflow's own return type** — see below |
+
+### Sub-workflows are resolved across graphs
+
+A sub-workflow node's output is whatever the target workflow returns, so the
+analysis recurses into that workflow's graph and applies the engine's own return
+rule: the `output-return` node's output if the graph has one, otherwise the last
+node in execution order that produced anything.
+
+It resolves the same targets the runner would accept — **same workspace,
+deployed** — because typing a node from a target the runner would refuse would
+report a shape the run can never produce. Three cases give up and report
+`unknown` instead, each because that is the honest answer:
+
+- a **cycle** (a workflow that calls itself, or A → B → A). The engine rejects
+  that at run time and `flowforge deps` reports it statically; inventing a type
+  for it would be fiction.
+- a call chain deeper than **three levels** — past that the work is not worth
+  doing on every keystroke.
+- a target that can't be resolved (deleted, undeployed, another workspace). The
+  linter reports the real problem in its own words.
 
 ### The Transform node is special
 

@@ -28,6 +28,7 @@ const { searchWorkflows } = require('../services/workflowSearch')
 const { diffGraphs, presentDiff } = require('../services/graphDiff')
 const { lintGraph } = require('../services/workflowLinter')
 const { describeGraphTypes } = require('../services/typeInference')
+const { graphResolver } = require('../services/graphLookup')
 const { checkWorkflow, policyIssues } = require('../services/policyGate')
 const canary = require('../services/canary')
 const { snapshotVersion } = require('../services/canaryMonitor')
@@ -682,7 +683,12 @@ router.post('/workflows/:id/lint', tokenAuth('read'), (req, res) => {
     )
 
     const issues = [
-      ...lintGraph(graph, { secretNames, variableNames, workflowTargets }),
+      ...lintGraph(graph, {
+        secretNames,
+        variableNames,
+        workflowTargets,
+        resolveWorkflow: graphResolver(workflow.workspace_id),
+      }),
       // Policy findings ride the same report, so `flowforge lint` is one gate
       // for "will it run?" and "is it allowed here?" rather than two commands.
       ...policyIssues(workflow, { graphJson: JSON.stringify(graph) }),
@@ -724,7 +730,10 @@ router.get('/workflows/:id/types', tokenAuth('read'), (req, res) => {
     } catch {
       /* unparseable stored graph — describe the empty shape */
     }
-    res.json({ workflowId: workflow.id, ...describeGraphTypes(graph) })
+    res.json({
+      workflowId: workflow.id,
+      ...describeGraphTypes(graph, { resolveWorkflow: graphResolver(workflow.workspace_id) }),
+    })
   } catch (err) {
     console.error(err)
     res.status(500).json({ error: 'Internal server error' })

@@ -81,7 +81,9 @@ describe('node output shapes match their runners', () => {
     )
   })
 
-  it('a sub-workflow is unknown — inferring another graph is not a guess worth making', () => {
+  it('a sub-workflow is unknown without a way to look its target up', () => {
+    // With a resolver it recurses into the target's graph — see the
+    // cross-workflow suite below.
     expect(only('sub-workflow')).toBe('unknown')
   })
 
@@ -476,5 +478,111 @@ describe('describeGraphTypes', () => {
     expect(paths).toContain('wouldHaveSent')
     const status = described.nodes.h.output.fields.find((f) => f.path === 'status')
     expect(status).toEqual({ path: 'status', type: 'number', optional: false })
+  })
+})
+
+describe('cross-workflow inference', () => {
+  // The resolver is a callback (typeInference has no database of its own), so
+  // these drive it directly with an in-memory library of graphs.
+  const library = {
+    'wf-return': {
+      nodes: [
+        node('t', 'trigger-manual'),
+        node('h', 'action-http'),
+        node('r', 'output-return'),
+      ],
+      edges: [edge('t', 'h'), edge('h', 'r')],
+    },
+    'wf-no-return': {
+      nodes: [node('t', 'trigger-manual'), node('a', 'ai-classify')],
+      edges: [edge('t', 'a')],
+    },
+    'wf-calls-return': {
+      nodes: [node('t', 'trigger-manual'), node('s', 'sub-workflow', { workflowId: 'wf-return' })],
+      edges: [edge('t', 's')],
+    },
+    'wf-self': {
+      nodes: [node('t', 'trigger-manual'), node('s', 'sub-workflow', { workflowId: 'wf-self' })],
+      edges: [edge('t', 's')],
+    },
+    'wf-a': {
+      nodes: [node('t', 'trigger-manual'), node('s', 'sub-workflow', { workflowId: 'wf-b' })],
+      edges: [edge('t', 's')],
+    },
+    'wf-b': {
+      nodes: [node('t', 'trigger-manual'), node('s', 'sub-workflow', { workflowId: 'wf-a' })],
+      edges: [edge('t', 's')],
+    },
+  }
+  const resolveWorkflow = (id) => library[id] || null
+
+  const callerOf = (targetId, type = 'sub-workflow') => ({
+    nodes: [node('t', 'trigger-manual'), node('s', type, { workflowId: targetId, items: '[]' })],
+    edges: [edge('t', 's')],
+  })
+
+  const outputWith = (graph, id) =>
+    T.describe(inferGraphTypes(graph, { resolveWorkflow }).outputs[id])
+
+  it('types a sub-workflow node from what its target returns', () => {
+    // The target's output-return node passes its input through, which is the
+    // HTTP node's shape.
+    expect(outputWith(callerOf('wf-return'), 's')).toMatch(/^\{ status: number, body: any/)
+  })
+
+  it('falls back to the last node with output, exactly as the engine does', () => {
+    expect(outputWith(callerOf('wf-no-return'), 's')).toBe('{ label: string }')
+  })
+
+  it('resolves through a chain of sub-workflows', () => {
+    expect(outputWith(callerOf('wf-calls-return'), 's')).toMatch(/^\{ status: number, body: any/)
+  })
+
+  it('gives up on a self-reference rather than recursing', () => {
+    expect(outputWith(callerOf('wf-self'), 's')).toBe('unknown')
+  })
+
+  it('gives up on a mutual cycle', () => {
+    // A→B→A is a stale configuration the dependency analyser reports; inventing
+    // a type for it would be worse than reporting none.
+    expect(outputWith(callerOf('wf-a'), 's')).toBe('unknown')
+  })
+
+  it('types a for-each node’s results from the same resolution', () => {
+    expect(outputWith(callerOf('wf-no-return', 'for-each'), 's'))
+      .toBe('{ count: number, succeeded: number, failed: number, results: { label: string }[], errors?: { index: number, error: string }[] }')
+  })
+
+  it('stays unknown when the caller supplies no resolver — the default', () => {
+    expect(outputOf(callerOf('wf-return'), 's')).toBe('unknown')
+  })
+
+  it('stays unknown for a target the resolver refuses', () => {
+    // Deleted, undeployed, or in another workspace — the linter reports those
+    // in its own words; here it is simply a shape we don't have.
+    expect(outputWith(callerOf('wf-missing'), 's')).toBe('unknown')
+  })
+
+  it('checks references against a resolved sub-workflow’s shape', () => {
+    const graph = {
+      nodes: [
+        node('t', 'trigger-manual'),
+        node('s', 'sub-workflow', { workflowId: 'wf-no-return' }),
+        node('l', 'output-log', { message: '{{s.lable}}' }),
+      ],
+      edges: [edge('t', 's'), edge('s', 'l')],
+    }
+    const found = inferGraphTypes(graph, { resolveWorkflow }).diagnostics
+    expect(found.map((d) => d.code)).toEqual(['unknown-field'])
+    expect(found[0].message).toMatch(/did you mean "label"\?/)
+  })
+
+  it('survives a resolver that throws', () => {
+    const angry = () => {
+      throw new Error('database is on fire')
+    }
+    expect(
+      T.describe(inferGraphTypes(callerOf('wf-return'), { resolveWorkflow: angry }).outputs.s)
+    ).toBe('unknown')
   })
 })

@@ -10,6 +10,7 @@ const scheduler = require('../services/scheduler')
 const activityService = require('../services/activityService')
 const { lintGraph } = require('../services/workflowLinter')
 const { describeGraphTypes } = require('../services/typeInference')
+const { graphResolver } = require('../services/graphLookup')
 const { checkWorkflow, policyIssues } = require('../services/policyGate')
 const stepCache = require('../services/stepCache')
 const { isValidPriority } = require('../services/runPriority')
@@ -703,7 +704,12 @@ router.post('/workflows/:id/lint', auth, (req, res) => {
     // isn't allowed here" while editing, not when the deploy button refuses.
     // Judged against the graph on screen, like every other rule above.
     const issues = [
-      ...lintGraph(graph, { secretNames, variableNames, workflowTargets }),
+      ...lintGraph(graph, {
+        secretNames,
+        variableNames,
+        workflowTargets,
+        resolveWorkflow: graphResolver(workflow.workspace_id),
+      }),
       ...policyIssues(workflow, { graphJson: JSON.stringify(graph) }),
     ]
     res.json({
@@ -747,7 +753,10 @@ router.post('/workflows/:id/types', auth, (req, res) => {
       graph = parseGraphData(workflow.graph_json)
     }
 
-    res.json({ workflowId: workflow.id, ...describeGraphTypes(graph) })
+    res.json({
+      workflowId: workflow.id,
+      ...describeGraphTypes(graph, { resolveWorkflow: graphResolver(workflow.workspace_id) }),
+    })
   } catch (err) {
     console.error(err)
     res.status(500).json({ error: 'Internal server error' })

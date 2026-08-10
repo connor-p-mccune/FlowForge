@@ -991,6 +991,19 @@ A node's input is `Object.assign` over its active upstream outputs, and
 - **A Map node's element type is whatever its mapping expression computes**,
   which comes straight back from the FXL checker — the two directions of the
   analysis feeding each other.
+- **A sub-workflow's output is resolved across graphs.** The analysis recurses
+  into the target workflow and applies the engine's own return rule, through a
+  `resolveWorkflow` callback rather than a database import — `typeInference.js`
+  stays a pure function of graphs, exactly as the policy engine's document
+  builder does. The resolver (`services/graphLookup.js`) accepts only what the
+  sub-workflow runner would accept, same workspace and deployed, because typing
+  a node from a target the runner would refuse reports a shape the run can never
+  produce — and the checker would then flag *correct* references against it. A
+  cycle, a chain deeper than three levels, and an unresolvable target all report
+  `unknown`: the first would be fiction (the engine rejects it at run time and
+  the dependency analyser reports it statically), the second is work not worth
+  doing on every keystroke, and the third is already the linter's finding in its
+  own words.
 
 ### The checker is a synthesis pass, not an inference engine
 
