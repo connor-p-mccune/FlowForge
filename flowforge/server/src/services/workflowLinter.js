@@ -19,6 +19,7 @@ const { analyze } = require('./expression')
 const { inferGraphTypes, checkReferences } = require('./typeInference')
 const { CACHEABLE_TYPES, DEFAULT_TTL_SECONDS } = require('./stepCache')
 const { compensationPlan } = require('./compensation')
+const { analyzeLineage } = require('./lineage')
 
 const PLACEHOLDER = /\{\{\s*([\w-]+(?:\.[\w-]+)*)\s*\}\}/g
 
@@ -876,6 +877,24 @@ function lintGraph({ nodes: rawNodes = [], edges: rawEdges = [] } = {}, { secret
         finding.nodeId
       )
     )
+  }
+
+  // Dataflow analysis (services/lineage.js). The passes above reason about
+  // structure, config, and the *shape* of what flows between nodes; this
+  // reasons about where that data came from and where it ends up, which is the
+  // only way to see the two problems it reports: a caller-controlled value
+  // deciding where a request goes, and a node computing something nobody reads.
+  //
+  // Additive and quiet by construction, like the type pass: every finding is a
+  // warning (a webhook that carries its own reply-to URL is a real and correct
+  // pattern), and a sink built from authored config, a variable, or a secret
+  // reports nothing at all.
+  try {
+    issues.push(...analyzeLineage({ nodes: rawNodes, edges: rawEdges }).findings)
+  } catch (err) {
+    // Lineage is an extra lens, never a gate: a graph the linter could
+    // otherwise report on must not go unlinted because this pass tripped.
+    console.error(`Lineage analysis failed: ${err.message}`)
   }
 
   const rank = { error: 0, warning: 1 }
