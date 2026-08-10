@@ -89,6 +89,11 @@ const ACTIONS = new Set([
   // worse one when nothing recorded it.
   'chaos.armed',
   'chaos.disarmed',
+  // Manually unwinding a run. Compensations fire real, irreversible side
+  // effects at real systems — a refund, a release, a deletion — and unlike the
+  // automatic rollback there is a person who decided to run them. That decision
+  // belongs in the record beside the deploys and the pauses.
+  'execution.rolled_back',
   // Surfaces that publish workspace state to people without accounts.
   'status_page.enabled',
   'status_page.rotated',

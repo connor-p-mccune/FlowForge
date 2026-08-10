@@ -11,6 +11,8 @@ const { compareRuns } = require('../services/runComparison')
 const { isValidPriority, resolvePriority, enqueueOpts } = require('../services/runPriority')
 const { forbidViewer } = require('../services/workspaceRoles')
 const { isPaused, PAUSED_ERROR } = require('../services/workflowPause')
+const { rollbackExecution } = require('../services/executionEngine')
+const { recordAudit } = require('../services/auditLog')
 
 const router = express.Router()
 
@@ -182,7 +184,15 @@ router.get('/executions/:id', auth, (req, res) => {
       /* unparseable graph — leave the empty critical path */
     }
 
-    res.json({ execution, steps, childExecutions, approvals, criticalPath })
+    // Compensating transactions: what the rollback undid, in unwind order.
+    // Empty for every run that succeeded and every workflow with no
+    // compensations, which is why it rides the existing detail response rather
+    // than a second round trip — the cost of "none" is one indexed lookup.
+    const compensations = db.prepare(
+      'SELECT * FROM execution_compensations WHERE execution_id = ? ORDER BY seq'
+    ).all(execution.id)
+
+    res.json({ execution, steps, childExecutions, approvals, criticalPath, compensations })
   } catch (err) {
     console.error(err)
     res.status(500).json({ error: 'Internal server error' })
@@ -275,6 +285,71 @@ router.post('/executions/:id/cancel', auth, (req, res) => {
     }
     const updated = db.prepare('SELECT * FROM executions WHERE id = ?').get(execution.id)
     res.status(202).json({ execution: updated })
+  } catch (err) {
+    console.error(err)
+    res.status(500).json({ error: 'Internal server error' })
+  }
+})
+
+// POST /api/executions/:id/rollback — run (or finish running) the compensating
+// actions for a run that already settled badly.
+//
+// The automatic rollback fires the moment a run fails. This exists for the case
+// it cannot handle: the compensation itself was broken. A refund endpoint that
+// was down, a credential that had rotated, a `{{…}}` that pointed at the wrong
+// field — the run lands `partial`, someone fixes the compensating node, and
+// this replays only what is still outstanding.
+//
+// Three rules, each mirroring a decision made elsewhere:
+//
+//   * Only a settled, unsuccessful run. Unwinding a run that is still going
+//     would race the engine for the same side effects, and unwinding a
+//     *successful* one is not a rollback — it is a new workflow, and pretending
+//     otherwise would give people a one-click undo with no audit story.
+//   * Only what has not already succeeded. Compensations are supposed to be
+//     idempotent and frequently are not; double-refunding a customer while
+//     cleaning up after a failure is worse than the failure was.
+//   * Viewers cannot. It fires real side effects, so it is a write.
+router.post('/executions/:id/rollback', auth, async (req, res) => {
+  try {
+    const execution = db.prepare('SELECT * FROM executions WHERE id = ?').get(req.params.id)
+    if (!execution) return res.status(404).json({ error: 'Execution not found' })
+    const workflow = getWorkflowForMember(execution.workflow_id, req.user.id)
+    if (!workflow) return res.status(404).json({ error: 'Execution not found' })
+    if (forbidViewer(res, workflow.workspace_id, req.user.id)) return
+
+    if (execution.status !== 'failed' && execution.status !== 'cancelled') {
+      return res.status(409).json({
+        error: `Only a failed or cancelled run can be rolled back — this one is ${execution.status}`,
+      })
+    }
+
+    const { outcome, results } = await rollbackExecution(execution.id)
+    if (outcome === null) {
+      return res.status(409).json({
+        error: 'Nothing to roll back — this run has no outstanding compensations',
+      })
+    }
+
+    recordAudit(workflow.workspace_id, req.user.id, 'execution.rolled_back', {
+      type: 'execution',
+      id: execution.id,
+      name: workflow.name,
+      metadata: {
+        workflowId: workflow.id,
+        outcome,
+        compensated: results.length,
+        failed: results.filter((r) => r.status === 'failed').length,
+      },
+    })
+
+    res.json({
+      executionId: execution.id,
+      outcome,
+      compensations: db.prepare(
+        'SELECT * FROM execution_compensations WHERE execution_id = ? ORDER BY seq'
+      ).all(execution.id),
+    })
   } catch (err) {
     console.error(err)
     res.status(500).json({ error: 'Internal server error' })

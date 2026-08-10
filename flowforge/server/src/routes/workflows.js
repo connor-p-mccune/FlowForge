@@ -14,6 +14,7 @@ const { graphResolver } = require('../services/graphLookup')
 const { checkWorkflow, policyIssues } = require('../services/policyGate')
 const stepCache = require('../services/stepCache')
 const { isValidPriority } = require('../services/runPriority')
+const { ROLLBACK_POLICIES } = require('../services/compensation')
 const { forbidViewer } = require('../services/workspaceRoles')
 const { pauseWorkflow, resumeWorkflow } = require('../services/workflowPause')
 const { computeDependencies } = require('../services/workflowDependencies')
@@ -372,6 +373,16 @@ function validatePriority(body) {
   return null
 }
 
+// Compensating transactions (services/compensation.js). Not nullable for the
+// same reason the priority lane isn't: a workflow always has a policy, and
+// "clearing" it means returning to the default of unwinding a failed run.
+function validateRollbackPolicy(body) {
+  if ('rollback_policy' in body && !ROLLBACK_POLICIES.includes(body.rollback_policy)) {
+    return `rollback_policy must be one of ${ROLLBACK_POLICIES.join(', ')}`
+  }
+  return null
+}
+
 router.put('/workflows/:id', auth, validate(workflowRule), (req, res) => {
   try {
     const workflow = db.prepare('SELECT * FROM workflows WHERE id = ?').get(req.params.id)
@@ -393,6 +404,8 @@ router.put('/workflows/:id', auth, validate(workflowRule), (req, res) => {
     if (heartbeatError) return res.status(400).json({ error: heartbeatError })
     const sloError = validateSlo(req.body)
     if (sloError) return res.status(400).json({ error: sloError })
+    const rollbackError = validateRollbackPolicy(req.body)
+    if (rollbackError) return res.status(400).json({ error: rollbackError })
     const handlerError = validateErrorHandler(req.body, workflow)
     if (handlerError) return res.status(400).json({ error: handlerError })
     const priorityError = validatePriority(req.body)
@@ -458,6 +471,8 @@ router.put('/workflows/:id', auth, validate(workflowRule), (req, res) => {
       'error_workflow_id' in req.body ? req.body.error_workflow_id : workflow.error_workflow_id
     const defaultPriority =
       'default_priority' in req.body ? req.body.default_priority : workflow.default_priority
+    const rollbackPolicyValue =
+      'rollback_policy' in req.body ? req.body.rollback_policy : workflow.rollback_policy
 
     const now = new Date().toISOString()
     db.prepare(
@@ -466,8 +481,8 @@ router.put('/workflows/:id', auth, validate(workflowRule), (req, res) => {
          maintenance_cron = ?, maintenance_duration_minutes = ?, maintenance_timezone = ?,
          sla_max_duration_ms = ?, sla_min_success_rate = ?, heartbeat_interval_minutes = ?, heartbeat_alerted_at = ?,
          slo_target = ?, slo_window_days = ?,
-         error_workflow_id = ?, default_priority = ?, updated_at = ? WHERE id = ?`
-    ).run(name, description ?? workflow.description, maxConcurrent, policy, rateMax, rateWindow, maintenanceCron, maintenanceDuration, maintenanceTimezone, slaMaxDuration, slaMinSuccess, heartbeatInterval, heartbeatAlertedAt, sloTarget, sloWindowDays, errorWorkflowId, defaultPriority, now, req.params.id)
+         error_workflow_id = ?, default_priority = ?, rollback_policy = ?, updated_at = ? WHERE id = ?`
+    ).run(name, description ?? workflow.description, maxConcurrent, policy, rateMax, rateWindow, maintenanceCron, maintenanceDuration, maintenanceTimezone, slaMaxDuration, slaMinSuccess, heartbeatInterval, heartbeatAlertedAt, sloTarget, sloWindowDays, errorWorkflowId, defaultPriority, rollbackPolicyValue, now, req.params.id)
 
     // Clearing (or removing) the window while it still holds a maintenance
     // pause would strand the workflow paused — the sweep no longer sees it to

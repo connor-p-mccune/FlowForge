@@ -17,6 +17,8 @@ const tokenAuth = require('../middleware/tokenAuth')
 const { publicApiLimiter } = require('../middleware/rateLimit')
 const { getExecutionQueue } = require('../config/queue')
 const { requestCancel } = require('../services/executionControl')
+const { rollbackExecution } = require('../services/executionEngine')
+const { recordAudit } = require('../services/auditLog')
 const { respondToApproval } = require('../services/approvals')
 const { admitRun } = require('../services/concurrencyGate')
 const { isValidPriority, resolvePriority, enqueueOpts } = require('../services/runPriority')
@@ -832,16 +834,24 @@ router.get('/executions/:id', tokenAuth('read'), (req, res) => {
     const steps = db.prepare(
       'SELECT id, node_id, node_type, status, input_json, output_json, error, started_at, finished_at FROM execution_steps WHERE execution_id = ? ORDER BY rowid'
     ).all(execution.id)
+    // Compensating transactions, in unwind order. A CI job that triggered this
+    // run needs to know not just that it failed but whether the cleanup took —
+    // `rollbackStatus: "partial"` is the one that has to page someone.
+    const compensations = db.prepare(
+      'SELECT node_id, target_node_id, node_type, seq, status, error, attempts, started_at, finished_at FROM execution_compensations WHERE execution_id = ? ORDER BY seq'
+    ).all(execution.id)
     res.json({
       execution: {
         id: execution.id,
         workflowId: execution.workflow_id,
         status: execution.status,
         triggerType: execution.trigger_type,
+        rollbackStatus: execution.rollback_status,
         startedAt: execution.started_at,
         finishedAt: execution.finished_at,
       },
       steps,
+      compensations,
     })
   } catch (err) {
     console.error(err)
@@ -986,6 +996,44 @@ router.post('/executions/:id/cancel', tokenAuth('trigger'), (req, res) => {
       execution: { id: execution.id, workflowId: execution.workflow_id, status: outcome === 'cancelled' ? 'cancelled' : 'running' },
       cancelling: outcome === 'cancelling',
     })
+  } catch (err) {
+    console.error(err)
+    res.status(500).json({ error: 'Internal server error' })
+  }
+})
+
+// POST /api/v1/executions/:id/rollback — run (or finish running) a settled
+// run's compensating actions.
+//
+// Requires the trigger scope rather than read: this fires real side effects at
+// real systems — refunds, releases, deletions — and is if anything the most
+// consequential thing a token can do. Only what has not already succeeded runs,
+// so a retry loop in CI cannot double-undo.
+router.post('/executions/:id/rollback', tokenAuth('trigger'), async (req, res) => {
+  try {
+    const execution = db.prepare('SELECT * FROM executions WHERE id = ?').get(req.params.id)
+    if (!execution) return res.status(404).json({ error: 'Execution not found' })
+    const workflow = getWorkflowForMember(execution.workflow_id, req.user.id)
+    if (!workflow) return res.status(404).json({ error: 'Execution not found' })
+    if (forbidViewer(res, workflow.workspace_id, req.user.id)) return
+
+    if (execution.status !== 'failed' && execution.status !== 'cancelled') {
+      return res.status(409).json({
+        error: `Only a failed or cancelled run can be rolled back — this one is ${execution.status}`,
+      })
+    }
+
+    const { outcome, results } = await rollbackExecution(execution.id)
+    if (outcome === null) {
+      return res.status(409).json({
+        error: 'Nothing to roll back — this run has no outstanding compensations',
+      })
+    }
+    recordAudit(workflow.workspace_id, req.user.id, 'execution.rolled_back', {
+      type: 'execution', id: execution.id, name: workflow.name,
+      metadata: { workflowId: workflow.id, outcome, compensated: results.length },
+    })
+    res.json({ executionId: execution.id, outcome, compensations: results })
   } catch (err) {
     console.error(err)
     res.status(500).json({ error: 'Internal server error' })

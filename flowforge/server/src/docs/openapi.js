@@ -1192,6 +1192,15 @@ const spec = {
                       type: 'array',
                       items: { $ref: '#/components/schemas/ExecutionStep' },
                     },
+                    compensations: {
+                      type: 'array',
+                      description:
+                        'Compensating actions run to unwind this run’s side ' +
+                        'effects, in unwind order (newest effect first). Empty ' +
+                        'unless the run failed and its workflow declares ' +
+                        'compensations.',
+                      items: { $ref: '#/components/schemas/Compensation' },
+                    },
                   },
                 },
               },
@@ -1200,6 +1209,52 @@ const spec = {
           401: { $ref: '#/components/responses/Unauthorized' },
           403: { $ref: '#/components/responses/Forbidden' },
           404: { $ref: '#/components/responses/NotFound' },
+          429: { $ref: '#/components/responses/RateLimited' },
+        },
+      },
+    },
+    '/executions/{executionId}/rollback': {
+      post: {
+        tags: ['executions'],
+        summary: 'Roll back a failed or cancelled run',
+        description:
+          'Runs the compensating actions for a settled run, newest side ' +
+          'effect first. A failed run unwinds automatically; this exists for ' +
+          'the case that could not — the compensating endpoint was itself ' +
+          'broken, so the run landed `partial` and someone has since fixed ' +
+          'it. Only compensations that have **not already succeeded** are ' +
+          'run, so retrying is safe and never double-undoes. Requires the ' +
+          '`trigger` scope: this fires real side effects at real systems.',
+        operationId: 'rollbackExecution',
+        parameters: [{ $ref: '#/components/parameters/ExecutionId' }],
+        responses: {
+          200: {
+            description: 'The rollback ran. `outcome` is `completed` or `partial`.',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    executionId: { type: 'string' },
+                    outcome: { type: 'string', enum: ['completed', 'partial'] },
+                    compensations: {
+                      type: 'array',
+                      items: { $ref: '#/components/schemas/Compensation' },
+                    },
+                  },
+                },
+              },
+            },
+          },
+          401: { $ref: '#/components/responses/Unauthorized' },
+          403: { $ref: '#/components/responses/Forbidden' },
+          404: { $ref: '#/components/responses/NotFound' },
+          409: {
+            description:
+              'The run is still going or succeeded, or every compensation has ' +
+              'already succeeded so there is nothing outstanding.',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } },
+          },
           429: { $ref: '#/components/responses/RateLimited' },
         },
       },
@@ -1562,8 +1617,47 @@ const spec = {
           workflowId: { type: 'string' },
           status: { $ref: '#/components/schemas/ExecutionStatus' },
           triggerType: { type: 'string', nullable: true, example: 'api' },
+          rollbackStatus: {
+            type: 'string',
+            enum: ['completed', 'partial'],
+            nullable: true,
+            description:
+              'Whether this run’s side effects were unwound by compensating ' +
+              'actions. `null` on every run that was never rolled back. ' +
+              '`partial` means at least one compensation failed after its ' +
+              'retries — the inconsistency is known and enumerated in ' +
+              '`compensations`, and a rollback can be retried for just those.',
+          },
           startedAt: { type: 'string', format: 'date-time', nullable: true },
           finishedAt: { type: 'string', format: 'date-time', nullable: true },
+        },
+      },
+      Compensation: {
+        type: 'object',
+        description:
+          'One compensating action executed during a rollback. Compensations ' +
+          'are not steps — they run after the run reached a terminal state, ' +
+          'follow no edges, and are ordered by when their target *completed* ' +
+          'rather than by the graph’s topology.',
+        properties: {
+          node_id: {
+            type: 'string',
+            description: 'The compensating node that ran.',
+          },
+          target_node_id: {
+            type: 'string',
+            description: 'The node whose effect it undid.',
+          },
+          node_type: { type: 'string', nullable: true, example: 'action-http' },
+          seq: {
+            type: 'integer',
+            description: 'Position in the unwind order — 0 is the last thing the run did.',
+          },
+          status: { type: 'string', enum: ['succeeded', 'failed'] },
+          attempts: { type: 'integer', description: 'How many tries it took.' },
+          error: { type: 'string', nullable: true },
+          started_at: { type: 'string', format: 'date-time', nullable: true },
+          finished_at: { type: 'string', format: 'date-time', nullable: true },
         },
       },
       ExecutionSummary: {
