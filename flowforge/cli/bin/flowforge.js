@@ -19,6 +19,7 @@ const COMMANDS = {
   import: require('../src/commands/import'),
   diff: require('../src/commands/diff'),
   lint: require('../src/commands/lint'),
+  types: require('../src/commands/types'),
   trigger: require('../src/commands/trigger'),
   pause: require('../src/commands/pause'),
   unpause: require('../src/commands/resume-workflow'),
@@ -51,6 +52,7 @@ Usage:
   flowforge import <workspace-id> <file> [--name]  Create a draft workflow from an exported file
   flowforge diff <workflow-id> <file>              Compare the live workflow against an exported file (exits non-zero on drift)
   flowforge lint <workflow-id> [file] [--strict]   Lint the live workflow — or an exported file against its workspace (exits non-zero on errors)
+  flowforge types <workflow-id> [--node <id>]      Inferred data schema per node — what each one produces (exits non-zero on a type error)
   flowforge trigger <workflow-id> [--data <json>] [--key <idempotency-key>] [--priority high|normal|low] [--watch]
   flowforge pause <workflow-id>                    Hold all new runs (kill switch) — needs a manage token
   flowforge unpause <workflow-id>                  Release the pause and accept runs again

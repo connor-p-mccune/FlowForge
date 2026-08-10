@@ -724,3 +724,62 @@ describe('POST /api/workflows/:id/lint', () => {
     expect(res.status).toBe(404)
   })
 })
+
+// Type analysis is the linter's last pass and the only one that reasons about
+// the *data* moving between nodes rather than each node in isolation. These
+// tests pin the two things that matter about it as a lint rule: that it catches
+// what the structural passes cannot, and that it never re-reports what they
+// already own.
+describe('lintGraph — type analysis', () => {
+  it('flags a reference to a field the upstream node cannot produce', () => {
+    const graph = {
+      nodes: [
+        node('t1', 'trigger-manual'),
+        node('h1', 'action-http', { url: 'https://api.example.com' }),
+        node('o1', 'output-log', { message: 'code {{h1.stats}}' }),
+      ],
+      edges: [edge('t1', 'h1'), edge('h1', 'o1')],
+    }
+    const found = lintGraph(graph).find((i) => i.code === 'unknown-field')
+    expect(found).toMatchObject({ severity: 'error', nodeId: 'o1' })
+    expect(found.message).toMatch(/has no "stats"; did you mean "status"\?/)
+  })
+
+  it('flags an expression that cannot typecheck against its real scope', () => {
+    const graph = {
+      nodes: [
+        node('t1', 'trigger-manual'),
+        node('f1', 'filter', { source: '[1, 2, 3]', predicate: 'item > 1' }),
+        node('c1', 'condition', { operator: 'expression', expression: 'items * 2 > 4' }),
+      ],
+      edges: [edge('t1', 'f1'), edge('f1', 'c1')],
+    }
+    const found = lintGraph(graph).find((i) => i.code === 'type-error')
+    expect(found).toMatchObject({ severity: 'error', nodeId: 'c1' })
+    expect(found.message).toMatch(/c1: the condition expression: "\*" needs numbers/)
+  })
+
+  it('does not re-report a syntax error the expression pass already owns', () => {
+    const graph = {
+      nodes: [
+        node('t1', 'trigger-manual'),
+        node('c1', 'condition', { operator: 'expression', expression: 'amount >' }),
+      ],
+      edges: [edge('t1', 'c1')],
+    }
+    expect(codes(lintGraph(graph)).filter((c) => c !== 'unwired-branch'))
+      .toEqual(['invalid-expression'])
+  })
+
+  it('stays silent on a graph built entirely from dynamic data', () => {
+    const graph = {
+      nodes: [
+        node('t1', 'trigger-webhook'),
+        node('h1', 'action-http', { url: 'https://api.example.com/{{t1.orderId}}' }),
+        node('o1', 'output-log', { message: 'total {{h1.body.order.total}}' }),
+      ],
+      edges: [edge('t1', 'h1'), edge('h1', 'o1')],
+    }
+    expect(lintGraph(graph)).toEqual([])
+  })
+})

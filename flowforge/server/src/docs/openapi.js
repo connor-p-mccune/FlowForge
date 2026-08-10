@@ -1001,6 +1001,37 @@ const spec = {
         },
       },
     },
+    '/workflows/{workflowId}/types': {
+      get: {
+        tags: ['workflows'],
+        summary: 'Inferred data schema of the workflow',
+        description:
+          'The static type of the data flowing through the stored graph: what ' +
+          'each node receives, what it produces, and the flattened ' +
+          '`{{node.path}}` references it offers. Derived from each runner’s ' +
+          'output contract and propagated across the DAG — no run history is ' +
+          'consulted, so a workflow that has never executed still reports a ' +
+          'schema. Types are `unknown` where nothing can honestly be claimed ' +
+          '(a parsed HTTP body, a sub-workflow’s return). Requires the `read` ' +
+          'scope.',
+        operationId: 'getWorkflowTypes',
+        parameters: [{ $ref: '#/components/parameters/WorkflowId' }],
+        responses: {
+          200: {
+            description: 'The inferred schema, keyed by node id.',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/TypeReport' },
+              },
+            },
+          },
+          401: { $ref: '#/components/responses/Unauthorized' },
+          403: { $ref: '#/components/responses/Forbidden' },
+          404: { $ref: '#/components/responses/NotFound' },
+          429: { $ref: '#/components/responses/RateLimited' },
+        },
+      },
+    },
     '/workflows/{workflowId}/tests/run': {
       post: {
         tags: ['workflows'],
@@ -1794,6 +1825,70 @@ const spec = {
             properties: {
               errors: { type: 'integer' },
               warnings: { type: 'integer' },
+            },
+          },
+        },
+      },
+      TypeReport: {
+        type: 'object',
+        properties: {
+          workflowId: { type: 'string' },
+          order: {
+            type: 'array',
+            description: 'Node ids in topological order. Empty when the graph has a cycle.',
+            items: { type: 'string' },
+          },
+          nodes: {
+            type: 'object',
+            description:
+              'Keyed by node id. `described` is the human rendering (e.g. ' +
+              '`{ status: number, body: any }`); `type` is the machine-readable ' +
+              'lattice value; `fields` flattens the pickable `{{node.path}}` ' +
+              'references the output offers.',
+            additionalProperties: {
+              type: 'object',
+              properties: {
+                input: {
+                  type: 'object',
+                  properties: {
+                    type: { type: 'object' },
+                    described: { type: 'string' },
+                  },
+                },
+                output: {
+                  type: 'object',
+                  properties: {
+                    type: { type: 'object' },
+                    described: { type: 'string' },
+                    fields: {
+                      type: 'array',
+                      items: {
+                        type: 'object',
+                        properties: {
+                          path: { type: 'string', example: 'body.total' },
+                          type: { type: 'string', example: 'number' },
+                          optional: { type: 'boolean' },
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+          diagnostics: {
+            type: 'array',
+            description:
+              'Type findings, the same ones the lint report carries as ' +
+              '`unknown-field` and `type-error`.',
+            items: {
+              type: 'object',
+              properties: {
+                severity: { type: 'string', enum: ['error', 'warning'] },
+                code: { type: 'string', example: 'unknown-field' },
+                message: { type: 'string' },
+                nodeId: { type: 'string' },
+              },
             },
           },
         },

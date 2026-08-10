@@ -9,6 +9,7 @@ const { validate } = require('../middleware/validate')
 const scheduler = require('../services/scheduler')
 const activityService = require('../services/activityService')
 const { lintGraph } = require('../services/workflowLinter')
+const { describeGraphTypes } = require('../services/typeInference')
 const stepCache = require('../services/stepCache')
 const { isValidPriority } = require('../services/runPriority')
 const { forbidViewer } = require('../services/workspaceRoles')
@@ -700,6 +701,41 @@ router.post('/workflows/:id/lint', auth, (req, res) => {
         warnings: issues.filter((i) => i.severity === 'warning').length,
       },
     })
+  } catch (err) {
+    console.error(err)
+    res.status(500).json({ error: 'Internal server error' })
+  }
+})
+
+// POST /api/workflows/:id/types — the inferred data schema of every node in
+// the graph: what each one receives and what it produces
+// (services/typeInference.js).
+//
+// The same body contract as lint, for the same reason: the canvas asks about
+// the graph on screen, which may not be saved yet. It is the *authoring*
+// surface — the config panel's "insert data from upstream" list is built from
+// `output.fields`, so what a user can pick is exactly what the node will
+// actually have, rather than a guess assembled from the last recorded run.
+//
+// Read-only and pure: no run, no writes, nothing touched.
+router.post('/workflows/:id/types', auth, (req, res) => {
+  try {
+    const workflow = db.prepare('SELECT * FROM workflows WHERE id = ?').get(req.params.id)
+    if (!workflow || !isMember(workflow.workspace_id, req.user.id)) {
+      return res.status(404).json({ error: 'Workflow not found' })
+    }
+
+    let graph
+    if (req.body && Array.isArray(req.body.nodes) && Array.isArray(req.body.edges)) {
+      if (req.body.nodes.length > 2000 || req.body.edges.length > 5000) {
+        return res.status(400).json({ error: 'Graph too large to analyse' })
+      }
+      graph = { nodes: req.body.nodes, edges: req.body.edges }
+    } else {
+      graph = parseGraphData(workflow.graph_json)
+    }
+
+    res.json({ workflowId: workflow.id, ...describeGraphTypes(graph) })
   } catch (err) {
     console.error(err)
     res.status(500).json({ error: 'Internal server error' })

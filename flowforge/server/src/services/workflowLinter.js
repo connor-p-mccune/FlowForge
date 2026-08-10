@@ -16,6 +16,7 @@
 const cron = require('node-cron')
 const { buildAdjacency, topoSort } = require('./dagParser')
 const { analyze } = require('./expression')
+const { inferGraphTypes } = require('./typeInference')
 const { CACHEABLE_TYPES, DEFAULT_TTL_SECONDS } = require('./stepCache')
 
 const PLACEHOLDER = /\{\{\s*([\w-]+(?:\.[\w-]+)*)\s*\}\}/g
@@ -378,6 +379,7 @@ function lintGraph({ nodes: rawNodes = [], edges: rawEdges = [] } = {}, { secret
   }
 
   const nodeIds = new Set(nodes.map((n) => n.id))
+  const nodeById = Object.fromEntries(nodes.map((n) => [n.id, n]))
 
   // Structural problems first — an edge into nowhere breaks the run before any
   // node executes, and a cycle can't be ordered at all.
@@ -673,6 +675,30 @@ function lintGraph({ nodes: rawNodes = [], edges: rawEdges = [] } = {}, { secret
         )
       }
     }
+  }
+
+  // Type analysis. Everything above reasons about the graph's *structure* and
+  // each node's config in isolation; this reasons about the data flowing
+  // between them (services/typeInference.js) and reports the two classes only a
+  // schema can see: a `{{node.field}}` that cannot resolve, and an FXL
+  // expression that doesn't typecheck against what its scope actually holds.
+  //
+  // Deliberately last and deliberately additive. It never re-reports anything
+  // the passes above own — a syntax error, an unknown function, a reference to
+  // a node that doesn't exist — and it stays silent about every value it cannot
+  // prove the shape of, so a graph full of dynamic webhook payloads lints
+  // exactly as it did before this existed.
+  for (const finding of inferGraphTypes({ nodes, edges: validEdges }).diagnostics) {
+    issues.push(
+      issue(
+        finding.severity,
+        finding.code,
+        finding.code === 'unknown-field'
+          ? finding.message
+          : `${label(nodeById[finding.nodeId] || { id: finding.nodeId })}: ${finding.message}`,
+        finding.nodeId
+      )
+    )
   }
 
   const rank = { error: 0, warning: 1 }

@@ -6,6 +6,7 @@ const CODES = {
   red: '31',
   yellow: '33',
   gray: '90',
+  cyan: '36',
   bold: '1',
 }
 
@@ -21,6 +22,7 @@ const green = (t) => paint(t, CODES.green)
 const red = (t) => paint(t, CODES.red)
 const yellow = (t) => paint(t, CODES.yellow)
 const gray = (t) => paint(t, CODES.gray)
+const cyan = (t) => paint(t, CODES.cyan)
 const bold = (t) => paint(t, CODES.bold)
 
 // Run/step statuses → a consistent palette across every command.
@@ -55,4 +57,4 @@ function formatDuration(startedAt, finishedAt) {
   return ms < 10_000 ? `${(ms / 1000).toFixed(1)}s` : `${Math.round(ms / 1000)}s`
 }
 
-module.exports = { green, red, yellow, gray, bold, statusColored, table, formatDuration }
+module.exports = { green, red, yellow, gray, cyan, bold, statusColored, table, formatDuration }

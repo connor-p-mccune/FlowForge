@@ -27,6 +27,7 @@ const { compareRuns } = require('../services/runComparison')
 const { searchWorkflows } = require('../services/workflowSearch')
 const { diffGraphs, presentDiff } = require('../services/graphDiff')
 const { lintGraph } = require('../services/workflowLinter')
+const { describeGraphTypes } = require('../services/typeInference')
 const { forbidViewer, memberRole } = require('../services/workspaceRoles')
 const { isPaused, PAUSED_ERROR, pauseWorkflow, resumeWorkflow } = require('../services/workflowPause')
 const { computeDependencies } = require('../services/workflowDependencies')
@@ -674,6 +675,36 @@ router.post('/workflows/:id/lint', tokenAuth('read'), (req, res) => {
       issues,
       summary: { errors, warnings },
     })
+  } catch (err) {
+    console.error(err)
+    res.status(500).json({ error: 'Internal server error' })
+  }
+})
+
+// GET /api/v1/workflows/:id/types — the inferred data schema of the stored
+// graph: every node's input and output shape, plus the flattened `{{…}}`
+// references each one offers.
+//
+// A read, not a gate: the lint endpoint above already fails CI on a type
+// error, and this is what you fetch when you want to *see* the contract — to
+// diff a schema across a promotion, or to generate types for the code on the
+// other side of a workflow's webhook. Cheap and side-effect-free, so the
+// `read` scope is the whole authorisation story.
+router.get('/workflows/:id/types', tokenAuth('read'), (req, res) => {
+  try {
+    const workflow = getWorkflowForMember(req.params.id, req.user.id)
+    if (!workflow) return res.status(404).json({ error: 'Workflow not found' })
+    let graph = { nodes: [], edges: [] }
+    try {
+      const parsed = JSON.parse(workflow.graph_json)
+      graph = {
+        nodes: Array.isArray(parsed.nodes) ? parsed.nodes : [],
+        edges: Array.isArray(parsed.edges) ? parsed.edges : [],
+      }
+    } catch {
+      /* unparseable stored graph — describe the empty shape */
+    }
+    res.json({ workflowId: workflow.id, ...describeGraphTypes(graph) })
   } catch (err) {
     console.error(err)
     res.status(500).json({ error: 'Internal server error' })

@@ -47,6 +47,7 @@ export FLOWFORGE_TOKEN=ffp_…
 | `flowforge import <ws-id> <file> [--name "…"]` | Create a draft workflow from an exported file — promote definitions between environments (needs the `manage` scope) |
 | `flowforge diff <id> <file>` | Compare the **live** workflow against an exported file — exits non-zero on drift, so CI catches the promotion someone forgot (or the hand-edit someone made) |
 | `flowforge lint <id> [file] [--strict]` | Run the app's linter as a CI gate — over the live workflow, or over an exported file against its target workspace (real secret/variable names, sub-workflow targets); exits non-zero on errors, `--strict` fails warnings too |
+| `flowforge types <id> [--node <id>] [--json]` | The workflow's inferred data schema — what each node produces and the exact `{{node.path}}` references it offers; exits non-zero on a type error ([docs](../docs/TYPES.md)) |
 | `flowforge search <query> [--limit N]` | Find workflows by name **or by what's inside them** — node labels, config strings, sticky notes ([docs](../docs/API.md#search-workflows)) |
 | `flowforge trigger <id> [--data <json>] [--key <k>] [--priority high\|normal\|low] [--watch]` | Start a run; `--key` sets an [`Idempotency-Key`](../docs/API.md#trigger-a-workflow) so retries are safe; `--priority` picks the queue lane |
 | `flowforge pause <id>` | Kill switch — hold **all** new runs (manual, API, webhook, schedule, error-handler) while in-flight runs settle; wrap a deploy window so no cron tick fires into a half-migrated system (needs the `manage` scope) |
@@ -98,6 +99,27 @@ is caught before the import, not at the first 3am run:
 
 Without a file it lints the live workflow. Errors always fail the job;
 `--strict` fails warnings (unreachable nodes, half-wired branches) too.
+
+## Ask what a node actually produces
+
+`types` prints the workflow's inferred schema — every node's output shape,
+derived from the runners' contracts and propagated across the graph, so it
+holds for a workflow that has never run. `--node` narrows to one node and
+lists its references in the form you paste into a config:
+
+```console
+$ flowforge types 6f0c… --node http-1
+http-1
+  in  { triggered: boolean, … }
+  out { status: number, body: any }
+
+  references:
+    {{http-1.status}} number
+    {{http-1.body}} any
+```
+
+`--json` prints the machine-readable lattice, which is the useful form for
+diffing a schema across a promotion.
 
 ## Gate a deploy on definition drift
 
