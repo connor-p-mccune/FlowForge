@@ -84,6 +84,11 @@ const ACTIONS = new Set([
   'policy.updated',
   'policy.deleted',
   'policy.overridden',
+  // Deliberate faults. "Why did the 3am runs fail?" has a much better answer
+  // when the record shows someone armed a chaos profile at 2:50 — and a much
+  // worse one when nothing recorded it.
+  'chaos.armed',
+  'chaos.disarmed',
   // Surfaces that publish workspace state to people without accounts.
   'status_page.enabled',
   'status_page.rotated',

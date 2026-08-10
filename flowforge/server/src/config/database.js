@@ -295,6 +295,18 @@ db.exec(`
     ON executions (workflow_id, release_channel, created_at);
 `)
 
+// Chaos profile (services/faultInjection.js): deliberate faults injected into a
+// workflow's steps so the failure machinery — retries, on-error branches,
+// error-handler workflows, SLA budgets — can be exercised on purpose instead of
+// waiting for a real dependency to break. JSON: { enabled, scope, expiresAt,
+// rules[] }. NULL = no profile.
+//
+// Stored as one column rather than a table because it is per-workflow config
+// with no independent lifetime and no query of its own — and because every
+// profile carries a mandatory `expiresAt`, so the rows would be transient
+// anyway. Chaos is an experiment, not a setting.
+ensureColumn('workflows', 'chaos_config', 'TEXT')
+
 // Two-factor authentication (TOTP). Optional, opt-in per user. totp_enabled stays
 // 0 until the user verifies a code from their authenticator, so a half-finished
 // setup never locks them out of login. totp_backup_codes is a JSON array of

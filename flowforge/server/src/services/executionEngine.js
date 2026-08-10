@@ -11,7 +11,13 @@ const { v4: uuidv4 } = require('uuid')
 const db = require('../config/database')
 const { buildAdjacency, topoSort } = require('./dagParser')
 const { decryptSecret } = require('./secretVault')
-const { recordExecution, recordStepCache, recordStepCost } = require('./metrics')
+const {
+  recordExecution,
+  recordStepCache,
+  recordStepCost,
+  recordFaultInjected,
+} = require('./metrics')
+const faultInjection = require('./faultInjection')
 const costModel = require('./costModel')
 const stepCache = require('./stepCache')
 const tracing = require('./tracing')
@@ -231,8 +237,34 @@ function defaultPublish(payload) {
     .catch((err) => console.error('Failed to publish exec-update:', err.message))
 }
 
-async function runWithRetries(node, config, input, isDryRun, ctx) {
-  const runner = getRunner(node.type)
+// A node's runner, wrapped by the run's chaos profile when one applies. The
+// fault is resolved *once per node*, not per attempt, so a `fail` rule
+// genuinely exercises the retry ladder — a node that re-drew its luck between
+// attempts would test the retries' existence rather than their behaviour.
+//
+// Each mode intervenes at a different point, which is the whole vocabulary:
+// `fail` replaces the call, `delay` precedes it, and `stub` substitutes its
+// result.
+function applyFault(runner, fault) {
+  if (!fault) return runner
+  recordFaultInjected(fault.mode)
+  if (fault.mode === 'fail') {
+    return async () => {
+      throw new Error(`[chaos] ${fault.message}`)
+    }
+  }
+  if (fault.mode === 'delay') {
+    return async (...args) => {
+      await sleep(fault.delayMs)
+      return runner(...args)
+    }
+  }
+  // stub: the node never runs, and downstream receives the canned output.
+  return async () => ({ ...fault.output })
+}
+
+async function runWithRetries(node, config, input, isDryRun, ctx, fault) {
+  const runner = applyFault(getRunner(node.type), fault)
   const maxAttempts = SINGLE_ATTEMPT_TYPES.has(node.type) ? 1 : MAX_ATTEMPTS
   for (let attempt = 1; ; attempt++) {
     try {
@@ -298,6 +330,12 @@ async function runExecution(
   const release = canary.resolveRelease(execution, workflow, { dryRun })
   canary.recordRelease(executionId, release)
   const graph = JSON.parse(release.graphJson)
+
+  // Chaos profile, if this workflow has an armed one. Loading it here (rather
+  // than per node) means one parse per run and one decision about scope: a
+  // profile limited to test runs resolves to null on a real one, so nothing
+  // downstream has to remember the rule.
+  const chaosProfile = faultInjection.loadProfile(workflow.chaos_config)
   // Sticky notes are canvas annotations, not steps: they never execute, get
   // no step rows, and any edge touching one (only possible in a hand-edited
   // import — the UI renders notes without handles) is dropped with them.
@@ -716,7 +754,10 @@ async function runExecution(
           // than of the run as a whole.
           traceparent: tracing.formatTraceparent(traceId, spanIdByNode[nodeId], true),
         }
-        const raw = (await runWithRetries(node, config, input, dryRun, ctx)) ?? {}
+        // Resolved once, before the retry ladder, so a `fail` rule exercises
+        // the retries rather than re-rolling its luck between them.
+        const fault = faultInjection.faultFor(chaosProfile, node, { executionId, dryRun })
+        const raw = (await runWithRetries(node, config, input, dryRun, ctx, fault)) ?? {}
         // Metering rides back from a runner on a reserved `usage` key, which is
         // then stripped: cost accounting is a side channel from runner to
         // engine, not data. Leaving it in would put token counts into the

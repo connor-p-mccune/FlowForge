@@ -253,6 +253,16 @@ const runsBudgetBlocked = counter(
   'Run submissions refused because the workspace was over its budget.'
 )
 
+// Deliberate faults (services/faultInjection.js), by mode. Counting them is
+// what keeps a chaos run distinguishable from a real incident: a spike in
+// execution failures next to a spike here is an experiment, and the same spike
+// with this counter flat is an outage.
+const faultsInjected = counter(
+  'flowforge_faults_injected_total',
+  'Faults injected into steps by a chaos profile, by mode.',
+  ['mode']
+)
+
 const processUptime = gauge('process_uptime_seconds', 'Process uptime in seconds.')
 const processMemory = gauge(
   'process_resident_memory_bytes',
@@ -334,6 +344,11 @@ function recordBudgetBlocked() {
   runsBudgetBlocked.inc({})
 }
 
+// Called by the engine each time a chaos profile alters a step.
+function recordFaultInjected(mode) {
+  faultsInjected.inc({ mode })
+}
+
 module.exports = {
   counter,
   gauge,
@@ -351,6 +366,7 @@ module.exports = {
   recordRateLimited,
   recordStepCost,
   recordBudgetBlocked,
+  recordFaultInjected,
   queueJobs,
   webhookPending,
 }
