@@ -291,6 +291,68 @@ function OnErrorField({ config, setConfig }) {
   )
 }
 
+// Node types that can be a compensation — the same set the server's
+// compensation service accepts. Triggers have nothing to emit and branching
+// nodes have nowhere to route, because a rollback follows no edges.
+const COMPENSATION_TYPES = new Set([
+  'action-http', 'action-delay', 'action-email', 'action-slack',
+  'transform', 'filter', 'map', 'aggregate',
+  'ai-prompt', 'ai-classify', 'ai-extract',
+  'output-log', 'output-return',
+  'sub-workflow', 'for-each',
+])
+
+// "This node undoes…" — turns an ordinary action node into another node's
+// compensating action.
+//
+// The field is a picker over the graph rather than a free-text id, because the
+// failure mode this whole feature has to avoid is a compensation that looks
+// armed and silently never runs — and a typo'd node id is the easiest way to
+// get one. (The linter catches it too; this stops it being typed.)
+//
+// Turning it on visibly changes what the node *is*: it leaves the forward
+// graph, so the panel says so rather than leaving the author to discover it
+// when the node never executes.
+function CompensationField({ config, setConfig, node, nodes = [] }) {
+  const value = config.compensates || ''
+  // Everything that could plausibly have a side effect worth undoing: any node
+  // but this one, other compensations, and sticky notes.
+  const candidates = nodes.filter(
+    (n) =>
+      n.id !== node.id &&
+      n.type !== 'note' &&
+      !n.type.startsWith('trigger-') &&
+      !n.data?.config?.compensates
+  )
+
+  return (
+    <>
+      <label className="config-panel__field">
+        <span>This node undoes</span>
+        <select value={value} onChange={(e) => setConfig('compensates', e.target.value || undefined)}>
+          <option value="">Nothing — it’s a normal step</option>
+          {candidates.map((n) => (
+            <option key={n.id} value={n.id}>
+              {n.data?.label || n.id}
+            </option>
+          ))}
+        </select>
+      </label>
+      {value && (
+        <p className="config-panel__hint">
+          This node has left the normal flow: it never runs on the happy path and
+          its connections are ignored. It runs only if the run fails <em>after</em>{' '}
+          <strong>{nodes.find((n) => n.id === value)?.data?.label ?? value}</strong>{' '}
+          succeeded — and compensations run newest-first, so it goes after
+          anything that happened later. Its input is that node’s output, and{' '}
+          <code>{'{{rollback.error}}'}</code> holds the failure that caused the
+          unwind.
+        </p>
+      )}
+    </>
+  )
+}
+
 // Node types whose output the engine will memoise (services/stepCache.js on
 // the server): pure input→output computations plus calls the author can
 // declare idempotent. Side-effect actions (email/Slack), branching/waiting
@@ -1100,6 +1162,9 @@ export default function NodeConfigPanel({
           <CacheField config={config} setConfig={setConfig} nodeType={node.type} />
         )}
         {CATCHABLE_TYPES.has(node.type) && <OnErrorField config={config} setConfig={setConfig} />}
+        {COMPENSATION_TYPES.has(node.type) && (
+          <CompensationField config={config} setConfig={setConfig} node={node} nodes={nodes} />
+        )}
         {/* Notes are annotations — no upstream data to explore, nothing to bench. */}
         {node.type !== 'note' && (
           <VariableExplorer

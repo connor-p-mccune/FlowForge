@@ -4,6 +4,7 @@ import { useToast } from '../../hooks/useToast'
 import { StepList } from './ExecutionPanel'
 import ExecutionTimeline from './ExecutionTimeline'
 import RunComparison from './RunComparison'
+import RollbackSection from './RollbackSection'
 import { SkeletonRows } from '../Skeleton'
 
 function parseSteps(rows) {
@@ -175,7 +176,7 @@ export default function ExecutionHistory({ workflowId, nodes, autoOpenId }) {
     setPendingResume(null)
     setDetailView('steps')
     try {
-      const { execution, steps, childExecutions, criticalPath } = await apiFetch(
+      const { execution, steps, childExecutions, criticalPath, compensations } = await apiFetch(
         `/api/executions/${executionId}`
       )
       setSelected({
@@ -183,6 +184,7 @@ export default function ExecutionHistory({ workflowId, nodes, autoOpenId }) {
         steps: parseSteps(steps),
         childExecutionsByNode: buildChildMap(childExecutions),
         criticalPath,
+        compensations,
       })
     } catch (err) {
       setError(err.message)
@@ -349,6 +351,14 @@ export default function ExecutionHistory({ workflowId, nodes, autoOpenId }) {
             childExecutionsByNode={selected.childExecutionsByNode}
           />
         )}
+        {/* Below the steps, because it happened after them: the run failed
+            first, and the unwind is what came next. */}
+        <RollbackSection
+          execution={selected.execution}
+          compensations={selected.compensations}
+          nodes={nodes}
+          onRolledBack={() => openRun(selected.execution.id)}
+        />
       </div>
     )
   }

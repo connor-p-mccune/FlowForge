@@ -45,6 +45,9 @@ export default function RunSettingsPanel({ workflowId, open, onClose }) {
   // refuses self-handling).
   const [handlerId, setHandlerId] = useState('')
   const [handlerOptions, setHandlerOptions] = useState([])
+  // Compensating transactions: what a run that ends badly does about the side
+  // effects it already caused. 'failure' (default) | 'failure-or-cancel' | 'off'.
+  const [rollbackPolicy, setRollbackPolicy] = useState('failure')
   // Cross-workflow dependencies (read-only impact analysis). null while
   // loading; a fetch failure just hides the section — it's informational.
   const [deps, setDeps] = useState(null)
@@ -89,6 +92,7 @@ export default function RunSettingsPanel({ workflowId, open, onClose }) {
           setRateUnit(unit)
         }
         setPriority(wf.default_priority || 'normal')
+        setRollbackPolicy(wf.rollback_policy || 'failure')
         // Stored in ms / as a 0..1 fraction; shown in the friendlier seconds / %.
         setSlaDurationInput(wf.sla_max_duration_ms ? String(wf.sla_max_duration_ms / 1000) : '')
         setSlaSuccessInput(
@@ -228,6 +232,7 @@ export default function RunSettingsPanel({ workflowId, open, onClose }) {
           maintenance_timezone: maintenanceCron === null ? null : maintTimezone || null,
           error_workflow_id: handlerId || null,
           default_priority: priority,
+          rollback_policy: rollbackPolicy,
         },
       })
       toast.success('Run settings saved')
@@ -237,6 +242,17 @@ export default function RunSettingsPanel({ workflowId, open, onClose }) {
     } finally {
       setSaving(false)
     }
+  }
+
+  // How many compensations this workflow declares. Read from the saved graph
+  // rather than tracked separately: a compensation *is* a node with a field
+  // set, so counting them is the only definition that can't drift.
+  let compensationCount = 0
+  try {
+    const graph = JSON.parse(workflow?.graph_json || '{}')
+    compensationCount = (graph.nodes || []).filter((n) => n.data?.config?.compensates).length
+  } catch {
+    /* unparseable graph — the section still renders, just without the count */
   }
 
   return (
@@ -442,6 +458,41 @@ export default function RunSettingsPanel({ workflowId, open, onClose }) {
                 across daylight-saving changes. Its <em>length</em> is elapsed time —
                 a two-hour freeze is two real hours even when the clocks move inside it.
               </p>
+
+              <div className="run-settings__section">Rollback</div>
+              <p className="webhook-panel__hint">
+                A node can declare another node as its <strong>compensation</strong>{' '}
+                (in that node’s config). When a run ends badly, FlowForge runs
+                those compensations for the steps that already succeeded, in{' '}
+                <em>reverse order</em> — the charge is refunded before the
+                reservation is released.
+                {compensationCount > 0 && (
+                  <> This workflow declares <strong>{compensationCount}</strong>.</>
+                )}
+              </p>
+              <label className="run-settings__field">
+                <span className="run-settings__label">Unwind a run that</span>
+                <select value={rollbackPolicy} onChange={(e) => setRollbackPolicy(e.target.value)}>
+                  <option value="failure">Failed (default)</option>
+                  <option value="failure-or-cancel">Failed or was cancelled</option>
+                  <option value="off">Never — don’t run compensations</option>
+                </select>
+              </label>
+              {rollbackPolicy === 'off' && compensationCount > 0 && (
+                <p className="webhook-panel__hint">
+                  The kill switch: the {compensationCount} compensation
+                  {compensationCount === 1 ? '' : 's'} on this canvas stay drawn
+                  and stop executing. Use it when the compensating endpoint is
+                  itself the broken thing.
+                </p>
+              )}
+              {rollbackPolicy === 'failure-or-cancel' && (
+                <p className="webhook-panel__hint">
+                  Stopping a run will also undo what it had already done —
+                  right for a half-finished deploy, wrong for a half-finished
+                  report you’d rather keep.
+                </p>
+              )}
 
               <div className="run-settings__section">Error handler</div>
               <p className="webhook-panel__hint">

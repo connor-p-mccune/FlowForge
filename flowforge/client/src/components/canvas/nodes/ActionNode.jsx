@@ -11,7 +11,20 @@ export default function ActionNode({ data, selected }) {
   return (
     <div className={`node node--action${selected ? ' node--selected' : ''}`}>
       <Handle type="target" position={Position.Top} />
-      <div className="node__label">{data.label || 'Action'}</div>
+      <div className="node__label">
+        {data.label || 'Action'}
+        {/* A compensation never runs on the happy path. Saying so on the node
+            itself is the difference between "deliberately outside the flow"
+            and "mysteriously never executes". */}
+        {data.config?.compensates && (
+          <span
+            className="node-compensation-badge"
+            title={`Runs only during a rollback, to undo ${data.config.compensates}`}
+          >
+            ↩ undo
+          </span>
+        )}
+      </div>
       <div className="node__type">{data.config?.method || data.subtype || 'HTTP Request'}</div>
 
       {dryRun && (

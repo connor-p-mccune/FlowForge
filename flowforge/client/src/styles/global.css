@@ -7122,3 +7122,143 @@ html, body, #root {
   padding: 6px 8px;
   resize: vertical;
 }
+
+/* ── Compensating transactions ───────────────────────────────────────────
+   The rollback of a failed run, on the run detail. The section is styled to
+   read as an *aftermath* rather than another list of steps — it sits below
+   them because it happened after them — and a partial rollback is deliberately
+   loud: it means real side effects are still standing in production. */
+.rollback {
+  margin-top: 16px;
+  padding: 12px 14px;
+  border: 1px solid var(--border, #e2e8f0);
+  border-left: 3px solid #06b6d4;
+  border-radius: 8px;
+  background: var(--surface-muted, #f8fafc);
+}
+
+.rollback--partial {
+  border-left-color: #dc2626;
+  background: #fef2f2;
+}
+
+.rollback__header {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.rollback__title {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text, #0f172a);
+}
+
+.rollback--partial .rollback__title {
+  color: #991b1b;
+}
+
+.rollback__summary {
+  font-size: 12px;
+  color: var(--text-muted, #64748b);
+}
+
+.rollback__warning {
+  margin: 8px 0 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: #991b1b;
+}
+
+.rollback__list {
+  list-style: none;
+  margin: 10px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.rollback__row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  font-size: 12px;
+}
+
+.rollback__node {
+  font-weight: 600;
+  color: var(--text, #0f172a);
+}
+
+.rollback__undoes {
+  color: var(--text-muted, #64748b);
+}
+
+.rollback__attempts {
+  padding: 0 5px;
+  border-radius: 6px;
+  background: #fef3c7;
+  color: #92400e;
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.rollback__error {
+  flex-basis: 100%;
+  padding-left: 4px;
+  color: #b91c1c;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  word-break: break-word;
+}
+
+.rollback__retry {
+  margin-top: 10px;
+  padding: 6px 12px;
+  border: 1px solid #dc2626;
+  border-radius: 6px;
+  background: #dc2626;
+  color: #fff;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.rollback__retry:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.rollback__confirm {
+  margin-top: 10px;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.rollback__confirm-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+/* A node that is another node's compensation. It never runs on the happy path,
+   so the canvas says so at a glance rather than leaving it looking like an
+   ordinary step that mysteriously never executes. */
+.node-compensation-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  margin-left: 6px;
+  padding: 0 5px;
+  border-radius: 6px;
+  background: #cffafe;
+  border: 1px solid #06b6d4;
+  color: #0e7490;
+  font-size: 9px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
