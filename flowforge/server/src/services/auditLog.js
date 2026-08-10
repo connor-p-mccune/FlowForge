@@ -77,6 +77,13 @@ const ACTIONS = new Set([
   'workflow.resumed',
   'workflow.imported',
   'workflow.version_restored',
+  // Governance rules — and, crucially, their removal. A policy quietly
+  // disabled the day before a bad deploy is exactly what an incident review
+  // needs to be able to see.
+  'policy.created',
+  'policy.updated',
+  'policy.deleted',
+  'policy.overridden',
   // Surfaces that publish workspace state to people without accounts.
   'status_page.enabled',
   'status_page.rotated',

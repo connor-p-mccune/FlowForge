@@ -447,6 +447,46 @@ CREATE TABLE IF NOT EXISTS workflow_search_state (
   indexed_updated_at TEXT NOT NULL
 );
 
+-- Workspace policies (services/policyEngine.js): rules a workflow must satisfy
+-- before it may be deployed or imported. Where the linter asks "will this run?",
+-- a policy asks "is this allowed here?" — an unapproved outbound host, an
+-- unsigned webhook, a credential typed into a config instead of stored as a
+-- secret.
+--
+-- `rule` is an FXL expression over the policy document (the flattened view of a
+-- workflow that services/policyEngine.js builds) which must evaluate truthy for
+-- the workflow to comply. Rules are phrased as the *requirement*, so `message`
+-- can be the remedy rather than a restatement of the condition. `evidence` is an
+-- optional second expression, evaluated only when the rule fails, whose value is
+-- reported with the violation — "blocked: evil.example.com" instead of "a host
+-- is not allowed".
+--
+-- severity: 'deny' refuses the deploy/import; 'warn' records the finding and
+-- lets it through. Both surface in the canvas's Issues panel, so an author sees
+-- a policy problem while editing rather than at the deploy button.
+--
+-- Management is workspace-owner-only (like secrets and status pages): a control
+-- any member could switch off is not a control.
+CREATE TABLE IF NOT EXISTS workspace_policies (
+  id           TEXT PRIMARY KEY,
+  workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+  name         TEXT NOT NULL,
+  description  TEXT,
+  rule         TEXT NOT NULL,
+  message      TEXT,
+  evidence     TEXT,
+  severity     TEXT NOT NULL DEFAULT 'deny',
+  enabled      INTEGER NOT NULL DEFAULT 1,
+  created_by   TEXT REFERENCES users(id),
+  created_at   TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at   TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE (workspace_id, name)
+);
+
+-- Every admission check reads a workspace's enabled policies in one query.
+CREATE INDEX IF NOT EXISTS idx_workspace_policies_workspace
+  ON workspace_policies (workspace_id, enabled);
+
 -- Tamper-evident audit log (services/auditLog.js). Deliberately *not* the
 -- activity feed: the feed answers "what happened here lately" for people, is
 -- allowed to coalesce bursts, and is a product surface. This answers "who
