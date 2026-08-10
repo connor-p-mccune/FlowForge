@@ -12,6 +12,8 @@ export default function CanvasToolbar({
   onToggleBackfill,
   backfillOpen,
   onToggleInsights,
+  onToggleCanary,
+  canaryOpen,
   insightsOpen,
   onToggleTests,
   testsOpen,
@@ -100,6 +102,14 @@ export default function CanvasToolbar({
         aria-pressed={insightsOpen}
       >
         📊 Insights
+      </button>
+      <button
+        className={`toolbar-btn toolbar-btn--canary${canaryOpen ? ' toolbar-btn--active' : ''}`}
+        title="Canary release — send a slice of runs to this canvas and compare it against the deployed version"
+        onClick={onToggleCanary}
+        aria-pressed={canaryOpen}
+      >
+        🐤 Canary
       </button>
       <button
         className={`toolbar-btn toolbar-btn--tests${testsOpen ? ' toolbar-btn--active' : ''}`}

@@ -26,6 +26,7 @@ import WebhookPanel from './WebhookPanel'
 import RunSettingsPanel from './RunSettingsPanel'
 import BackfillPanel from './BackfillPanel'
 import InsightsPanel from './InsightsPanel'
+import CanaryPanel from './CanaryPanel'
 import TestsPanel from './TestsPanel'
 import HistoryPanel from './HistoryPanel'
 import IssuesPanel from './IssuesPanel'
@@ -96,6 +97,7 @@ function CanvasInner({ workflowId }) {
   const [runSettingsOpen, setRunSettingsOpen] = useState(false)
   const [backfillOpen, setBackfillOpen] = useState(false)
   const [insightsOpen, setInsightsOpen] = useState(false)
+  const [canaryOpen, setCanaryOpen] = useState(false)
   const [testsOpen, setTestsOpen] = useState(false)
 
   // AI workflow generation (natural-language description → full graph)
@@ -1003,6 +1005,8 @@ function CanvasInner({ workflowId }) {
         backfillOpen={backfillOpen}
         onToggleInsights={() => setInsightsOpen((v) => !v)}
         insightsOpen={insightsOpen}
+        onToggleCanary={() => setCanaryOpen((v) => !v)}
+        canaryOpen={canaryOpen}
         onToggleTests={() => setTestsOpen((v) => !v)}
         testsOpen={testsOpen}
         onToggleCommentMode={toggleCommentMode}
@@ -1140,6 +1144,11 @@ function CanvasInner({ workflowId }) {
         open={insightsOpen}
         onClose={() => setInsightsOpen(false)}
         nodes={nodes}
+      />
+      <CanaryPanel
+        workflowId={workflowId}
+        open={canaryOpen}
+        onClose={() => setCanaryOpen(false)}
       />
       <TestsPanel
         workflowId={workflowId}
