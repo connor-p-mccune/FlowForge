@@ -252,6 +252,28 @@ order while streaming live progress back to every collaborator on the canvas.
   whether it sits on a **stale cross-workflow cycle** (A→B→A) — the kind that
   fails at run time with a circular-reference error, surfaced statically before
   it does.
+- **Progressive delivery (canary releases)** — every control in this list bounds
+  a *deployed* workflow; none bounds the risk of the deploy itself. A deployed
+  workflow runs its **live graph**, so editing the canvas of something in
+  production changed production immediately and completely. A canary inverts
+  that while it runs: **stable traffic executes the last deployed version
+  snapshot, canary traffic executes your canvas**, at a share you ramp (5% → 25%
+  → 50%). That framing is the whole design — stable is *already* on the
+  baseline, so **rolling back is instant and destroys nothing**: no graph moves,
+  your edits survive, and raising the traffic again resumes the same experiment.
+  Promotion is just a deploy. The verdict is **statistical, not a threshold**,
+  because a canary is a small sample and a threshold on a small sample is a coin
+  flip with a UI: a one-sided **two-proportion z-test** on failure rates, a
+  tie-corrected **Mann-Whitney U** on durations (run times are right-skewed —
+  a mean comparison would let one bad afternoon decide a release), and **Wilson
+  intervals** so "0 failures in 12 runs" doesn't get reported as certainty. Both
+  directions wait for evidence — auto-promoting on a rate that merely *looks*
+  fine is the same mistake as auto-rolling-back on one that merely looks bad —
+  with one exception: every run failing needs no hypothesis test. A background
+  sweep promotes or rolls back automatically (or reports and lets you decide).
+  Dry runs never enter the experiment, a resumed run re-executes its original's
+  definition, and starting or promoting passes the same policy gate a deploy
+  does. See [docs/RELEASES.md](./docs/RELEASES.md).
 - **Version diffs** — every deploy snapshots the graph; the history drawer can
   preview any version, restore it (reversibly), or **diff it against the live
   canvas** — nodes added/removed, changed config fields, and rewired
@@ -598,6 +620,7 @@ Copy `.env.example` to `.env` before running. **Never commit `.env`.**
 | `HEARTBEAT_CHECK_INTERVAL_MS` | no | How often the heartbeat monitor sweeps for overdue workflows (default 60000) |
 | `MAINTENANCE_CHECK_INTERVAL_MS` | no | How often the maintenance-window sweep reconciles auto-pause/resume (default 60000) |
 | `WEBHOOK_DELIVERY_RETENTION_DAYS` | no | Prune settled delivery-log rows after this many days (default 30; 0 = keep) |
+| `CANARY_CHECK_INTERVAL_MS` | no | How often the canary sweep re-analyses running releases (default 60000) |
 
 \* The app runs without it, but any AI node or the Suggest button will error
 until a valid key is set.

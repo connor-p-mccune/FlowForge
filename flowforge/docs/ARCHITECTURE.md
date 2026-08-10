@@ -11,6 +11,7 @@ relative to `flowforge/`.
 - [Schedule backfill](#schedule-backfill)
 - [Outbound webhooks](#outbound-webhooks)
 - [Run insights & SLA monitoring](#run-insights--sla-monitoring)
+- [Progressive delivery](#progressive-delivery)
 - [The expression language](#the-expression-language)
 - [The type system](#the-type-system)
 - [Policy as code](#policy-as-code)
@@ -780,6 +781,79 @@ the promise is broken. Three decisions:
 Alerts reuse the existing fan-out — activity feed (which outbound webhooks
 relay) plus an owner notification — and `flowforge_heartbeats_missed_total`
 counts crossings on `/metrics`.
+
+## Progressive delivery
+
+`services/canary.js` addresses a gap the rest of the system makes conspicuous.
+Every control described above bounds a *deployed* workflow's behaviour —
+concurrency, rate, spend, pause — and none of them bounds the risk of the
+deploy itself. A deployed workflow executes its **live graph**, so editing the
+canvas of something in production changes production immediately and
+completely. There was no gradual anything.
+
+The user-facing reference is [RELEASES.md](./RELEASES.md); the decisions:
+
+- **The arms are chosen so that rollback costs nothing.** While a canary runs,
+  stable traffic executes a **pinned version snapshot** and canary traffic
+  executes the **live canvas**. That is the whole design: stable is already on
+  the baseline, so rolling back is `percent = 0` — no graph moves, no canvas is
+  overwritten under an author's cursor, and the edits survive for whoever has to
+  fix them. The obvious alternative (canary = a snapshot, stable = the live
+  graph) makes rollback a graph restore, which is destructive, racy against a
+  concurrent edit, and much harder to make idempotent.
+
+- **Promotion is an ordinary deploy**, snapshot and all, because the live canvas
+  is exactly what the canary was proving. The canary module takes the deploy
+  route's snapshot function as an argument rather than growing a second copy of
+  it.
+
+- **The engine change is one branch.** `runExecution` already read one graph per
+  run; it now reads a *version's* graph when the execution row names one, and
+  records which arm the run belonged to. Everything downstream — scheduling,
+  retries, tracing, cost — is untouched.
+
+- **The verdict is inferential, not threshold-based.** A canary is a small
+  sample, and a threshold on a small sample is a coin flip with a UI. "3 failures
+  out of 40 versus 20 out of 380" is a 42% higher rate and it is noise; a
+  one-sided two-proportion test says so. Durations go through Mann-Whitney U
+  rather than a mean comparison because run times are right-skewed with a long
+  retry tail — precisely the shape that lets one bad afternoon claim
+  significance. Rates are reported with a Wilson interval, because "0 failures in
+  12 runs" is not "certainly 0%" and a canary panel is exactly where someone
+  would act on that.
+
+- **Both directions wait for evidence.** Auto-promoting on a rate that merely
+  looks fine is the same error as auto-rolling-back on one that merely looks
+  bad, so `wait` is a first-class verdict rather than a fallback. The one
+  exception is deliberate: every canary run failing is not a subtle signal, and
+  waiting for the twentieth costs twenty broken runs.
+
+- **Four verbs, because "stop the canary" means three different things.**
+  Promote, roll back (traffic to zero, edits preserved, resumable by ramping),
+  and abandon (the canvas serves everything again) have genuinely different
+  consequences; collapsing them would make the destructive one the default.
+  Adjust is separate because ramping 5% → 25% → 50% is how a release normally
+  progresses and must not discard the accumulated sample.
+
+- **Assignment is random per run**, not hashed. A workflow's runs have no stable
+  identity to hash — a schedule tick is not a user — and independent samples are
+  exactly what the tests assume.
+
+- **The boundaries mirror decisions made elsewhere.** Dry runs never enter the
+  experiment (test mode exists to try the edits); a resumed run inherits its
+  source's assignment, because adopting recorded step outputs into a different
+  definition would be incoherent; a deleted baseline degrades to "no experiment"
+  rather than failing runs; and both starting and promoting pass the policy gate,
+  since 99% of traffic to the live canvas is a deploy.
+
+One correctness detail is worth recording because it was found by a test rather
+than by reasoning: durations are rounded to the millisecond before ranking.
+`julianday()`'s subtraction leaves sub-microsecond floating-point dust that
+varies with the absolute date, and the two arms necessarily occupy different
+time ranges — so unrounded, a rank test could read that dust as a systematic
+ordering and call a slowdown where the runs were identical.
+
+---
 
 ## The expression language
 
