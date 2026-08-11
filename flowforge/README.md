@@ -240,6 +240,33 @@ order while streaming live progress back to every collaborator on the canvas.
   picker is generated from it, `flowforge types <id>` prints it, and
   `GET /api/v1/workflows/:id/types` serves it. See
   [docs/TYPES.md](./docs/TYPES.md).
+- **Data lineage & taint analysis** — the type system knows the *shape* of what
+  flows between nodes; nothing knew the *path*. `{{http-1.body.email}}` in a Send
+  Email node names a field and says nothing about where it came from, so six
+  nodes later two questions are unanswerable: **if I change this, what breaks?**
+  and **is anything reaching that URL controlled by whoever sends the webhook?**
+  One pass over the DAG recovers the dataflow — every node's *origins* and its
+  *reads* — which is a second graph over the first, and the two directions of it
+  are those two questions. Origins carry a **trust level**: a webhook body and a
+  callback payload are `untrusted` (whoever holds the URL wrote them), an HTTP or
+  model response is `external` (a third party did), config, variables and secrets
+  are `internal`. Untrusted data reaching a **sink** — the address a request goes
+  to, an email's recipient, a Slack webhook, which workflow a sub-workflow runs —
+  is server-side request forgery with a drag-and-drop interface, and it now lints
+  like a syntax error. **Precision is the whole design**, because a checker
+  nobody reads is worse than no checker: taint **stops at an external boundary**
+  (an HTTP node's body is the far side's answer, not a function of the URL it was
+  asked for, so a tainted request does not make a tainted response), a **pinned
+  host is not SSRF** (`https://api.acme.com/orders/{{trigger.id}}` is how
+  requests are *supposed* to be built — only a dynamic *authority* lets a caller
+  choose the destination), and a Transform over literals launders nothing.
+  *Impact*, by contrast, deliberately does cross those boundaries — taint asks
+  who controls a value's content, impact asks what it participates in deciding,
+  and changing the URL does change the response. It also reports **dead
+  computation** (a leaf whose output nothing reads — on an AI node, a bill) and
+  **secret reach** ("who can read `STRIPE_KEY`?" was otherwise a manual grep). On
+  the canvas as 🔗 Lineage, in `flowforge lineage --node <id>`, and on the public
+  API. See [docs/LINEAGE.md](./docs/LINEAGE.md).
 - **Policy as code** — the linter asks "will this run?"; a policy asks **"is
   this allowed here?"**, which is a different question and the one that appears
   the moment more than one person builds workflows in the same place. A graph

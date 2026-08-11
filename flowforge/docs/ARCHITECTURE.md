@@ -7,10 +7,11 @@ relative to `flowforge/`.
 
 Companion references: [EXPRESSIONS.md](./EXPRESSIONS.md) (the expression
 language), [TYPES.md](./TYPES.md) (static types over the canvas),
-[POLICIES.md](./POLICIES.md) (policy as code), [RELEASES.md](./RELEASES.md)
-(progressive delivery), [ROLLBACK.md](./ROLLBACK.md) (compensating
-transactions), [INSIGHTS.md](./INSIGHTS.md) (run statistics), and
-[API.md](./API.md) (the public API).
+[POLICIES.md](./POLICIES.md) (policy as code), [LINEAGE.md](./LINEAGE.md) (data
+lineage and taint), [RELEASES.md](./RELEASES.md) (progressive delivery),
+[ROLLBACK.md](./ROLLBACK.md) (compensating transactions),
+[INSIGHTS.md](./INSIGHTS.md) (run statistics), and [API.md](./API.md) (the
+public API).
 
 - [The execution engine](#the-execution-engine)
   - [Compensating transactions](#compensating-transactions)
@@ -1186,6 +1187,46 @@ a topological pass, so the linter's idea of "upstream" and the engine's idea
 of "resolvable" cannot drift apart. The lint route accepts the canvas's
 live, unsaved graph and enriches it with real workspace context (secret
 names, sub-workflow target status).
+
+### Dataflow analysis
+
+`services/lineage.js` is a third lens over the same graph, and the split
+between the three is deliberate: the linter reasons about **structure and
+config**, `typeInference` about the **shape** of what flows, and lineage about
+its **path and provenance**. Each is additive, each stays silent about what it
+cannot prove, and none re-reports what another owns.
+
+The pass gives every node two things — the *origins* its output can carry, and
+the specific `{{node.path}}` references its config makes. Together those form a
+second graph over the first, and both directions of it are questions the canvas
+could not previously answer: what feeds this value, and what breaks if it
+changes.
+
+Three decisions do the real work, and all three are about **precision**, because
+a finding that fires everywhere is worse than no finding:
+
+- **Taint stops at an external boundary.** A node whose output is written by
+  something outside the graph — an HTTP response, a model, a callback payload —
+  carries that one origin and *not* the origins of anything it read. An HTTP
+  node's `body` is the far side's answer, not a function of the URL it was asked
+  for. Propagating there would mark most of a typical graph.
+- **A pinned host is not SSRF.** Only a dynamic *authority* — everything before
+  the first `/`, `?` or `#` after the scheme — lets a caller choose what the
+  server connects to. `https://api.acme.com/orders/{{trigger.id}}` is how
+  requests are supposed to be built and drops to the medium band rather than
+  being reported. (Slack's webhook URL is exempt from the softening: there, the
+  path *is* the credential.)
+- **Dead computation needs a leaf.** The engine merges every active upstream
+  output into a node's input, so a node mid-chain whose output nothing
+  *references* is still being used. Only a node with no outgoing edge and no
+  reader provably computed something for nobody.
+
+Impact analysis deliberately **does** cross the boundary taint stops at, and the
+asymmetry is the point: taint asks who controls a value's content, impact asks
+what a value participates in deciding. Changing a webhook field doesn't make the
+response untrusted in a new way, but it does change which URL is called.
+
+See [LINEAGE.md](./LINEAGE.md).
 
 ### The node test bench
 
