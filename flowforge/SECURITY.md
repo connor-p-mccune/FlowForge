@@ -32,6 +32,9 @@ Bull worker. The notable trust boundaries and the threats against them:
 | T13 | **Governance controls silently disabled** | Workspace policies gate what may be deployed. An attacker (or a hurried teammate) disables a rule, ships something it would have blocked, and re-enables it. | **Mitigated** — policy management is owner-only; create/update/delete are appended to the tamper-evident audit log, with disabling called out explicitly in the entry's metadata; a policy that fails to evaluate **fails closed** rather than passing. |
 | T14 | **Deliberate faults reaching production** | A chaos profile injects failures. Armed carelessly (or maliciously) against real traffic it is a self-inflicted outage that looks like a dependency problem. | **Mitigated** — profiles are scoped to test runs by default; widening one to real runs is owner-only, audited, and announced in the workspace feed; every profile carries a mandatory expiry capped at 7 days; injected failures are labelled `[chaos]` and counted separately on `/metrics`, so they are never mistaken for an incident. |
 | T15 | **Release gate bypass via canary** | A canary sends real traffic to an undeployed definition, which would otherwise route around the deploy-time policy gate. | **Mitigated** — starting a canary and promoting one both run the same policy check a deploy does; a resumed run re-executes its original definition; dry runs never enter the experiment. |
+| T16 | **Compensations as an attack surface** | Compensating actions fire *automatically* when a run fails, are irreversible (refunds, deletions), and run outside the DAG — so a graph edit that adds one is a way to make a side effect happen by simply breaking a workflow. The mirror risk is a compensation firing against work it does not own. | **Mitigated** — a compensation runs only for a step that **succeeded in this run**, which excludes `cached`/`reused` steps whose effects belong to an earlier execution (enforced by the same column that records completion order, so the rule cannot drift from the data). Its config is templated from the run's *persisted, redacted* outputs, so a secret an API echoed back cannot reach it. The manual endpoint requires a non-viewer with the `trigger` scope, refuses a run that is not settled, never re-runs a compensation that already succeeded, and is written to the tamper-evident audit log (`execution.rolled_back`). `rollback_policy: "off"` is an operator kill switch, and a partial unwind is announced in the workspace feed rather than left silent. |
+| T17 | **Caller-controlled request destinations (SSRF by graph)** | T7 blocks private/reserved IPs at egress, but a workflow whose HTTP URL, email recipient, Slack webhook or sub-workflow target is built from `{{trigger.*}}` lets whoever POSTs the webhook choose where the server sends data — invisible on a canvas. | **Mitigated (detective)** — `services/lineage.js` traces every value to its origin and reports untrusted data reaching a high-sensitivity sink as a lint finding, in the Issues panel, `flowforge lint`, and `flowforge lineage --strict` as a CI gate. Detection, not prevention: the egress guard (T7) is the control, and a [workspace policy](docs/POLICIES.md) over approved hosts is what *refuses* the deploy. Deliberately precise — a pinned authority (`https://api.acme.com/{{trigger.id}}`) is not reported, because a check that fires on correct code is one people turn off. |
+| T18 | **Merge as a definition-tampering vector** | `POST /api/v1/workflows/:id/merge` rewrites a workflow definition from outside the app, and a merge that silently resolved conflicts could slip a change past code review. | **Mitigated** — requires the `manage` scope *and* a non-viewer role; previews unless `apply` is set; a conflicted merge writes **nothing at all**, so a change can never be silently chosen; taking a side (`ours`/`theirs`) is explicit per request; the merged graph is linted before it lands; and every applied merge is appended to the audit log (`workflow.merged`) with its base version, strategy and summary. Merging updates the canvas only — going live still requires a deploy, which is where the policy gate runs. |
 
 ---
 
@@ -373,6 +376,78 @@ Triggers cannot be targeted, and a rule must name a `nodeId` or `nodeType`: a
 profile that matched everything by omission is exactly the accident this
 refuses. Tested in `server/src/__tests__/faultInjection.test.js`; the canary's
 matching gate (T15) in `__tests__/canary.test.js`.
+
+### Compensating transactions (T16)
+
+`services/compensation.js` plus the engine's rollback pass fire real,
+irreversible side effects — refunds, releases, deletions — *automatically*, when
+a run fails. That combination (automatic, irreversible, triggered by breakage) is
+unusual enough to state its boundaries explicitly.
+
+- **Only work this run did is undone.** A compensation runs for a step that
+  succeeded *in this execution*. `cached` and `reused` steps adopted an earlier
+  run's output and are excluded, because undoing an effect another execution
+  caused and still owns is data loss, not cleanup. This is not a separate check:
+  `execution_steps.completed_seq` is written exactly when a runner returned, so
+  the ordering data and the eligibility rule are the same fact and cannot drift.
+- **A caught failure is not compensated.** `onError: continue`/`branch` means the
+  author already decided what that failure means.
+- **Nothing new reaches a compensation's config.** Templates resolve against the
+  run's *persisted* outputs, which are secret-redacted — so a credential an API
+  echoed back during the run cannot ride into a compensation, exactly as with
+  resume-from-failure.
+- **The manual path is authorised, bounded and audited.** `POST
+  /executions/:id/rollback` needs a non-viewer and the `trigger` scope (it fires
+  side effects, so `read` would be wrong), refuses a run that is still going or
+  that succeeded, and re-runs **only compensations that have not already
+  succeeded** — double-undoing while cleaning up after a failure is worse than
+  the failure. Every invocation is appended to the audit log as
+  `execution.rolled_back`.
+- **Failure is visible, not silent.** A partial unwind is a distinct status
+  naming which compensations are outstanding, is announced in the workspace
+  activity feed, and lands on `/metrics` as
+  `flowforge_compensations_total{status="failed"}` — a rising count there means
+  the *cleanup* path is broken, which is worth paging on in its own right.
+- **`rollback_policy: "off"`** is the operator kill switch for the case where the
+  compensating endpoint is itself the broken thing.
+
+Tested in `server/src/__tests__/compensation.test.js` and
+`__tests__/rollbackApi.test.js`; see [docs/ROLLBACK.md](docs/ROLLBACK.md).
+
+### Dataflow analysis — caller-controlled sinks (T17)
+
+The egress guard (T7) answers "may the server connect to this address?". It
+cannot answer "who *chose* this address?", and on a visual builder that second
+question is invisible: a URL assembled from `{{trigger.host}}` looks exactly like
+one an author typed.
+
+`services/lineage.js` recovers the dataflow — every node's *origins* and its
+`{{…}}` *reads* — and reports untrusted data reaching a high-sensitivity sink
+(request URL, request headers, email recipient, Slack webhook, sub-workflow
+target). Origins carry a trust level: a webhook body and a callback payload are
+`untrusted`, an HTTP or model response is `external`, config/variables/secrets
+are `internal`.
+
+This is **detective, not preventive**, and the layering is deliberate:
+
+| Layer | Question | Control |
+|---|---|---|
+| Lineage | who chose this value? | lint finding, CI gate |
+| SSRF guard (T7) | may we connect there? | request refused at egress |
+| Policy (T13) | is this workflow allowed here? | deploy refused |
+
+Precision is a security property here rather than a nicety. A pinned authority
+(`https://api.acme.com/orders/{{trigger.id}}`) is **not** reported — the
+destination cannot be redirected, only a path segment varies — and taint does not
+propagate through an HTTP response, because the far side wrote it regardless of
+what the request contained. A checker that fired on both would flag most of every
+graph, and a finding people have learned to ignore protects nothing.
+
+It also reports **secret reach** (which nodes can read each secret), which turns
+"who can see `STRIPE_KEY`?" from a manual grep into a query.
+
+Tested in `server/src/__tests__/lineage.test.js`; see
+[docs/LINEAGE.md](docs/LINEAGE.md).
 
 ---
 
