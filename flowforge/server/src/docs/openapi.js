@@ -1169,6 +1169,154 @@ const spec = {
         },
       },
     },
+    '/workflows/{workflowId}/merge': {
+      post: {
+        tags: ['workflows'],
+        summary: 'Three-way merge a document into the live workflow',
+        description:
+          '`diff` detects that git and production have diverged; this resolves ' +
+          'it. Merging is per **config field**, so two people editing different ' +
+          'fields of the same node combine cleanly — the case that justifies a ' +
+          'real three-way merge rather than picking a side. Node position is ' +
+          'ignored (dragging is not a semantic change) and identical edits on ' +
+          'both sides are agreement, not conflict.\n\n' +
+          'The base defaults to the workflow’s latest version snapshot — a ' +
+          'deploy is where the exported document came from, so it is the last ' +
+          'point the two provably agreed. `baseVersion` (a version number or ' +
+          'snapshot id) overrides it.\n\n' +
+          'A conflicted merge **produces no graph**: a graph with conflict ' +
+          'markers is not a graph, and writing a half-merged definition into a ' +
+          'workflow that may be deployed is not an acceptable failure mode. ' +
+          'Resolve by hand, or pass `strategy: "ours" | "theirs"` — the ' +
+          'equivalent of git’s `-X` options.\n\n' +
+          'Previews unless `apply` is true. Requires the `manage` scope.',
+        operationId: 'mergeWorkflow',
+        parameters: [{ $ref: '#/components/parameters/WorkflowId' }],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                required: ['graph_data'],
+                properties: {
+                  graph_data: {
+                    type: 'object',
+                    required: ['nodes', 'edges'],
+                    description: 'The document to merge in — what `export` produces.',
+                    properties: {
+                      nodes: { type: 'array', items: { type: 'object' } },
+                      edges: { type: 'array', items: { type: 'object' } },
+                    },
+                  },
+                  baseVersion: {
+                    oneOf: [{ type: 'integer' }, { type: 'string' }],
+                    description: 'Version number or snapshot id to merge against. Defaults to the latest.',
+                  },
+                  strategy: {
+                    type: 'string',
+                    enum: ['manual', 'ours', 'theirs'],
+                    default: 'manual',
+                    description:
+                      '`ours` keeps the live value on a conflicted field, `theirs` ' +
+                      'takes the document’s. Both are deliberate choices, never defaults.',
+                  },
+                  apply: {
+                    type: 'boolean',
+                    default: false,
+                    description: 'Write the merged graph. Ignored when the merge conflicts.',
+                  },
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          200: {
+            description: 'The merge result. `clean` is the gate; `applied` says whether it was written.',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    workflowId: { type: 'string' },
+                    clean: { type: 'boolean' },
+                    applied: { type: 'boolean' },
+                    base: {
+                      type: 'object',
+                      properties: {
+                        versionId: { type: 'string', nullable: true },
+                        version: { type: 'integer', nullable: true },
+                        createdAt: { type: 'string', format: 'date-time' },
+                        note: { type: 'string' },
+                      },
+                    },
+                    conflicts: {
+                      type: 'array',
+                      items: { $ref: '#/components/schemas/MergeConflict' },
+                    },
+                    droppedEdges: {
+                      type: 'array',
+                      description:
+                        'Connections removed because the merge deleted an endpoint. ' +
+                        'Not a conflict — debris — but reported, because silently ' +
+                        'deleting a connection somebody drew is what a merge must not do.',
+                      items: {
+                        type: 'object',
+                        properties: {
+                          source: { type: 'string' },
+                          target: { type: 'string' },
+                          sourceHandle: { type: 'string', nullable: true },
+                          reason: { type: 'string' },
+                        },
+                      },
+                    },
+                    summary: {
+                      type: 'object',
+                      properties: {
+                        added: { type: 'integer' },
+                        removed: { type: 'integer' },
+                        changed: { type: 'integer' },
+                        unchanged: { type: 'integer' },
+                        conflicts: { type: 'integer' },
+                        nodes: { type: 'integer' },
+                        edges: { type: 'integer' },
+                      },
+                    },
+                    lint: {
+                      type: 'object',
+                      nullable: true,
+                      description:
+                        'The linter run against the *merged* graph. Two individually ' +
+                        'valid graphs can merge into one that won’t run — a reference ' +
+                        'to a node the other side deleted — and after applying is the ' +
+                        'worst possible time to find out. Null when the merge conflicted.',
+                      properties: {
+                        errors: { type: 'integer' },
+                        warnings: { type: 'integer' },
+                        issues: { type: 'array', items: { $ref: '#/components/schemas/LintIssue' } },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+          400: {
+            description: 'Malformed graph_data, an unknown strategy, or an unknown baseVersion.',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } },
+          },
+          401: { $ref: '#/components/responses/Unauthorized' },
+          403: { $ref: '#/components/responses/Forbidden' },
+          404: { $ref: '#/components/responses/NotFound' },
+          413: {
+            description: 'The graph is larger than 500KB.',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } },
+          },
+          429: { $ref: '#/components/responses/RateLimited' },
+        },
+      },
+    },
     '/workflows/{workflowId}/lineage': {
       get: {
         tags: ['workflows'],
@@ -2101,6 +2249,32 @@ const spec = {
             nullable: true,
             description: 'Null for graph-level problems (cycles, dangling edges).',
           },
+        },
+      },
+      MergeConflict: {
+        type: 'object',
+        properties: {
+          kind: {
+            type: 'string',
+            enum: ['field', 'modify-delete', 'delete-modify'],
+            description:
+              '`field` — both sides changed the same config field to different ' +
+              'values. `modify-delete` — the document deleted a node the live ' +
+              'workflow edited. `delete-modify` — the reverse.',
+          },
+          nodeId: { type: 'string' },
+          label: { type: 'string' },
+          field: {
+            type: 'string',
+            nullable: true,
+            example: 'config.url',
+            description: 'Dotted path; null for whole-node conflicts.',
+          },
+          base: { description: 'The common ancestor’s value.' },
+          ours: { description: 'The live workflow’s value.' },
+          theirs: { description: 'The document’s value.' },
+          detail: { type: 'string' },
+          description: { type: 'string', description: 'One-line human-readable rendering.' },
         },
       },
       LineageNode: {

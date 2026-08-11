@@ -76,6 +76,7 @@ const ACTIONS = new Set([
   'workflow.paused',
   'workflow.resumed',
   'workflow.imported',
+  'workflow.merged',
   'workflow.version_restored',
   // Governance rules — and, crucially, their removal. A policy quietly
   // disabled the day before a bad deploy is exactly what an incident review
