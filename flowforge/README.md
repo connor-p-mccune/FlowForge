@@ -775,6 +775,17 @@ SMTP_USER=        SMTP_PASS=         EMAIL_FROM=flowforge@example.com
     outbound hosts, signed webhooks, no credentials in config — and a deploy
     that breaks one is refused with the reason
     ([docs](./docs/POLICIES.md)).
+14. **Trace the data:** 🔗 Lineage shows where each value came from and where it
+    leaves; select a node to see what feeds it and what breaks if you change it,
+    and click through the chain to walk backwards
+    ([docs](./docs/LINEAGE.md)).
+15. **Plan the undo:** give a node a **compensation** in its config panel — a
+    Refund step that undoes a Charge step — and a run that fails unwinds itself,
+    newest side effect first, instead of leaving them standing
+    ([docs](./docs/ROLLBACK.md)).
+16. **Reconcile with git:** when the canvas and the file in your repo have both
+    moved, ⇋ Merge combines them per field rather than making you pick a side to
+    throw away ([docs](./docs/MERGE.md)).
 
 ---
 
