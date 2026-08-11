@@ -18,6 +18,7 @@ const COMMANDS = {
   export: require('../src/commands/export'),
   import: require('../src/commands/import'),
   diff: require('../src/commands/diff'),
+  merge: require('../src/commands/merge'),
   lint: require('../src/commands/lint'),
   types: require('../src/commands/types'),
   lineage: require('../src/commands/lineage'),
@@ -54,6 +55,7 @@ Usage:
   flowforge export <workflow-id>                   Print the portable workflow JSON (pipe to a file)
   flowforge import <workspace-id> <file> [--name]  Create a draft workflow from an exported file
   flowforge diff <workflow-id> <file>              Compare the live workflow against an exported file (exits non-zero on drift)
+  flowforge merge <workflow-id> <file> [--yes]     Three-way merge a file into the live workflow (exits 2 on conflicts)
   flowforge lint <workflow-id> [file] [--strict]   Lint the live workflow — or an exported file against its workspace (exits non-zero on errors)
   flowforge types <workflow-id> [--node <id>]      Inferred data schema per node — what each one produces (exits non-zero on a type error)
   flowforge lineage <id> [--node <id>] [--strict]  Where data comes from and where it leaves — provenance, impact, and taint
@@ -88,9 +90,12 @@ Exit codes:
   that found drift, an 'audit' whose chain failed verification, or a
   'rollback' that only partly unwound (the world is inconsistent in
   a known way — a pipeline should stop)
-  2 'release' only — the canary has no verdict yet (keep waiting).
-    Distinct from 1 on purpose: a pipeline that treats "not enough
-    evidence" as failure rolls back every healthy young release.`
+  2 'release' — the canary has no verdict yet (keep waiting), and
+    'merge' — the merge conflicts and needs a person. Distinct from 1
+    on purpose: a pipeline that treats "not enough evidence" as
+    failure rolls back every healthy young release, and one that
+    treats "needs review" as failure can't tell a colleague's edit
+    from an outage.`
 
 async function main() {
   const argv = process.argv.slice(2)
