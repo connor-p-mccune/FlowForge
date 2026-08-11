@@ -30,6 +30,7 @@ import CanaryPanel from './CanaryPanel'
 import TestsPanel from './TestsPanel'
 import HistoryPanel from './HistoryPanel'
 import IssuesPanel from './IssuesPanel'
+import LineagePanel from './LineagePanel'
 import ExecutionPanel from '../execution/ExecutionPanel'
 import CursorOverlay from '../collaboration/CursorOverlay'
 import CommentsOverlay from '../collaboration/CommentsOverlay'
@@ -108,6 +109,7 @@ function CanvasInner({ workflowId }) {
 
   // Lint results for the live canvas (Issues panel)
   const [issuesOpen, setIssuesOpen] = useState(false)
+  const [lineageOpen, setLineageOpen] = useState(false)
 
   // Version history (deploy / restore)
   const [historyOpen, setHistoryOpen] = useState(false)
@@ -580,6 +582,7 @@ function CanvasInner({ workflowId }) {
   }, [])
 
   const handleToggleIssues = useCallback(() => setIssuesOpen((v) => !v), [])
+  const handleToggleLineage = useCallback(() => setLineageOpen((v) => !v), [])
 
   // Clicking an issue selects the offending node (opening its config panel)
   // and pans the viewport to it.
@@ -1018,6 +1021,8 @@ function CanvasInner({ workflowId }) {
         canRedo={canRedo}
         onToggleIssues={handleToggleIssues}
         issuesOpen={issuesOpen}
+        onToggleLineage={handleToggleLineage}
+        lineageOpen={lineageOpen}
         onDeploy={handleDeploy}
         onToggleHistory={handleToggleHistory}
         onTogglePause={handleTogglePause}
@@ -1161,6 +1166,18 @@ function CanvasInner({ workflowId }) {
           nodes={nodes}
           edges={edges}
           onClose={() => setIssuesOpen(false)}
+          onSelectNode={handleSelectIssueNode}
+        />
+      )}
+      {/* Anchored on the same side as Issues: both answer "what's wrong with
+          this graph?" and neither should fight the config panel on the right. */}
+      {lineageOpen && (
+        <LineagePanel
+          workflowId={workflowId}
+          nodes={nodes}
+          edges={edges}
+          selectedNodeId={selectedNode?.id || null}
+          onClose={() => setLineageOpen(false)}
           onSelectNode={handleSelectIssueNode}
         />
       )}

@@ -25,6 +25,8 @@ export default function CanvasToolbar({
   canUndo,
   canRedo,
   onToggleIssues,
+  onToggleLineage,
+  lineageOpen,
   issuesOpen,
   onDeploy,
   onToggleHistory,
@@ -159,6 +161,14 @@ export default function CanvasToolbar({
         aria-pressed={issuesOpen}
       >
         🔎 Issues
+      </button>
+      <button
+        className={`toolbar-btn toolbar-btn--issues${lineageOpen ? ' toolbar-btn--active' : ''}`}
+        title="Trace where this workflow's data comes from and where it leaves"
+        onClick={onToggleLineage}
+        aria-pressed={lineageOpen}
+      >
+        🔗 Lineage
       </button>
       <span className="canvas-toolbar__divider" />
       <button
