@@ -361,6 +361,30 @@ order while streaming live progress back to every collaborator on the canvas.
   workflow against the file and exits non-zero when they differ — the
   promotion someone forgot, or the hand-edit someone made in production —
   with node moves ignored, so only meaningful changes count.
+- **Three-way merge** — drift detection tells you git and production diverged
+  and then leaves you to pick which side's work to throw away: import the file
+  and lose the live edit, or re-export and lose the reviewed change. A two-way
+  comparison *can't* do better, because it cannot tell "added here" from
+  "deleted there" — distinguishing them needs a common ancestor, which is
+  exactly why git merges from a merge-base and why `flowforge merge <id>
+  file.json` does too (the last version snapshot, since a deploy is where the
+  export came from). It merges **per config field**, which is the whole reason
+  to build a real three-way merge rather than pick a side: one person changing
+  an HTTP node's URL while another changes its retry count is the common case,
+  and it combines cleanly. Position never conflicts (dragging a node isn't a
+  semantic change), identical edits on both sides are agreement rather than
+  conflict, and edges merge as a set keyed on their endpoints. When something
+  genuinely does conflict — including a node one side deleted and the other
+  edited — the merge **produces no graph at all**: git can leave conflict
+  markers in a file because a file with markers is still a file, but a graph
+  with markers is not a graph, and half-merging a definition that may be
+  deployed is not an acceptable failure mode. Resolve on the canvas, or pass
+  `--ours` / `--theirs` (deliberate, never a default). The result is **linted
+  before it lands** — two valid graphs can merge into one that won't run — and
+  a connection orphaned by the merge is dropped *and reported*, because quietly
+  deleting a connection someone drew is what a merge must never do. Exits `2` on
+  conflicts, distinct from `1`: a merge needing review isn't a broken build. See
+  [docs/MERGE.md](./docs/MERGE.md).
 - **Status badges** — mint a per-workflow badge token and embed a live SVG of
   its latest run status (passing / failing / running) in a README or dashboard,
   just like a CI badge — hand-rendered, cached, and revocable by rotating the
@@ -829,7 +853,7 @@ flowforge/
 ├── server/        Express API, Socket.io, Bull worker, SQLite
 ├── ai-service/    Flask microservice for LLM-backed features
 ├── cli/           Zero-dependency terminal client for the public API
-├── docs/          API reference, architecture deep dive, FXL/types/policies/releases/rollback
+├── docs/          API reference, architecture deep dive, FXL/types/policies/lineage/merge/releases/rollback
 ├── docker-compose.yml
 ├── .env.example
 ├── .env.production.example

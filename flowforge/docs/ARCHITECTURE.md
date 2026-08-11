@@ -8,7 +8,8 @@ relative to `flowforge/`.
 Companion references: [EXPRESSIONS.md](./EXPRESSIONS.md) (the expression
 language), [TYPES.md](./TYPES.md) (static types over the canvas),
 [POLICIES.md](./POLICIES.md) (policy as code), [LINEAGE.md](./LINEAGE.md) (data
-lineage and taint), [RELEASES.md](./RELEASES.md) (progressive delivery),
+lineage and taint), [MERGE.md](./MERGE.md) (three-way merge),
+[RELEASES.md](./RELEASES.md) (progressive delivery),
 [ROLLBACK.md](./ROLLBACK.md) (compensating transactions),
 [INSIGHTS.md](./INSIGHTS.md) (run statistics), and [API.md](./API.md) (the
 public API).
