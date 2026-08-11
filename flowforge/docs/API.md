@@ -216,6 +216,105 @@ CLI, `flowforge diff <id> <file>` wraps this and exits non-zero on drift, so
 CI can fail a pipeline that's about to run against a workflow nobody
 re-exported.
 
+### Merge a document into the live workflow
+
+`diff` detects that git and production diverged; this resolves it, keeping both
+sides' work instead of making you pick one to discard.
+
+```bash
+curl -s -X POST https://your-flowforge-host/api/v1/workflows/6f0c…/merge \
+  -H "Authorization: Bearer $FLOWFORGE_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{ "graph_data": … , "apply": true }'
+```
+
+Merging is per **config field**, so two people editing different fields of the
+same node combine cleanly — the case that justifies a three-way merge rather
+than picking a side. Node position is ignored, and identical edits on both sides
+are agreement rather than conflict.
+
+The base defaults to the workflow's latest version snapshot (a deploy is where
+the exported document came from). `baseVersion` names another; a workflow with
+no snapshots merges against an empty base, which reads every node as added and
+so can never conclude something was deleted.
+
+Response `200`:
+
+```json
+{
+  "workflowId": "6f0c…",
+  "clean": false,
+  "applied": false,
+  "base": { "versionId": "9ab…", "version": 7 },
+  "conflicts": [
+    {
+      "kind": "field",
+      "nodeId": "h1",
+      "label": "Charge card",
+      "field": "config.url",
+      "base": "https://pay.acme.com/v1",
+      "ours": "https://pay.acme.com/v2",
+      "theirs": "https://pay.acme.com/v1-legacy",
+      "description": "Charge card · config.url: live \"https://pay.acme.com/v2\" vs document \"https://pay.acme.com/v1-legacy\""
+    }
+  ],
+  "droppedEdges": [],
+  "summary": { "added": 1, "removed": 0, "changed": 2, "unchanged": 4, "conflicts": 1 },
+  "lint": null
+}
+```
+
+A conflicted merge **produces no graph** and writes nothing, even with
+`apply: true`: git can leave conflict markers in a file because a file with
+markers is still a file, and a graph with markers is not a graph. Resolve on the
+canvas or pass `strategy: "ours" | "theirs"` — deliberate per request, never a
+default.
+
+`lint` carries the linter's verdict on the **merged** graph, because two
+individually valid graphs can merge into one that won't run, and after applying
+is the worst time to learn that. `droppedEdges` lists connections orphaned by
+the merge — debris rather than conflicts, but reported, since quietly deleting a
+connection somebody drew is what a merge must never do.
+
+Requires the `manage` scope (it writes a definition) and a non-viewer role.
+Applying updates the canvas, not the deployment. `400` for a bad `graph_data`,
+strategy or `baseVersion`; `413` past the 500KB cap. From the CLI,
+`flowforge merge <id> <file>` wraps this and exits **2** on conflicts. See
+[MERGE.md](./MERGE.md).
+
+### Trace a workflow's dataflow
+
+Where each node's data comes from, what reads it, and which config fields let
+data leave the system.
+
+```bash
+curl -s "https://your-flowforge-host/api/v1/workflows/6f0c…/lineage?node=charge" \
+  -H "Authorization: Bearer $FLOWFORGE_TOKEN"
+```
+
+Without `?node`, the whole map: every node's **origins** and reads, the
+**sinks** where data leaves with the origins reaching them, which nodes can read
+each secret, and the findings. With `?node=<id>`, one node's **provenance**
+(what feeds it, back to the trigger field or API response it started as) and
+**impact** (what breaks if it changes).
+
+Origins carry a trust level — `untrusted` (a webhook body or callback payload:
+whoever holds the URL wrote it), `external` (an HTTP or model response: a third
+party did), `internal` (config, variables, secrets) — and untrusted data
+reaching a high-sensitivity sink is the `tainted-sink` finding that also appears
+in `lint`.
+
+Two asymmetries are deliberate and worth knowing when reading the output. Taint
+**stops at an external boundary**: an HTTP node's body is the far side's answer,
+not a function of the URL it was asked for. Impact **does not**: changing the URL
+does change the response, so everything downstream really is affected. And a
+pinned host (`https://api.acme.com/orders/{{trigger.id}}`) is recorded as a sink
+but not reported — only a dynamic authority lets a caller choose the
+destination.
+
+Read-only and pure; requires the `read` scope. `flowforge lineage <id>
+[--node <id>] [--strict]` wraps it. See [LINEAGE.md](./LINEAGE.md).
+
 ### Lint a workflow
 
 The app's 🔎 Issues linter as a CI gate — same rules, same severity contract,
@@ -746,6 +845,40 @@ Returns `409` if the source run is not failed or cancelled.
 Like replay, a resume runs the workflow's **current** definition: an edited or
 replaced node has no matching prior step, so it re-executes — and everything
 downstream of any node that re-executes runs fresh instead of being reused.
+
+### Roll back an execution
+
+Resume re-runs what didn't finish; **rollback undoes what did**. A failed run
+whose workflow declares compensations unwinds automatically — this endpoint
+exists for the case that couldn't: the compensating endpoint was itself broken,
+the run landed `partial`, and someone has since fixed it.
+
+```bash
+curl -s -X POST https://your-flowforge-host/api/v1/executions/e57a…/rollback \
+  -H "Authorization: Bearer $FLOWFORGE_TOKEN"
+```
+
+```json
+{
+  "executionId": "e57a…",
+  "outcome": "completed",
+  "compensations": [
+    { "nodeId": "refund", "targetNodeId": "charge", "status": "succeeded", "attempts": 2 }
+  ]
+}
+```
+
+Only compensations that have **not already succeeded** are run, so retrying is
+safe and never double-undoes — double-refunding a customer while cleaning up
+after a failure is worse than the failure was. `outcome` is `completed` or
+`partial`.
+
+Requires the `trigger` scope, not `read`: this fires real, irreversible side
+effects at real systems. Returns `409` if the run is still going, succeeded, or
+has nothing outstanding. The run detail (`GET /executions/:id`) carries
+`rollbackStatus` and the `compensations` list for polling. From the CLI,
+`flowforge rollback <id> --yes` wraps it and exits non-zero on a partial unwind.
+See [ROLLBACK.md](./ROLLBACK.md).
 
 ### List approval requests
 
