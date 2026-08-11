@@ -30,6 +30,7 @@ export default function CanvasToolbar({
   issuesOpen,
   onDeploy,
   onToggleHistory,
+  onOpenMerge,
   onTogglePause,
   paused,
   pausing,
@@ -222,6 +223,13 @@ export default function CanvasToolbar({
         onClick={onToggleHistory}
       >
         🕘 History
+      </button>
+      <button
+        className="toolbar-btn toolbar-btn--history"
+        title="Merge an exported workflow file into this canvas, keeping both sides' edits"
+        onClick={onOpenMerge}
+      >
+        ⇋ Merge
       </button>
       {scheduleWarning && (
         <span className="canvas-toolbar__warning" role="status">

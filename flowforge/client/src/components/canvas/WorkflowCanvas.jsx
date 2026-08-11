@@ -31,6 +31,7 @@ import TestsPanel from './TestsPanel'
 import HistoryPanel from './HistoryPanel'
 import IssuesPanel from './IssuesPanel'
 import LineagePanel from './LineagePanel'
+import MergeModal from './MergeModal'
 import ExecutionPanel from '../execution/ExecutionPanel'
 import CursorOverlay from '../collaboration/CursorOverlay'
 import CommentsOverlay from '../collaboration/CommentsOverlay'
@@ -110,6 +111,7 @@ function CanvasInner({ workflowId }) {
   // Lint results for the live canvas (Issues panel)
   const [issuesOpen, setIssuesOpen] = useState(false)
   const [lineageOpen, setLineageOpen] = useState(false)
+  const [mergeOpen, setMergeOpen] = useState(false)
 
   // Version history (deploy / restore)
   const [historyOpen, setHistoryOpen] = useState(false)
@@ -1025,6 +1027,7 @@ function CanvasInner({ workflowId }) {
         lineageOpen={lineageOpen}
         onDeploy={handleDeploy}
         onToggleHistory={handleToggleHistory}
+        onOpenMerge={() => setMergeOpen(true)}
         onTogglePause={handleTogglePause}
         paused={paused}
         pausing={pausing}
@@ -1179,6 +1182,22 @@ function CanvasInner({ workflowId }) {
           selectedNodeId={selectedNode?.id || null}
           onClose={() => setLineageOpen(false)}
           onSelectNode={handleSelectIssueNode}
+        />
+      )}
+      {/* A merge rewrites the live graph server-side, so the canvas reloads it
+          rather than trying to reconcile a second time on the client. */}
+      {mergeOpen && (
+        <MergeModal
+          workflowId={workflowId}
+          onClose={() => setMergeOpen(false)}
+          onMerged={async () => {
+            try {
+              const { workflow } = await apiFetch(`/api/workflows/${workflowId}`)
+              applyWorkflow(workflow)
+            } catch {
+              /* the merge landed server-side; a failed reload is a refresh away */
+            }
+          }}
         />
       )}
       <HistoryPanel

@@ -7447,3 +7447,184 @@ html, body, #root {
   padding-top: 10px;
   border-top: 1px solid var(--border, #e2e8f0);
 }
+
+/* ── Three-way merge ─────────────────────────────────────────────────────
+   The modal is wider than the import one because its job is to show three
+   values side by side — the ancestor, what's live, and what the file says.
+   That comparison is the information a merge tool exists to present; a list
+   of node names would just be a diff with extra steps. */
+.merge-modal {
+  max-width: 620px;
+}
+
+.merge-modal__body {
+  max-height: 70vh;
+  overflow-y: auto;
+}
+
+.merge-modal__intro {
+  margin: 0 0 12px;
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--text-muted, #64748b);
+}
+
+.merge-modal__file input {
+  width: 100%;
+  font-size: 13px;
+}
+
+.merge-modal__filename {
+  margin: 8px 0 0;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  color: var(--text-muted, #64748b);
+}
+
+.merge-modal__hint {
+  margin: 12px 0 0;
+  font-size: 12px;
+  color: var(--text-muted, #64748b);
+}
+
+.merge-modal__warning {
+  margin: 10px 0 0;
+  padding: 8px 10px;
+  border-left: 3px solid #f59e0b;
+  border-radius: 6px;
+  background: #fffbeb;
+  font-size: 12px;
+  color: #92400e;
+}
+
+.merge-modal__clean {
+  margin: 12px 0 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: #166534;
+}
+
+.merge-modal__section {
+  margin: 16px 0 8px;
+  font-size: 13px;
+  font-weight: 700;
+  color: #991b1b;
+}
+
+.merge-summary {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-top: 10px;
+  font-size: 12px;
+}
+
+.merge-summary__stat {
+  padding: 2px 8px;
+  border-radius: 6px;
+  background: var(--surface-muted, #f1f5f9);
+  color: var(--text-muted, #475569);
+  font-weight: 600;
+}
+
+.merge-summary__stat--added { background: #dcfce7; color: #166534; }
+.merge-summary__stat--changed { background: #fef3c7; color: #92400e; }
+.merge-summary__stat--removed { background: #fee2e2; color: #991b1b; }
+
+.merge-conflicts {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.merge-conflict {
+  padding: 10px 12px;
+  border: 1px solid #fecaca;
+  border-left: 3px solid #dc2626;
+  border-radius: 8px;
+  background: #fef2f2;
+}
+
+.merge-conflict__head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-bottom: 6px;
+  font-size: 13px;
+}
+
+.merge-conflict__field {
+  padding: 0 5px;
+  border-radius: 4px;
+  background: #fff;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  color: #991b1b;
+}
+
+.merge-conflict__detail {
+  margin: 0;
+  font-size: 12px;
+  color: #991b1b;
+}
+
+.merge-value {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 3px 0;
+  font-size: 12px;
+}
+
+.merge-value__label {
+  flex: 0 0 40px;
+  font-weight: 700;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-muted, #64748b);
+}
+
+.merge-value__text {
+  flex: 1;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: #fff;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  word-break: break-all;
+}
+
+.merge-value--ours .merge-value__text { box-shadow: inset 2px 0 0 #2563eb; }
+.merge-value--theirs .merge-value__text { box-shadow: inset 2px 0 0 #16a34a; }
+.merge-value--base .merge-value__text { color: var(--text-muted, #64748b); }
+
+.merge-modal__actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.merge-modal__actions button {
+  padding: 7px 14px;
+  border: 1px solid var(--border, #cbd5e1);
+  border-radius: 6px;
+  background: #fff;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.merge-modal__actions button:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.merge-modal__apply {
+  border-color: #2563eb !important;
+  background: #2563eb !important;
+  color: #fff;
+}

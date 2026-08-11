@@ -16,6 +16,7 @@ const stepCache = require('../services/stepCache')
 const { isValidPriority } = require('../services/runPriority')
 const { ROLLBACK_POLICIES } = require('../services/compensation')
 const { describeLineage, analyzeLineage, traceProvenance, traceImpact } = require('../services/lineage')
+const { mergeDocument, applyMerge } = require('../services/workflowMerge')
 const { forbidViewer } = require('../services/workspaceRoles')
 const { pauseWorkflow, resumeWorkflow } = require('../services/workflowPause')
 const { computeDependencies } = require('../services/workflowDependencies')
@@ -776,6 +777,57 @@ router.post('/workflows/:id/types', auth, (req, res) => {
       workflowId: workflow.id,
       ...describeGraphTypes(graph, { resolveWorkflow: graphResolver(workflow.workspace_id) }),
     })
+  } catch (err) {
+    console.error(err)
+    res.status(500).json({ error: 'Internal server error' })
+  }
+})
+
+// POST /api/workflows/:id/merge — three-way merge an exported document into
+// this workflow's canvas.
+//
+// The same service the public API uses, so the two surfaces cannot disagree
+// about what a merge means. The session route exists because the reconciliation
+// is not always a CI job: someone who exported a workflow, changed it in git,
+// and then also fixed something live wants to bring the two together without
+// dropping to a terminal — and this is the surface where they can *see* the
+// conflict against the graph it belongs to.
+router.post('/workflows/:id/merge', auth, (req, res) => {
+  try {
+    const workflow = db.prepare('SELECT * FROM workflows WHERE id = ?').get(req.params.id)
+    if (!workflow || !isMember(workflow.workspace_id, req.user.id)) {
+      return res.status(404).json({ error: 'Workflow not found' })
+    }
+    if (forbidViewer(res, workflow.workspace_id, req.user.id)) return
+
+    const graphData = req.body?.graph_data
+    if (graphData && Buffer.byteLength(JSON.stringify(graphData), 'utf8') > MAX_IMPORT_GRAPH_BYTES) {
+      return res.status(413).json({ error: 'Workflow graph is too large (max 500KB)' })
+    }
+
+    const strategy = req.body?.strategy ?? 'manual'
+    const merged = mergeDocument(workflow, graphData, {
+      strategy,
+      baseVersion: req.body?.baseVersion,
+    })
+    if (merged.error) return res.status(400).json({ error: merged.error })
+    if (!req.body?.apply || !merged.graph) return res.json(merged.body)
+
+    applyMerge(workflow, merged.graph)
+    recordAudit(workflow.workspace_id, req.user.id, 'workflow.merged', {
+      type: 'workflow',
+      id: workflow.id,
+      name: workflow.name,
+      metadata: {
+        baseVersion: merged.body.base?.version ?? null,
+        strategy,
+        ...merged.body.summary,
+      },
+    })
+    activityService.logEvent(workflow.workspace_id, req.user.id, 'workflow.updated', {
+      type: 'workflow', id: workflow.id, name: workflow.name,
+    })
+    res.json({ ...merged.body, applied: true })
   } catch (err) {
     console.error(err)
     res.status(500).json({ error: 'Internal server error' })
