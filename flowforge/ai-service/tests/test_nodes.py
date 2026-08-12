@@ -3,7 +3,7 @@ from unittest.mock import patch
 
 import pytest
 
-from services.nodes import run_llm_prompt, classify_text, extract_fields
+from services.nodes import classify_text, extract_fields, run_llm_prompt
 
 # Every node function now also reports the call's token usage, so the server can
 # price the step. Tests patch `chat_with_usage` and assert on the payload
@@ -64,17 +64,22 @@ class TestClassifyText:
 
 
 class TestExtractFields:
-    @patch('services.llm.chat')
+    @patch('services.llm.chat_with_usage')
     def test_parses_json_object(self, mock_chat):
-        mock_chat.return_value = json.dumps({'name': 'Ada', 'email': 'ada@example.com'})
+        mock_chat.side_effect = replying(json.dumps({'name': 'Ada', 'email': 'ada@example.com'}))
         result = extract_fields('Ada <ada@example.com>', ['name', 'email'])
-        assert result == {'data': {'name': 'Ada', 'email': 'ada@example.com'}}
+        assert without_usage(result) == {'data': {'name': 'Ada', 'email': 'ada@example.com'}}
 
-    @patch('services.llm.chat')
+    @patch('services.llm.chat_with_usage')
     def test_strips_code_fences(self, mock_chat):
-        mock_chat.return_value = '```json\n{"city": "Paris"}\n```'
+        mock_chat.side_effect = replying('```json\n{"city": "Paris"}\n```')
         result = extract_fields('I live in Paris', 'city')
-        assert result == {'data': {'city': 'Paris'}}
+        assert without_usage(result) == {'data': {'city': 'Paris'}}
+
+    @patch('services.llm.chat_with_usage')
+    def test_reports_token_usage_for_pricing(self, mock_chat):
+        mock_chat.side_effect = replying('{"city": "Paris"}')
+        assert extract_fields('I live in Paris', 'city')['usage'] == USAGE
 
     def test_requires_text_and_fields(self):
         with pytest.raises(ValueError):
