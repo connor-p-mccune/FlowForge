@@ -27,6 +27,8 @@ export default function CanvasToolbar({
   onToggleIssues,
   onToggleLineage,
   lineageOpen,
+  onToggleGuarantees,
+  guaranteesOpen,
   issuesOpen,
   onDeploy,
   onToggleHistory,
@@ -170,6 +172,14 @@ export default function CanvasToolbar({
         aria-pressed={lineageOpen}
       >
         🔗 Lineage
+      </button>
+      <button
+        className={`toolbar-btn toolbar-btn--issues${guaranteesOpen ? ' toolbar-btn--active' : ''}`}
+        title="Guarantees — invariants checked over every execution this graph admits, not just the one that ran"
+        onClick={onToggleGuarantees}
+        aria-pressed={guaranteesOpen}
+      >
+        🛡 Guarantees
       </button>
       <span className="canvas-toolbar__divider" />
       <button

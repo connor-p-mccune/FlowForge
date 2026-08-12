@@ -7628,3 +7628,188 @@ html, body, #root {
   background: #2563eb !important;
   color: #fff;
 }
+
+/* ── Workflow guarantees ─────────────────────────────────────────────────
+   A verdict is carried by an icon, a word, and a colour, never by the colour
+   alone — this panel's whole job is to say "the thing you promised can no
+   longer be relied on", which has to survive a red/green colour deficiency.
+   The visually-hidden status word rides beside every icon for the same
+   reason. */
+.guarantees-panel .issues-panel__body {
+  font-size: 12px;
+}
+
+.issues-panel__count--ok {
+  background: #dcfce7;
+  color: #166534;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.guarantee-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.guarantee {
+  padding: 8px 10px;
+  border-radius: 7px;
+  border-left: 3px solid var(--border, #e2e8f0);
+  background: #f8fafc;
+}
+
+.guarantee--holds {
+  border-left-color: #16a34a;
+}
+.guarantee--violated {
+  border-left-color: #dc2626;
+  background: #fef2f2;
+}
+.guarantee--unknown {
+  border-left-color: #d97706;
+  background: #fffbeb;
+}
+
+.guarantee__head {
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+}
+
+.guarantee__icon {
+  font-weight: 700;
+}
+.guarantee--holds .guarantee__icon { color: #16a34a; }
+.guarantee--violated .guarantee__icon { color: #dc2626; }
+.guarantee--unknown .guarantee__icon { color: #d97706; }
+
+.guarantee__statement {
+  flex: 1;
+  font-weight: 600;
+  color: #1e293b;
+}
+
+.guarantee__remove {
+  padding: 0 4px;
+  border: none;
+  background: none;
+  color: var(--text-muted, #94a3b8);
+  font-size: 15px;
+  line-height: 1;
+  cursor: pointer;
+}
+.guarantee__remove:hover:not(:disabled) { color: #dc2626; }
+.guarantee__remove:disabled { opacity: 0.4; cursor: default; }
+
+.guarantee__message,
+.guarantee__evidence,
+.guarantee__path,
+.guarantee__facts {
+  margin: 5px 0 0;
+  color: #475569;
+}
+
+.guarantee__evidence,
+.guarantee__facts {
+  color: var(--text-muted, #64748b);
+}
+
+.guarantee__path {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 3px;
+}
+
+.guarantee__arrow {
+  margin: 0 3px;
+  color: var(--text-muted, #94a3b8);
+}
+
+.guarantee-suggestions {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.guarantee-suggestions li {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 6px 8px;
+  border: 1px dashed var(--border, #e2e8f0);
+  border-radius: 7px;
+}
+
+.guarantee__pin {
+  padding: 2px 9px;
+  border: 1px solid #4f46e5;
+  border-radius: 5px;
+  background: #fff;
+  color: #4f46e5;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.guarantee__pin:hover:not(:disabled) { background: #eef2ff; }
+.guarantee__pin:disabled { opacity: 0.5; cursor: default; }
+
+.guarantee__compose {
+  width: 100%;
+  margin-top: 14px;
+  padding: 6px;
+  border: 1px dashed #d1d5db;
+  border-radius: 6px;
+  background: #fff;
+  color: #475569;
+  font-size: 12px;
+  cursor: pointer;
+}
+.guarantee__compose:hover { background: #f9fafb; }
+
+.guarantee-composer {
+  margin-top: 14px;
+  padding: 10px;
+  border: 1px solid var(--border, #e2e8f0);
+  border-radius: 8px;
+}
+
+.guarantee-composer__row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 5px;
+  margin-top: 8px;
+  color: #475569;
+}
+
+.guarantee-composer select {
+  max-width: 130px;
+  padding: 3px 5px;
+  border: 1px solid #d1d5db;
+  border-radius: 5px;
+  font-size: 11px;
+}
+
+.guarantee-composer__actions {
+  display: flex;
+  gap: 6px;
+  margin-top: 10px;
+}

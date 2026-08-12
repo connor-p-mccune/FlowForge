@@ -31,6 +31,7 @@ import TestsPanel from './TestsPanel'
 import HistoryPanel from './HistoryPanel'
 import IssuesPanel from './IssuesPanel'
 import LineagePanel from './LineagePanel'
+import GuaranteesPanel from './GuaranteesPanel'
 import MergeModal from './MergeModal'
 import ExecutionPanel from '../execution/ExecutionPanel'
 import CursorOverlay from '../collaboration/CursorOverlay'
@@ -111,6 +112,7 @@ function CanvasInner({ workflowId }) {
   // Lint results for the live canvas (Issues panel)
   const [issuesOpen, setIssuesOpen] = useState(false)
   const [lineageOpen, setLineageOpen] = useState(false)
+  const [guaranteesOpen, setGuaranteesOpen] = useState(false)
   const [mergeOpen, setMergeOpen] = useState(false)
 
   // Version history (deploy / restore)
@@ -585,6 +587,7 @@ function CanvasInner({ workflowId }) {
 
   const handleToggleIssues = useCallback(() => setIssuesOpen((v) => !v), [])
   const handleToggleLineage = useCallback(() => setLineageOpen((v) => !v), [])
+  const handleToggleGuarantees = useCallback(() => setGuaranteesOpen((v) => !v), [])
 
   // Clicking an issue selects the offending node (opening its config panel)
   // and pans the viewport to it.
@@ -1025,6 +1028,8 @@ function CanvasInner({ workflowId }) {
         issuesOpen={issuesOpen}
         onToggleLineage={handleToggleLineage}
         lineageOpen={lineageOpen}
+        onToggleGuarantees={handleToggleGuarantees}
+        guaranteesOpen={guaranteesOpen}
         onDeploy={handleDeploy}
         onToggleHistory={handleToggleHistory}
         onOpenMerge={() => setMergeOpen(true)}
@@ -1181,6 +1186,18 @@ function CanvasInner({ workflowId }) {
           edges={edges}
           selectedNodeId={selectedNode?.id || null}
           onClose={() => setLineageOpen(false)}
+          onSelectNode={handleSelectIssueNode}
+        />
+      )}
+      {/* Same side again, and for the same reason: this is the third answer to
+          "what's wrong with this graph?" — the linter's is about the nodes, the
+          lineage's is about the data, and this one is about the paths. */}
+      {guaranteesOpen && (
+        <GuaranteesPanel
+          workflowId={workflowId}
+          nodes={nodes}
+          edges={edges}
+          onClose={() => setGuaranteesOpen(false)}
           onSelectNode={handleSelectIssueNode}
         />
       )}
