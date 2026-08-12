@@ -20,6 +20,7 @@ const COMMANDS = {
   diff: require('../src/commands/diff'),
   merge: require('../src/commands/merge'),
   lint: require('../src/commands/lint'),
+  verify: require('../src/commands/verify'),
   types: require('../src/commands/types'),
   lineage: require('../src/commands/lineage'),
   release: require('../src/commands/release'),
@@ -57,6 +58,7 @@ Usage:
   flowforge diff <workflow-id> <file>              Compare the live workflow against an exported file (exits non-zero on drift)
   flowforge merge <workflow-id> <file> [--yes]     Three-way merge a file into the live workflow (exits 2 on conflicts)
   flowforge lint <workflow-id> [file] [--strict]   Lint the live workflow — or an exported file against its workspace (exits non-zero on errors)
+  flowforge verify <id> [--facts] [--suggest]      Check declared path invariants over every execution the graph admits (exits non-zero on a break)
   flowforge types <workflow-id> [--node <id>]      Inferred data schema per node — what each one produces (exits non-zero on a type error)
   flowforge lineage <id> [--node <id>] [--strict]  Where data comes from and where it leaves — provenance, impact, and taint
   flowforge release <id> [--promote|--rollback]   Canary release status — exits 0 promote, 1 roll back, 2 keep waiting

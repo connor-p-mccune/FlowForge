@@ -48,6 +48,7 @@ export FLOWFORGE_TOKEN=ffp_…
 | `flowforge diff <id> <file>` | Compare the **live** workflow against an exported file — exits non-zero on drift, so CI catches the promotion someone forgot (or the hand-edit someone made) |
 | `flowforge merge <id> <file> [--yes] [--ours\|--theirs] [--base <v>]` | Three-way merge a file into the live workflow, per config field — keeps both sides' work instead of picking one to lose. Previews unless `--yes`; exits **2** on conflicts ([docs](../docs/MERGE.md)) |
 | `flowforge lint <id> [file] [--strict]` | Run the app's linter as a CI gate — over the live workflow, or over an exported file against its target workspace (real secret/variable names, sub-workflow targets); exits non-zero on errors, `--strict` fails warnings too |
+| `flowforge verify <id> [--facts] [--suggest]` | Check the workflow's declared path invariants over **every execution the graph admits**; exits non-zero on one that broke *or* one that can no longer be checked ([docs](../docs/GUARANTEES.md)) |
 | `flowforge types <id> [--node <id>] [--json]` | The workflow's inferred data schema — what each node produces and the exact `{{node.path}}` references it offers; exits non-zero on a type error ([docs](../docs/TYPES.md)) |
 | `flowforge release <id> [--promote] [--rollback] [--wait N]` | Canary release status — exits **0** promote, **1** roll back, **2** keep waiting, so a pipeline branches on the verdict without parsing a p-value ([docs](../docs/RELEASES.md)) |
 | `flowforge search <query> [--limit N]` | Find workflows by name **or by what's inside them** — node labels, config strings, sticky notes ([docs](../docs/API.md#search-workflows)) |
@@ -103,6 +104,41 @@ is caught before the import, not at the first 3am run:
 
 Without a file it lints the live workflow. Errors always fail the job;
 `--strict` fails warnings (unreachable nodes, half-wired branches) too.
+
+## Gate on what the graph can never do
+
+`lint` answers *will this run?*. `verify` answers a question no amount of
+linting reaches — *does it still do what its author swore it did?* — by
+checking the workflow's declared path invariants against every execution the
+graph admits:
+
+```console
+$ flowforge verify 6f0c…
+✗ Charge card never runs unless Approve ran first
+    Run by hand → Charge card reaches Charge card without Approve
+    counterexample: manual → charge
+
+1 of 2 guarantees no longer hold
+```
+
+Somebody added a manual trigger for testing and wired it straight at the
+charge. Every node still lints, every type still checks, and the approval is
+now optional. Both commands belong in a pipeline because they fail on
+different things:
+
+```yaml
+- run: npx --prefix cli flowforge lint $WORKFLOW_ID --strict
+- run: npx --prefix cli flowforge verify $WORKFLOW_ID
+```
+
+A guarantee that can no longer be **checked** fails the build exactly like one
+that broke. Delete the approval node and every invariant about it stops
+failing — a green pipeline forever, guarding nothing.
+
+`--facts` adds what is true of the graph regardless of what anyone declared
+(which nodes every run executes, where the decisions are); `--suggest` lists
+the invariants that hold today and look deliberate, which is the shortest path
+from *no guarantees declared* to a useful set.
 
 ## Ask what a node actually produces
 
