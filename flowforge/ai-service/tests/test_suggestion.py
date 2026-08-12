@@ -4,7 +4,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from services.suggestion import get_node_suggestions, build_node_summary
+from services.suggestion import build_node_summary, get_node_suggestions
 
 
 class TestBuildNodeSummary:
@@ -130,9 +130,9 @@ class TestGetNodeSuggestionsWithMockedOpenAI:
     def test_surfaces_a_failing_completion(self):
         client = MagicMock()
         client.chat.completions.create.side_effect = RuntimeError('rate limited')
-        with patch('services.llm.get_client', return_value=client):
-            with pytest.raises(RuntimeError, match='rate limited'):
-                get_node_suggestions([], [])
+        with patch('services.llm.get_client', return_value=client), \
+                pytest.raises(RuntimeError, match='rate limited'):
+            get_node_suggestions([], [])
 
 
 class TestRoutes:

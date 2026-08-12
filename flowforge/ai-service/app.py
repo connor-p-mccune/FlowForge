@@ -1,10 +1,11 @@
 import os
 
-from flask import Flask, request, jsonify
-from services.suggestion import get_node_suggestions
-from services.nodes import run_llm_prompt, classify_text, extract_fields
-from services.generate import generate_workflow
 from dotenv import load_dotenv
+from flask import Flask, jsonify, request
+
+from services.generate import generate_workflow
+from services.nodes import classify_text, extract_fields, run_llm_prompt
+from services.suggestion import get_node_suggestions
 
 load_dotenv()
 
@@ -78,5 +79,8 @@ def generate():
 
 if __name__ == '__main__':
     # Dev entrypoint only — production is served by gunicorn (see Dockerfile).
-    port = int(os.environ.get('PORT', 5000))
+    # The fallback is a string because that is what os.environ.get returns for
+    # a variable that *is* set — an int default makes the two paths differently
+    # typed for no reason.
+    port = int(os.environ.get('PORT', '5000'))
     app.run(host='0.0.0.0', port=port, debug=True)

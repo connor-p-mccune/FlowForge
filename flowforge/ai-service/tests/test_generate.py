@@ -11,13 +11,12 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from services.generate import (
+    _EXAMPLES,
     KNOWN_NODE_TYPES,
     SYSTEM_PROMPT,
-    _EXAMPLES,
     _validate_graph,
     generate_workflow,
 )
-
 
 # --- Five prompts → five representative gpt-4o outputs -----------------------
 # Built as dicts (always valid JSON) covering the breadth of node types: a
@@ -294,9 +293,9 @@ class TestGenerateWithMockedOpenAI:
     def test_surfaces_a_failing_completion(self):
         client = MagicMock()
         client.chat.completions.create.side_effect = RuntimeError('rate limited')
-        with patch('services.llm.get_client', return_value=client):
-            with pytest.raises(RuntimeError, match='rate limited'):
-                generate_workflow('anything')
+        with patch('services.llm.get_client', return_value=client), \
+                pytest.raises(RuntimeError, match='rate limited'):
+            generate_workflow('anything')
 
 
 class TestRoutes:

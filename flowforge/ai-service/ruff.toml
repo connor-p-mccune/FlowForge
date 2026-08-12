@@ -1,0 +1,54 @@
+# Ruff configuration for the AI service.
+#
+# This file exists because its absence was a bug. With no config, ruff lints
+# against whatever its *current* default rule set happens to be — and that set
+# has grown across releases, so a CI job that installs ruff unpinned can go red
+# without a single commit touching this service. Selecting the rules here (and
+# pinning the version in .github/workflows/ci.yml) makes the lint a decision
+# recorded in the repository rather than a property of the day it ran.
+#
+# The selection is deliberately about *defects and consistency*, not house
+# style: this project has no formatter step, so rules that would demand
+# wholesale reflowing of working code earn nothing.
+
+# The code was written to a wider margin than ruff's 88-character default, and
+# reflowing it would be churn rather than a fix. 120 is what the source already
+# observes everywhere outside the exempted prompt below.
+line-length = 120
+
+[lint]
+select = [
+  "E",   # pycodestyle errors
+  "W",   # pycodestyle warnings
+  "F",   # pyflakes — unused names, undefined names, the real bug catchers
+  "I",   # import sorting
+  "B",   # flake8-bugbear — mutable defaults, calls in argument defaults, …
+  "C4",  # flake8-comprehensions
+  "SIM", # flake8-simplify
+  "RET", # flake8-return
+  "UP",  # pyupgrade — keep to the Python the Dockerfile actually runs
+]
+
+# Two families are deliberately *not* selected, because both are wrong for this
+# code rather than merely inconvenient:
+#
+#   BLE (blind-except) fires on every Flask route in app.py. Catching
+#   `Exception` at an HTTP boundary and turning it into a 500 JSON body is the
+#   correct pattern there — it is the same thing the Node server's error
+#   handler does — and letting an unexpected error escape to Flask's default
+#   HTML page would be a regression, not a fix.
+#
+#   TRY004 ("prefer TypeError for invalid type") fires on _validate_graph in
+#   services/generate.py. That function validates *untrusted model output*, not
+#   a caller's arguments: its documented contract is to raise ValueError, the
+#   route maps ValueError to a user-facing message, and the tests assert
+#   `pytest.raises(ValueError)`. TypeError is the idiom for a programmer's
+#   mistake, which this is not.
+
+[lint.per-file-ignores]
+# services/generate.py embeds the LLM system prompt as a triple-quoted string
+# containing a column-aligned table of node types. Those lines are long because
+# the alignment is what makes the table legible to the model and to a reader;
+# wrapping them would change the prompt that gets sent. A `# noqa` cannot go
+# inside a string literal, so the exemption has to live here.
+"services/generate.py" = ["E501"]

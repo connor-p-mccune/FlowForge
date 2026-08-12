@@ -8,8 +8,15 @@ import pytest
 
 from services import llm
 
+# The token counts a fake completion reports unless a test asks for others.
+# Named at module level rather than written inline as a default argument: a
+# default is evaluated once at definition time either way, so naming it makes
+# that sharing explicit — and it leaves `usage=None` free to mean what one test
+# below needs it to mean, a provider response carrying no usage block at all.
+DEFAULT_USAGE = SimpleNamespace(prompt_tokens=11, completion_tokens=7)
 
-def fake_client(content='ok', usage=SimpleNamespace(prompt_tokens=11, completion_tokens=7)):
+
+def fake_client(content='ok', usage=DEFAULT_USAGE):
     """A stand-in for the OpenAI client whose completion returns `content`."""
     client = MagicMock()
     client.chat.completions.create.return_value = SimpleNamespace(
@@ -59,9 +66,9 @@ class TestChat:
     def test_propagates_client_errors(self):
         client = MagicMock()
         client.chat.completions.create.side_effect = RuntimeError('rate limited')
-        with patch('services.llm.get_client', return_value=client):
-            with pytest.raises(RuntimeError, match='rate limited'):
-                llm.chat('hi')
+        with patch('services.llm.get_client', return_value=client), \
+                pytest.raises(RuntimeError, match='rate limited'):
+            llm.chat('hi')
 
 
 class TestChatWithUsage:

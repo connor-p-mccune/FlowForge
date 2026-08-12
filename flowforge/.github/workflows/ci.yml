@@ -63,7 +63,12 @@ jobs:
         with:
           python-version: '3.11'
       - run: pip install -r requirements.txt
-      - run: pip install ruff
+      # Pinned deliberately. An unpinned linter is a build that can go red with
+      # no commit behind it: ruff's *default* rule set grows between releases,
+      # so `pip install ruff` silently changed what this job enforced. The rules
+      # themselves are selected in ai-service/ruff.toml; this pins the tool that
+      # reads them. Bump both together.
+      - run: pip install ruff==0.16.2
       - run: ruff check .
       # Coverage flags come from pytest.ini (addopts)
       - run: python -m pytest -v
