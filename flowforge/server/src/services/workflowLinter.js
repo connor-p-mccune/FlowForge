@@ -20,6 +20,7 @@ const { inferGraphTypes, checkReferences } = require('./typeInference')
 const { CACHEABLE_TYPES, DEFAULT_TTL_SECONDS } = require('./stepCache')
 const { compensationPlan } = require('./compensation')
 const { analyzeLineage } = require('./lineage')
+const { guaranteeIssues } = require('./guarantees')
 
 const PLACEHOLDER = /\{\{\s*([\w-]+(?:\.[\w-]+)*)\s*\}\}/g
 
@@ -461,7 +462,9 @@ function buildAncestors(order, incomingByNode) {
 //   resolveWorkflow — (id) => { nodes, edges } | null, so a sub-workflow node
 //                     can be typed from what its target actually returns
 //                     (services/graphLookup.js builds one)
-function lintGraph({ nodes: rawNodes = [], edges: rawEdges = [] } = {}, { secretNames, variableNames, workflowTargets, resolveWorkflow, rollbackPolicy } = {}) {
+//   guarantees      — the workflow's declared path invariants (raw JSON or a
+//                     parsed array), verified against the graph on screen
+function lintGraph({ nodes: rawNodes = [], edges: rawEdges = [] } = {}, { secretNames, variableNames, workflowTargets, resolveWorkflow, rollbackPolicy, guarantees } = {}) {
   const issues = []
 
   // Sticky notes are annotations: the engine drops them (and any edge touching
@@ -895,6 +898,21 @@ function lintGraph({ nodes: rawNodes = [], edges: rawEdges = [] } = {}, { secret
     // Lineage is an extra lens, never a gate: a graph the linter could
     // otherwise report on must not go unlinted because this pass tripped.
     console.error(`Lineage analysis failed: ${err.message}`)
+  }
+
+  // Declared path invariants (services/guarantees.js). Every pass above reasons
+  // about what is *on* the canvas; this one reasons about what the canvas
+  // permits, and reports only against statements the author wrote down
+  // themselves — so a workflow with no declarations is completely unaffected.
+  //
+  // Errors rather than warnings, uniquely among the additive passes, and the
+  // asymmetry is the point: a lineage finding says "this pattern is often a
+  // mistake", while a violated guarantee says "the thing you told us must never
+  // happen can now happen". The author already decided it mattered.
+  try {
+    issues.push(...guaranteeIssues({ nodes: rawNodes, edges: rawEdges }, guarantees))
+  } catch (err) {
+    console.error(`Guarantee verification failed: ${err.message}`)
   }
 
   const rank = { error: 0, warning: 1 }

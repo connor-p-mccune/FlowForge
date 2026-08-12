@@ -417,11 +417,18 @@ function verifyGuarantees(rawGraph, declarations) {
     // declaration as `unknown` rather than as holding is the whole point: a
     // guarantee whose check silently stopped running is worse than no
     // guarantee, because somebody is relying on it.
+    const results = base.map((g) => ({
+      ...g,
+      status: 'unknown',
+      message: reasonText(analysis.reason),
+    }))
     return {
-      ok: false,
+      ok: results.length === 0,
+      analysed: false,
       reason: analysis.reason,
-      results: base.map((g) => ({ ...g, status: 'unknown', message: reasonText(analysis.reason) })),
+      results,
       facts: null,
+      suggestions: [],
     }
   }
 
@@ -478,7 +485,12 @@ function verifyGuarantees(rawGraph, declarations) {
   })
 
   return {
-    ok: true,
+    // `ok` means what a CI gate needs it to mean — every declaration holds —
+    // and `analysed` separately reports whether the graph could be reasoned
+    // about at all. Two facts, because collapsing them would make a cyclic
+    // graph with no declarations indistinguishable from a broken invariant.
+    ok: results.every((r) => r.status === 'holds'),
+    analysed: true,
     results,
     facts: {
       alwaysRuns: [...analysis.always].map((id) => ({ nodeId: id, label: labels(id) })),

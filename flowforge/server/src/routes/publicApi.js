@@ -19,6 +19,7 @@ const { getExecutionQueue } = require('../config/queue')
 const { requestCancel } = require('../services/executionControl')
 const { rollbackExecution } = require('../services/executionEngine')
 const { describeLineage, analyzeLineage, traceProvenance, traceImpact } = require('../services/lineage')
+const { verifyGuarantees, parseGuarantees } = require('../services/guarantees')
 const { mergeDocument, applyMerge } = require('../services/workflowMerge')
 const { recordAudit } = require('../services/auditLog')
 const { respondToApproval } = require('../services/approvals')
@@ -230,11 +231,13 @@ router.post('/workspaces/:id/workflows/import', tokenAuth('manage'), (req, res) 
       return res.status(413).json({ error: 'Workflow graph is too large (max 500KB)' })
     }
 
+    const guarantees = parseGuarantees(req.body.guarantees)
+
     const id = uuidv4()
     const now = new Date().toISOString()
     db.prepare(
-      "INSERT INTO workflows (id, workspace_id, name, description, graph_json, status, created_by, created_at, updated_at) VALUES (?, ?, ?, ?, ?, 'draft', ?, ?, ?)"
-    ).run(id, req.params.id, name.trim(), null, graphJson, req.user.id, now, now)
+      "INSERT INTO workflows (id, workspace_id, name, description, graph_json, guarantees_json, status, created_by, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, 'draft', ?, ?, ?)"
+    ).run(id, req.params.id, name.trim(), null, graphJson, guarantees.length ? JSON.stringify(guarantees) : null, req.user.id, now, now)
 
     const workflow = db.prepare(
       'SELECT id, name, description, status, workspace_id, updated_at, graph_json FROM workflows WHERE id = ?'
@@ -583,6 +586,10 @@ router.get('/workflows/:id/export', tokenAuth('read'), (req, res) => {
       name: workflow.name,
       description: workflow.description,
       graph_data: graphData,
+      // The declared path invariants ride along — see the session export route.
+      // Without them a git-tracked definition would lose the assertions that
+      // are the reason a reviewer approved it.
+      guarantees: parseGuarantees(workflow.guarantees_json),
       exportedAt: new Date().toISOString(),
     })
   } catch (err) {
@@ -745,6 +752,11 @@ router.post('/workflows/:id/lint', tokenAuth('read'), (req, res) => {
         workflowTargets,
         resolveWorkflow: graphResolver(workflow.workspace_id),
         rollbackPolicy: workflow.rollback_policy,
+        // A `flowforge lint <id> file.json` in CI vets a candidate definition
+        // against the *target* workspace, so the invariants it is checked
+        // against are the ones live there — which is what catches a promotion
+        // that would route around a gate production still declares.
+        guarantees: workflow.guarantees_json,
       }),
       // Policy findings ride the same report, so `flowforge lint` is one gate
       // for "will it run?" and "is it allowed here?" rather than two commands.
@@ -791,6 +803,39 @@ router.get('/workflows/:id/types', tokenAuth('read'), (req, res) => {
       workflowId: workflow.id,
       ...describeGraphTypes(graph, { resolveWorkflow: graphResolver(workflow.workspace_id) }),
     })
+  } catch (err) {
+    console.error(err)
+    res.status(500).json({ error: 'Internal server error' })
+  }
+})
+
+// GET /api/v1/workflows/:id/guarantees — verify the workflow's declared path
+// invariants against its stored graph (services/guarantees.js).
+//
+// The CI shape of this is a gate that means something different from `lint`:
+// lint asks whether the workflow will run, and this asks whether it still does
+// what its author swore it did. `ok` is false when any declaration is violated
+// *or* can no longer be checked, because a guarantee that quietly stopped
+// being verified is the failure this exists to prevent — a pipeline keying on
+// `ok` should stop for both.
+//
+// Read-only and pure. `read` is the whole authorisation story; changing a
+// declaration is a session-side write behind the workspace's own roles.
+router.get('/workflows/:id/guarantees', tokenAuth('read'), (req, res) => {
+  try {
+    const workflow = getWorkflowForMember(req.params.id, req.user.id)
+    if (!workflow) return res.status(404).json({ error: 'Workflow not found' })
+    let graph = { nodes: [], edges: [] }
+    try {
+      const parsed = JSON.parse(workflow.graph_json)
+      graph = {
+        nodes: Array.isArray(parsed.nodes) ? parsed.nodes : [],
+        edges: Array.isArray(parsed.edges) ? parsed.edges : [],
+      }
+    } catch {
+      /* unparseable stored graph — verify against the empty shape */
+    }
+    res.json({ workflowId: workflow.id, ...verifyGuarantees(graph, workflow.guarantees_json) })
   } catch (err) {
     console.error(err)
     res.status(500).json({ error: 'Internal server error' })

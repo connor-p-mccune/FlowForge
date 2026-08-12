@@ -1388,6 +1388,75 @@ const spec = {
         },
       },
     },
+    '/workflows/{workflowId}/guarantees': {
+      get: {
+        tags: ['workflows'],
+        summary: 'Verify the workflow’s path invariants',
+        description:
+          'Checks the invariants the workflow’s author declared about their ' +
+          'own graph against **every execution the graph admits** — not ' +
+          'against the runs that happened. Three kinds: `requires` (B never ' +
+          'runs unless A ran first — A dominates B), `ensures` (if A runs, B ' +
+          'runs too — B post-dominates A), and `exclusive` (some decision ' +
+          'separates them, so no run reaches both).\n\n' +
+          'A different gate from `lint`: lint asks whether the workflow will ' +
+          'run, this asks whether it still does what its author swore it did. ' +
+          '`ok` is false when any declaration is **violated** *or* has become ' +
+          '**uncheckable** (a node it names was deleted), because a guarantee ' +
+          'that quietly stopped being verified is the failure this exists to ' +
+          'prevent. Violations carry a counterexample — the path that reaches ' +
+          'the node without the gate. Read-only; requires the `read` scope.',
+        operationId: 'getWorkflowGuarantees',
+        parameters: [{ $ref: '#/components/parameters/WorkflowId' }],
+        responses: {
+          200: {
+            description: 'One verdict per declaration, plus derived facts and suggestions.',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    workflowId: { type: 'string' },
+                    ok: {
+                      type: 'boolean',
+                      description: 'Every declaration holds. The CI gate.',
+                    },
+                    results: {
+                      type: 'array',
+                      items: { $ref: '#/components/schemas/GuaranteeResult' },
+                    },
+                    facts: {
+                      type: 'object',
+                      nullable: true,
+                      description:
+                        'True of the graph regardless of what anyone declared: ' +
+                        'which nodes every run executes, and where the ' +
+                        'decisions are. Null when the graph cannot be analysed.',
+                      properties: {
+                        alwaysRuns: { type: 'array', items: { type: 'object' } },
+                        decisions: { type: 'array', items: { type: 'object' } },
+                      },
+                    },
+                    suggestions: {
+                      type: 'array',
+                      description:
+                        'Invariants that hold today and look deliberate — a ' +
+                        'gate standing in front of something consequential. ' +
+                        'Worth pinning before an edit removes them.',
+                      items: { $ref: '#/components/schemas/Guarantee' },
+                    },
+                  },
+                },
+              },
+            },
+          },
+          401: { $ref: '#/components/responses/Unauthorized' },
+          403: { $ref: '#/components/responses/Forbidden' },
+          404: { $ref: '#/components/responses/NotFound' },
+          429: { $ref: '#/components/responses/RateLimited' },
+        },
+      },
+    },
     '/executions/{executionId}': {
       get: {
         tags: ['executions'],
@@ -2355,6 +2424,59 @@ const spec = {
           via: { type: 'array', items: { type: 'string' } },
           origins: { type: 'array', items: { type: 'string' } },
         },
+      },
+      Guarantee: {
+        type: 'object',
+        description:
+          'A path invariant declared about this graph. Each reads left to ' +
+          'right: `requires` — <node> never runs unless <other> ran first; ' +
+          '`ensures` — if <node> runs, <other> runs too; `exclusive` — <node> ' +
+          'and <other> never both run.',
+        properties: {
+          kind: { type: 'string', enum: ['requires', 'ensures', 'exclusive'] },
+          node: { type: 'string', description: 'The node the statement is about.' },
+          other: { type: 'string', description: 'The node it is related to.' },
+          note: { type: 'string', description: 'Why it matters, in the author’s words.' },
+          statement: {
+            type: 'string',
+            example: 'Charge card never runs unless Approve ran first',
+          },
+        },
+      },
+      GuaranteeResult: {
+        allOf: [
+          { $ref: '#/components/schemas/Guarantee' },
+          {
+            type: 'object',
+            properties: {
+              status: {
+                type: 'string',
+                enum: ['holds', 'violated', 'unknown'],
+                description:
+                  '`unknown` is never a pass: it means the declaration could ' +
+                  'not be checked — a node it names was deleted, or the graph ' +
+                  'has a cycle and admits no execution at all.',
+              },
+              message: {
+                type: 'string',
+                description: 'Why it failed, naming the specific nodes.',
+                example: 'Run by hand → Charge card reaches Charge card without Approve',
+              },
+              counterexample: {
+                type: 'array',
+                nullable: true,
+                items: { type: 'string' },
+                description:
+                  'The path that breaks the invariant, as node ids. The finding ' +
+                  'nobody has to investigate: this is the route around the gate.',
+              },
+              evidence: {
+                type: 'string',
+                description: 'For a holding `exclusive`: which decision separates them.',
+              },
+            },
+          },
+        ],
       },
       CanaryReport: {
         type: 'object',

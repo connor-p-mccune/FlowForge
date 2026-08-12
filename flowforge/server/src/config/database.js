@@ -337,6 +337,18 @@ ensureColumn('execution_steps', 'completed_seq', 'INTEGER')
 // known and enumerated in execution_compensations rather than merely suspected).
 ensureColumn('executions', 'rollback_status', 'TEXT')
 
+// Workflow guarantees (services/guarantees.js): path invariants the author
+// declares about their own graph — "this charge never runs unless that approval
+// ran first" — verified over every execution the graph admits rather than over
+// the one that happened to run. JSON array of { kind, node, other, note? };
+// NULL/absent = none declared, which is every workflow until somebody pins one.
+//
+// One column rather than a table for the same reason the chaos profile is one:
+// this is per-workflow config with no independent lifetime, no query of its
+// own, and it travels with the graph it describes — an exported workflow that
+// arrived without its invariants would be the interesting half missing.
+ensureColumn('workflows', 'guarantees_json', 'TEXT')
+
 // Two-factor authentication (TOTP). Optional, opt-in per user. totp_enabled stays
 // 0 until the user verifies a code from their authenticator, so a half-finished
 // setup never locks them out of login. totp_backup_codes is a JSON array of

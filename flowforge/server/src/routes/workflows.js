@@ -16,6 +16,7 @@ const stepCache = require('../services/stepCache')
 const { isValidPriority } = require('../services/runPriority')
 const { ROLLBACK_POLICIES } = require('../services/compensation')
 const { describeLineage, analyzeLineage, traceProvenance, traceImpact } = require('../services/lineage')
+const { verifyGuarantees, parseGuarantees } = require('../services/guarantees')
 const { mergeDocument, applyMerge } = require('../services/workflowMerge')
 const { forbidViewer } = require('../services/workspaceRoles')
 const { pauseWorkflow, resumeWorkflow } = require('../services/workflowPause')
@@ -155,11 +156,17 @@ router.post('/workspaces/:wsId/workflows/import', auth, validate(importRule), (r
       return res.status(413).json({ error: 'Workflow graph is too large (max 500KB)' })
     }
 
+    // Invariants declared in the source workspace come across with the graph.
+    // Parsed rather than trusted: an import is an outside document, and one
+    // naming nodes this graph doesn't have would be stored as a guarantee that
+    // can never be checked — which is the exact state the feature refuses.
+    const guarantees = parseGuarantees(req.body.guarantees)
+
     const id = uuidv4()
     const now = new Date().toISOString()
     db.prepare(
-      "INSERT INTO workflows (id, workspace_id, name, description, graph_json, status, created_by, created_at, updated_at) VALUES (?, ?, ?, ?, ?, 'draft', ?, ?, ?)"
-    ).run(id, req.params.wsId, name, null, graphJson, req.user.id, now, now)
+      "INSERT INTO workflows (id, workspace_id, name, description, graph_json, guarantees_json, status, created_by, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, 'draft', ?, ?, ?)"
+    ).run(id, req.params.wsId, name, null, graphJson, guarantees.length ? JSON.stringify(guarantees) : null, req.user.id, now, now)
 
     const workflow = db.prepare('SELECT * FROM workflows WHERE id = ?').get(id)
     // An import is how a definition crosses an environment boundary — the
@@ -209,6 +216,12 @@ router.get('/workflows/:id/export', auth, (req, res) => {
       name: workflow.name,
       description: workflow.description,
       graph_data: parseGraphData(workflow.graph_json),
+      // Declared path invariants travel with the definition. They are
+      // statements *about* this graph and reference its node ids, so a document
+      // that arrived without them would be the interesting half missing — and a
+      // promotion pipeline that dropped them would silently ship the workflow
+      // without the checks that were the reason it passed review.
+      guarantees: parseGuarantees(workflow.guarantees_json),
       exportedAt: new Date().toISOString(),
     })
   } catch (err) {
@@ -729,6 +742,9 @@ router.post('/workflows/:id/lint', auth, (req, res) => {
         // So the panel can say "these compensations will never run" while the
         // author is drawing them, rather than after the failure they exist for.
         rollbackPolicy: workflow.rollback_policy,
+        // Declared path invariants, checked against the graph on screen — the
+        // edit that breaks one should be reported while it is still an edit.
+        guarantees: workflow.guarantees_json,
       }),
       ...policyIssues(workflow, { graphJson: JSON.stringify(graph) }),
     ]
@@ -873,6 +889,94 @@ router.post('/workflows/:id/lineage', auth, (req, res) => {
     }
 
     res.json({ workflowId: workflow.id, ...describeLineage(graph) })
+  } catch (err) {
+    console.error(err)
+    res.status(500).json({ error: 'Internal server error' })
+  }
+})
+
+// ---------------------------------------------------------------------------
+// Workflow guarantees (services/guarantees.js)
+// ---------------------------------------------------------------------------
+
+// POST /api/workflows/:id/guarantees — verify the workflow's declared path
+// invariants against a graph. Same body contract as lint, types and lineage,
+// for the same reason: the canvas asks about the graph on screen, which is
+// where an invariant gets broken, not about the last saved one.
+//
+// The response carries three things and they answer three different questions:
+// `results` is the verdict per declaration, `facts` is what is true of the
+// graph regardless of what anyone declared (which nodes every run executes,
+// where the decisions are), and `suggestions` are invariants that hold today
+// and look deliberate — the ones worth pinning before an edit quietly removes
+// them.
+router.post('/workflows/:id/guarantees', auth, (req, res) => {
+  try {
+    const workflow = db.prepare('SELECT * FROM workflows WHERE id = ?').get(req.params.id)
+    if (!workflow || !isMember(workflow.workspace_id, req.user.id)) {
+      return res.status(404).json({ error: 'Workflow not found' })
+    }
+
+    let graph
+    if (req.body && Array.isArray(req.body.nodes) && Array.isArray(req.body.edges)) {
+      if (req.body.nodes.length > 2000 || req.body.edges.length > 5000) {
+        return res.status(400).json({ error: 'Graph too large to verify' })
+      }
+      graph = { nodes: req.body.nodes, edges: req.body.edges }
+    } else {
+      graph = parseGraphData(workflow.graph_json)
+    }
+
+    // A caller may verify a *proposed* set of declarations without saving them —
+    // which is what the panel does while somebody edits one, so an invariant is
+    // never stored in a state where it already fails.
+    const declared = Array.isArray(req.body?.guarantees)
+      ? req.body.guarantees
+      : workflow.guarantees_json
+
+    res.json({ workflowId: workflow.id, ...verifyGuarantees(graph, declared) })
+  } catch (err) {
+    console.error(err)
+    res.status(500).json({ error: 'Internal server error' })
+  }
+})
+
+// PUT /api/workflows/:id/guarantees — replace the declared invariants.
+//
+// A whole-list replace rather than add/remove endpoints: the list is short,
+// the canvas edits it as a unit, and a partial update API for a set of
+// assertions invites the failure where a client thinks it removed one and
+// didn't. Malformed entries are dropped by parseGuarantees rather than
+// rejected, and the stored list is echoed back — so a caller can see exactly
+// what was kept instead of assuming.
+//
+// Audited, because "who removed the invariant that stopped this workflow
+// charging cards without approval" is a question with a right answer.
+router.put('/workflows/:id/guarantees', auth, (req, res) => {
+  try {
+    const workflow = db.prepare('SELECT * FROM workflows WHERE id = ?').get(req.params.id)
+    if (!workflow || !isMember(workflow.workspace_id, req.user.id)) {
+      return res.status(404).json({ error: 'Workflow not found' })
+    }
+    if (forbidViewer(res, workflow.workspace_id, req.user.id)) return
+    if (!Array.isArray(req.body?.guarantees)) {
+      return res.status(400).json({ error: 'guarantees must be an array' })
+    }
+
+    const guarantees = parseGuarantees(req.body.guarantees)
+    const before = parseGuarantees(workflow.guarantees_json)
+    db.prepare('UPDATE workflows SET guarantees_json = ?, updated_at = ? WHERE id = ?')
+      .run(guarantees.length ? JSON.stringify(guarantees) : null, new Date().toISOString(), req.params.id)
+
+    if (before.length !== guarantees.length) {
+      recordAudit(workflow.workspace_id, req.user.id, 'workflow.guarantees_changed', {
+        type: 'workflow', id: workflow.id, name: workflow.name,
+        metadata: { before: before.length, after: guarantees.length },
+      })
+    }
+
+    const graph = parseGraphData(workflow.graph_json)
+    res.json({ guarantees, ...verifyGuarantees(graph, guarantees) })
   } catch (err) {
     console.error(err)
     res.status(500).json({ error: 'Internal server error' })
@@ -1149,6 +1253,33 @@ router.post('/workflows/:id/deploy', auth, (req, res) => {
       return res.status(422).json({
         error: 'Deploy blocked by workspace policy',
         violations: policy.violations,
+      })
+    }
+
+    // Declared path invariants. Checked here for a different reason than the
+    // policy above: a policy is the organisation's rule about this workflow,
+    // while a guarantee is the author's own statement about their design — so a
+    // violated one is not a permission problem, it is a regression, and the
+    // deploy is the last moment somebody is looking. Same 422 shape, because
+    // the caller is again permitted to deploy and it is the document that is
+    // unacceptable.
+    //
+    // A guarantee that can no longer be *checked* blocks too. The failure mode
+    // it guards against is precisely the quiet one: delete the approval node,
+    // and every invariant about it stops failing.
+    const guaranteeReport = verifyGuarantees(
+      parseGraphData(workflow.graph_json),
+      workflow.guarantees_json
+    )
+    const broken = guaranteeReport.results.filter((r) => r.status !== 'holds')
+    if (broken.length > 0) {
+      activityService.logEvent(workflow.workspace_id, req.user.id, 'workflow.deploy_blocked', {
+        type: 'workflow', id: workflow.id, name: workflow.name,
+        metadata: { guarantees: broken.map((r) => r.statement) },
+      })
+      return res.status(422).json({
+        error: 'Deploy blocked by a workflow guarantee',
+        guarantees: broken,
       })
     }
 
