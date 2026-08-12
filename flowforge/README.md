@@ -267,6 +267,44 @@ order while streaming live progress back to every collaborator on the canvas.
   **secret reach** ("who can read `STRIPE_KEY`?" was otherwise a manual grep). On
   the canvas as 🔗 Lineage, in `flowforge lineage --node <id>`, and on the public
   API. See [docs/LINEAGE.md](./docs/LINEAGE.md).
+- **Path invariants (workflow guarantees)** — every static check above asks a
+  question about a *place*: the linter about a node's config, the type checker
+  about a value's shape here, lineage about where that value came from. None of
+  them can answer the one that actually worries somebody the moment before they
+  deploy, because it isn't about a place — it's about a **path**: *can this ever
+  charge a card without the approval having been granted?* Consider how that
+  breaks. A workflow runs `webhook → approve → charge`; somebody adds a manual
+  trigger to test it without posting a webhook, wired straight at the charge
+  because that's the part they were testing. Every node lints, every type
+  checks, nothing is unreachable, no policy is violated — and the approval is
+  now optional. So declare the property itself and FlowForge verifies it over
+  **every execution the graph admits**, because the engine's own semantics make
+  that decidable: a node runs iff some chain of active edges reached it from a
+  source, every such chain is a path, and therefore *"B never runs unless A ran"*
+  **is** *"A dominates B"* — a solved problem with a fifty-year literature.
+  Three kinds, each a different classical analysis: `requires` (dominance),
+  `ensures` (post-dominance — if this runs, that runs too), and `exclusive` (a
+  decision separates them, so no run reaches both). One structural idea carries
+  all three: a node's **outcome partition**, of which exactly one group
+  activates — which is why a condition, a nine-case switch, a validate gate, an
+  approval, a callback *and the per-node error branch* need one check rather
+  than six, and why a failed HTTP call jumping its error branch straight to the
+  charge is caught rather than missed. Precision is deliberate throughout: the
+  virtual exit is fed from every **unwired outcome** (a dangling `false` branch
+  ends the run, and post-dominance without those edges would certify "every run
+  that charges also audits" about a graph where it doesn't), compensations and
+  notes are stripped exactly as the engine strips them, and a cycle reports
+  `unknown` rather than the vacuous truth. **`unknown` is never a pass** — delete
+  the approval node and every invariant about it stops failing, so an uncheckable
+  guarantee blocks the deploy exactly like a violated one. A violation carries a
+  **counterexample** — the actual path around the gate, clickable on the canvas —
+  because a finding you have to investigate isn't one. Nobody writes invariants
+  from scratch, so the panel *suggests* the ones that hold today and look
+  deliberate and pins them in a click. Enforced at deploy (422), reported in the
+  Issues panel while you edit, never applied to a run, and carried along by
+  export/import so a promotion can't ship the workflow without the assertions
+  that were the reason it passed review. `flowforge verify`, and on the public
+  API. See [docs/GUARANTEES.md](./docs/GUARANTEES.md).
 - **Policy as code** — the linter asks "will this run?"; a policy asks **"is
   this allowed here?"**, which is a different question and the one that appears
   the moment more than one person builds workflows in the same place. A graph
@@ -771,19 +809,24 @@ SMTP_USER=        SMTP_PASS=         EMAIL_FROM=flowforge@example.com
     change, 🐤 Canary sends a slice of runs to your canvas and the rest to the
     last deployed version, then promotes or rolls back on the statistics
     ([docs](./docs/RELEASES.md)).
-13. **Set the rules once:** a workspace owner declares **Policies** — approved
+13. **Pin what must stay true:** 🛡 Guarantees verifies path invariants over
+    every execution the graph admits — "this charge never runs unless that
+    approval ran first". Pin the ones it says already hold, and the edit that
+    routes around a gate is refused at deploy with the exact path that does it
+    ([docs](./docs/GUARANTEES.md)).
+14. **Set the rules once:** a workspace owner declares **Policies** — approved
     outbound hosts, signed webhooks, no credentials in config — and a deploy
     that breaks one is refused with the reason
     ([docs](./docs/POLICIES.md)).
-14. **Trace the data:** 🔗 Lineage shows where each value came from and where it
+15. **Trace the data:** 🔗 Lineage shows where each value came from and where it
     leaves; select a node to see what feeds it and what breaks if you change it,
     and click through the chain to walk backwards
     ([docs](./docs/LINEAGE.md)).
-15. **Plan the undo:** give a node a **compensation** in its config panel — a
+16. **Plan the undo:** give a node a **compensation** in its config panel — a
     Refund step that undoes a Charge step — and a run that fails unwinds itself,
     newest side effect first, instead of leaving them standing
     ([docs](./docs/ROLLBACK.md)).
-16. **Reconcile with git:** when the canvas and the file in your repo have both
+17. **Reconcile with git:** when the canvas and the file in your repo have both
     moved, ⇋ Merge combines them per field rather than making you pick a side to
     throw away ([docs](./docs/MERGE.md)).
 

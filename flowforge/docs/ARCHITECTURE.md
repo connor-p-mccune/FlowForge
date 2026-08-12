@@ -8,7 +8,8 @@ relative to `flowforge/`.
 Companion references: [EXPRESSIONS.md](./EXPRESSIONS.md) (the expression
 language), [TYPES.md](./TYPES.md) (static types over the canvas),
 [POLICIES.md](./POLICIES.md) (policy as code), [LINEAGE.md](./LINEAGE.md) (data
-lineage and taint), [MERGE.md](./MERGE.md) (three-way merge),
+lineage and taint), [GUARANTEES.md](./GUARANTEES.md) (path invariants),
+[MERGE.md](./MERGE.md) (three-way merge),
 [RELEASES.md](./RELEASES.md) (progressive delivery),
 [ROLLBACK.md](./ROLLBACK.md) (compensating transactions),
 [INSIGHTS.md](./INSIGHTS.md) (run statistics), and [API.md](./API.md) (the
@@ -26,6 +27,7 @@ public API).
 - [The type system](#the-type-system)
 - [Policy as code](#policy-as-code)
 - [Static analysis (the linter)](#static-analysis-the-linter)
+  - [Path invariants (workflow guarantees)](#path-invariants-workflow-guarantees)
 - [Run cost accounting and budgets](#run-cost-accounting-and-budgets)
 - [The tamper-evident audit log](#the-tamper-evident-audit-log)
 - [Security architecture](#security-architecture)
@@ -1228,6 +1230,83 @@ what a value participates in deciding. Changing a webhook field doesn't make the
 response untrusted in a new way, but it does change which URL is called.
 
 See [LINEAGE.md](./LINEAGE.md).
+
+### Path invariants (workflow guarantees)
+
+`services/dominance.js` + `services/guarantees.js` add a fourth lens, and it
+differs from the other three along an axis none of them vary on. The linter,
+the type checker and the lineage pass all answer questions about a **place** —
+this node's config, this value's shape, this value's provenance. The question
+somebody actually asks before deploying a workflow they didn't write is about a
+**path**: *can this ever charge a card without the approval having been
+granted?*
+
+Nothing in the product could answer it, and the way it breaks is unremarkable.
+A workflow runs `webhook → approve → charge`; somebody adds a manual trigger to
+test it without posting a webhook and wires it straight at the charge. Every
+node lints, every type checks, nothing is unreachable, no policy is violated —
+and the approval became optional.
+
+**The engine's semantics make the question decidable.** A node runs iff at least
+one incoming edge activated, and an edge activates iff its source succeeded with
+a matching handle (`activeIncomingFor`, above). So a node executed exactly when
+some chain of active edges reached it from a source node, and every such chain
+is a path in the graph. "B cannot run unless A ran" and "**A dominates B**" are
+therefore the same statement — which turns an open-ended product question into
+a fifty-year-old compiler problem. `dominance.js` solves it with Cooper, Harvey
+& Kennedy's iterative algorithm rather than Lengauer-Tarjan: on graphs a canvas
+produces it converges in two or three passes, and its entire state is one
+immediate-dominator array that a person can read in a debugger. Speed was never
+the constraint; explaining the output was.
+
+Three declarable kinds, each a different classical analysis: `requires`
+(dominance), `ensures` (post-dominance — "if this runs, that runs too"), and
+`exclusive` (a decision separates them, so no run reaches both).
+
+One structural idea carries all three. Most nodes fan out to *every* successor
+at once; a **decision** is a node whose outgoing edges are split into groups of
+which exactly one activates. Modelling that as an *outcome partition* rather
+than as per-type special cases is what lets one check cover a condition, a
+nine-case switch, a validate gate, an approval, a callback — and the per-node
+error branch, which is the same two-way shape wearing different clothes and is
+invisible to anything built around node types. A failed HTTP call jumping its
+error branch straight to the charge is a real bypass, and it is caught by the
+same code that catches the manual trigger.
+
+Three details carry the precision:
+
+- **Every source node is fed by a virtual entry**, because the engine starts all
+  of them. That is what makes the second trigger a finding rather than an
+  oversight.
+- **The virtual exit is fed from every unwired outcome**, not only from sinks. A
+  decision whose `false` branch dangles ends the run right there — the run
+  completes, having simply stopped — and post-dominance computed without those
+  edges would certify "every run that charges also audits" about a graph where
+  it demonstrably doesn't. This is the most load-bearing decision in the module.
+- **Notes and compensations are stripped**, by the same rule the engine strips
+  them. A compensating Refund wired at the Charge node is not a path to the
+  charge, and reporting it as one would make an author "fix" a correct graph.
+
+And one that carries the trust: **`unknown` is never a pass.** Delete the
+approval node and every invariant naming it stops failing, because there is
+nothing left to violate. So a declaration naming a node that is no longer in the
+graph reports `unknown`, and `unknown` blocks the deploy, fails `flowforge
+verify`, and sets `ok: false` exactly like a violation. A guarantee whose check
+silently stopped running is worse than no guarantee, because somebody is relying
+on it.
+
+Enforcement mirrors [policies](#policy-as-code) — checked at deploy, reported in
+the Issues panel while editing, never applied to a run — for the same reason: a
+governance check that can take production down is worse than the bug it looks
+for. It differs in *whose* rule it is, which is why a violation is an error
+rather than a warning: a policy is the organisation's rule about this workflow,
+a guarantee is the author's own statement about their design, so breaking one is
+a regression rather than a permission problem. Declarations travel with the
+export document, because they reference the graph's node ids and a promotion
+that dropped them would ship the workflow without the assertions that were the
+reason it passed review.
+
+See [GUARANTEES.md](./GUARANTEES.md).
 
 ### The node test bench
 

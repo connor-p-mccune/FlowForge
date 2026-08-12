@@ -135,9 +135,19 @@ the CLI prints exactly this to stdout.
   "name": "Nightly sync",
   "description": null,
   "graph_data": { "nodes": [ … ], "edges": [ … ] },
+  "guarantees": [
+    { "kind": "requires", "node": "charge", "other": "approve" }
+  ],
   "exportedAt": "2026-07-15T09:00:00.000Z"
 }
 ```
+
+`guarantees` carries the workflow's declared [path
+invariants](#verify-the-path-invariants). They are statements *about* this graph
+and reference its node ids, so a document without them would be the interesting
+half missing — a promotion that dropped them would silently ship the workflow
+without the assertions that were the reason it passed review. Import accepts
+them back.
 
 Requires the `read` scope.
 
@@ -352,6 +362,70 @@ ride along for `--strict` consumers:
 
 Requires the `read` scope — analysis changes nothing. From the CLI:
 `flowforge lint <id> [file] [--strict]`.
+
+### Verify the path invariants
+
+`lint` asks *will this run?*. This asks *does it still do what its author swore
+it did?* — by checking the workflow's declared invariants against **every
+execution the graph admits**, not against the runs it has had.
+
+```bash
+curl -s https://your-flowforge-host/api/v1/workflows/6f0c…/guarantees \
+  -H "Authorization: Bearer $FLOWFORGE_TOKEN"
+```
+
+Response `200` — **`ok` is the gate**:
+
+```json
+{
+  "workflowId": "6f0c…",
+  "ok": false,
+  "analysed": true,
+  "results": [
+    {
+      "kind": "requires", "node": "charge", "other": "approve",
+      "statement": "Charge card never runs unless Approve ran first",
+      "status": "violated",
+      "message": "Run by hand → Charge card reaches Charge card without Approve",
+      "counterexample": ["manual", "charge"]
+    },
+    {
+      "kind": "exclusive", "node": "ship", "other": "refund",
+      "statement": "Ship and Refund never both run",
+      "status": "holds", "evidence": "In stock? decides between them"
+    }
+  ],
+  "facts": {
+    "alwaysRuns": [{ "nodeId": "hook", "label": "Order webhook" }],
+    "decisions": [{ "nodeId": "approve", "label": "Approve", "outcomes": ["true", "false"] }]
+  },
+  "suggestions": [ … ]
+}
+```
+
+Three kinds, each read left to right: `requires` (*node* never runs unless
+*other* ran first), `ensures` (if *node* runs, *other* runs too), and
+`exclusive` (*node* and *other* never both run).
+
+**`status: "unknown"` is not a pass.** It means the declaration could not be
+checked — a node it names was deleted, or the graph has a cycle and admits no
+execution at all — and `ok` is false for it exactly as for a violation. Delete
+the approval node and every invariant about it stops failing; a pipeline that
+treated that as green would guard nothing forever. `analysed` separately
+reports whether the graph could be reasoned about, so a cyclic graph with no
+declarations can't be confused with a broken invariant.
+
+`facts` is what is true of the graph regardless of what anyone declared;
+`suggestions` are invariants that hold today and look deliberate — a gate
+standing in front of something consequential — which is the shortest path from
+nothing declared to a useful set.
+
+Declarations also ride the [export document](#export-a-workflow) and are
+accepted on [import](#import-a-workflow), so a promotion carries its own
+assertions.
+
+Read-only and pure; requires the `read` scope. `flowforge verify <id> [--facts]
+[--suggest]` wraps it. See [GUARANTEES.md](./GUARANTEES.md).
 
 ### Inferred data schema
 
