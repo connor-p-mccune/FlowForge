@@ -12,6 +12,31 @@ order while streaming live progress back to every collaborator on the canvas.
 
 ---
 
+## If you only read one section
+
+The feature list below is long. These are the parts that were hard, each with a
+short design record explaining the decision behind it — start wherever the
+problem sounds familiar.
+
+| | The problem | Where |
+|---|---|---|
+| **Path invariants** | Every static check asks about a *place* — this node's config, this value's shape. None could answer *"can this ever charge a card without the approval having run?"*, which is about a **path**. Turns out the engine's activation rule makes that question identical to graph dominance, so it's a solved compiler problem. Violations report the counterexample path. | [GUARANTEES.md](./docs/GUARANTEES.md) |
+| **Collaborative editing** | Last-write-wins on `Date.now()` meant whose laptop was fast decided whose edit survived, edits collided per *element* so two people editing different fields of one node lost half the work, and a dropped connection diverged **permanently**. Now a CRDT — commutative and idempotent, tested by applying every permutation of an operation set and asserting one document. | [ARCHITECTURE.md](./docs/ARCHITECTURE.md#real-time-collaboration) |
+| **Breakpoints** | Every other debugging tool here is a *record*, and none helps with *"why is this node about to send **that**?"* So the run stops — after the config resolves, before the runner fires — and you can change what it runs with. A breakpoint lives on the **run**, never the workflow, so a schedule tick has nowhere to hit one. | [ARCHITECTURE.md](./docs/ARCHITECTURE.md#breakpoints) |
+| **A safe expression language** | Users need real logic in a config field. `eval` is not an option. Hand-written lexer → Pratt parser → tree-walking evaluator, statically type-checked against the shapes the graph proves it will have. | [EXPRESSIONS.md](./docs/EXPRESSIONS.md) |
+| **Types over a canvas** | A visual builder normally discovers its data doesn't line up by running. A real type lattice — unions, per-field optionality, structural join — mirrors the engine instead of approximating it, and `any` vs `unknown` are kept as *different facts*. | [TYPES.md](./docs/TYPES.md) |
+| **Taint analysis** | Untrusted data deciding where a request goes is SSRF with a drag-and-drop interface. Precision is the whole design: taint stops at external boundaries, and a pinned host is not a finding — a checker nobody reads is worse than none. | [LINEAGE.md](./docs/LINEAGE.md) |
+| **Undoing side effects** | Every other control bounds *whether* something runs; none undoes what already ran. Compensations unwind in **reverse completion order** (the DAG doesn't know what finished first), and a step that did no work this run is never compensated. | [ROLLBACK.md](./docs/ROLLBACK.md) |
+| **Deciding a release** | A canary is a small sample, and a threshold on a small sample is a coin flip with a UI. Two-proportion z-test on failures, Mann-Whitney U on durations, Wilson intervals so "0 failures in 12" isn't reported as certainty. | [RELEASES.md](./docs/RELEASES.md) |
+| **Merging two graphs** | Drift detection tells you git and production diverged, then makes you pick a side to throw away. A two-way diff *can't* do better — telling "added here" from "deleted there" needs a common ancestor. So: a real three-way merge, per config field, that produces **no graph at all** on conflict. | [MERGE.md](./docs/MERGE.md) |
+| **Governance** | The linter asks "will this run?"; a policy asks "is this *allowed* here?". Rules are type-checked when saved, so one reading a misspelled field is refused rather than reporting every workflow compliant forever. | [POLICIES.md](./docs/POLICIES.md) |
+
+Everything above is covered by tests: **130 server suites (1738 tests)**, 58
+client files (506), 144 CLI tests, plus the AI service's pytest suite — lint and
+all four run on every push.
+
+---
+
 ## Screenshots
 
 > _Placeholders — drop real images into `docs/screenshots/` and update these._
@@ -998,7 +1023,8 @@ flowforge/
 ├── server/        Express API, Socket.io, Bull worker, SQLite
 ├── ai-service/    Flask microservice for LLM-backed features
 ├── cli/           Zero-dependency terminal client for the public API
-├── docs/          API reference, architecture deep dive, FXL/types/policies/lineage/merge/releases/rollback
+├── docs/          API reference, architecture deep dive, and one design record per hard part
+│                 (FXL, types, guarantees, lineage, policies, merge, releases, rollback, insights)
 ├── docker-compose.yml
 ├── .env.example
 ├── .env.production.example
