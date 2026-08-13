@@ -37,13 +37,78 @@ all four run on every push.
 
 ---
 
-## Screenshots
+## What a workflow looks like
 
-> _Placeholders — drop real images into `docs/screenshots/` and update these._
+An order pipeline with a schema gate, a human gate, and an undo — every one of
+these is an ordinary node on the canvas:
 
-| Canvas & collaboration | Execution run |
-|------------------------|---------------|
-| ![Canvas](docs/screenshots/canvas.png) | ![Execution](docs/screenshots/execution.png) |
+```mermaid
+flowchart LR
+    hook([Order webhook]) --> validate{{Validate schema}}
+    validate -- valid --> fraud[Fraud score<br/>AI classify]
+    validate -- invalid --> reject[/Log rejection/]
+    fraud --> check{High risk?}
+    check -- true --> reject
+    check -- false --> approve[[Approve<br/>waits for a human]]
+    approve -- approved --> charge[Charge card<br/>HTTP POST]
+    approve -- rejected --> reject
+    charge --> ship[Create shipment]
+    ship --> receipt[/Send receipt/]
+    refund[Refund card]:::comp -. compensates .-> charge
+
+    classDef comp fill:#fee2e2,stroke:#dc2626,stroke-dasharray:4 3
+```
+
+The dashed node never runs on the happy path. It is `charge`'s
+**compensation**: if `ship` fails, the run unwinds and the card is refunded
+before anybody is paged ([docs](./docs/ROLLBACK.md)).
+
+That graph is also where the analysis earns its keep. Its author can pin the two
+things they were already assuming —
+
+```console
+$ flowforge verify 6f0c…
+✓ Charge card never runs unless Approve ran first
+✓ if Charge card runs, Send receipt runs too
+
+2 guarantees hold
+```
+
+— and find out the moment an edit quietly stops one being true:
+
+```console
+$ flowforge verify 6f0c…
+✗ Charge card never runs unless Approve ran first
+    Run by hand → Charge card reaches Charge card without Approve
+    counterexample: manual → charge
+
+1 of 2 guarantees no longer hold
+```
+
+Somebody added a manual trigger so they could test the charge without posting a
+webhook, and wired it straight at the node they were testing. Every node still
+lints, every type still checks, nothing is unreachable, no policy is violated —
+and the approval is now optional. The deploy is refused with that path attached
+([docs](./docs/GUARANTEES.md)).
+
+And when the question is what a node is *actually* about to send, the run stops
+and shows you — templates resolved, secrets redacted, before the request goes
+out:
+
+```console
+$ flowforge debug 6f0c… --break charge
+▸ Charge card (charge)
+  about to run with:
+    {
+      "url": "https://api.acme.com/v1/charges/ord-8891",
+      "method": "POST",
+      "headers": { "Authorization": "Bearer ••••••" }
+    }
+  received:
+    { "orderId": "ord-8891", "amount": 4500, "risk": "low" }
+
+status completed
+```
 
 ---
 
