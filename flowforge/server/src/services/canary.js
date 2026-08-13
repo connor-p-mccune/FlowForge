@@ -133,7 +133,21 @@ function resolveRelease(execution, workflow, { dryRun = false } = {}) {
     return live
   }
 
-  if (dryRun) return live
+  // Dry runs and **debug runs** stay out of the experiment, for two reasons
+  // that both matter.
+  //
+  // The statistical one: a run somebody paused at a breakpoint for five minutes
+  // is not a sample of anything. Its duration is a measure of how long a person
+  // took to read a JSON blob, and feeding that into the Mann-Whitney comparison
+  // on run times — the test that decides whether a release ships — would let one
+  // debugging session veto a healthy canary.
+  //
+  // The mechanical one: breakpoints are validated against the *live* graph when
+  // the run is submitted, so a debug run assigned to the stable arm would
+  // execute a pinned baseline in which those node ids may not exist. The run
+  // would simply never stop, and the person waiting for it would have no idea
+  // why.
+  if (dryRun || execution.debug_json) return live
 
   const canary = activeCanary(workflow)
   if (!canary) return live

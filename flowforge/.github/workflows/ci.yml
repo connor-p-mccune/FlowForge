@@ -38,6 +38,11 @@ jobs:
       - run: npm ci
       - run: npm run lint
       - run: npm run test:coverage
+      # The tests run through Vitest's transform, not the production bundler,
+      # so they cannot catch a route chunk that fails to resolve — which is
+      # exactly what lazy loading introduced. Building is the only check that
+      # the split app actually assembles.
+      - run: npm run build
 
   cli:
     runs-on: ubuntu-latest

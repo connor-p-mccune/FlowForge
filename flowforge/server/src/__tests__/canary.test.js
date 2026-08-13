@@ -178,6 +178,23 @@ describe('the traffic split', () => {
     }
   })
 
+  it('never puts a debug run in the experiment either', async () => {
+    // Two reasons, and both matter. Statistically, a run somebody paused at a
+    // breakpoint for five minutes measures how long a person took to read a
+    // JSON blob — feeding that into the Mann-Whitney comparison on durations
+    // would let one debugging session veto a healthy release. Mechanically,
+    // breakpoints are validated against the *live* graph at submission, so a
+    // debug run assigned to the stable arm would execute a pinned baseline in
+    // which those node ids may not exist and would simply never stop.
+    await startCanary({ percent: 99 })
+    const execution = { id: 'e', debug_json: JSON.stringify({ breakpoints: ['h1'] }) }
+    for (let i = 0; i < 30; i++) {
+      const release = canary.resolveRelease(execution, workflowRow(), {})
+      expect(release.channel).toBeNull()
+      expect(JSON.parse(release.graphJson)).toEqual(CANARY_GRAPH)
+    }
+  })
+
   it('makes a resumed run re-execute its source’s definition', async () => {
     await startCanary({ percent: 1 })
     const sourceId = uuidv4()
