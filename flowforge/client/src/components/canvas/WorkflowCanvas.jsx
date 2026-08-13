@@ -40,6 +40,7 @@ import {
 import IssuesPanel from './IssuesPanel'
 import LineagePanel from './LineagePanel'
 import GuaranteesPanel from './GuaranteesPanel'
+import DebuggerPanel from './DebuggerPanel'
 import MergeModal from './MergeModal'
 import ExecutionPanel from '../execution/ExecutionPanel'
 import CursorOverlay from '../collaboration/CursorOverlay'
@@ -121,6 +122,12 @@ function CanvasInner({ workflowId }) {
   const [issuesOpen, setIssuesOpen] = useState(false)
   const [lineageOpen, setLineageOpen] = useState(false)
   const [guaranteesOpen, setGuaranteesOpen] = useState(false)
+  // The pause this run is currently sitting at, or null. Driven by the
+  // `debug` exec-update, which is why a collaborator watching the same run sees
+  // it stop too — a breakpoint is a property of the run, so everybody in the
+  // room is looking at the same paused node.
+  const [debuggerOpen, setDebuggerOpen] = useState(false)
+  const [activeBreak, setActiveBreak] = useState(null)
   const [mergeOpen, setMergeOpen] = useState(false)
 
   // Version history (deploy / restore)
@@ -185,6 +192,23 @@ function CanvasInner({ workflowId }) {
           failToastedRef.current = payload.executionId
           toastRef.current.error(payload.error || 'Workflow run failed')
         }
+      }
+    } else if (payload.kind === 'debug' && payload.executionId === executionIdRef.current) {
+      // The run stopped at a node — or started again. Opening the panel on a
+      // pause is deliberate: the run is not going anywhere until somebody acts,
+      // so hiding that behind a closed panel would look like it had hung.
+      if (payload.status === 'paused') {
+        setActiveBreak({
+          breakId: payload.breakId,
+          nodeId: payload.nodeId,
+          nodeLabel: payload.nodeLabel,
+          input: payload.input,
+          config: payload.config,
+          expiresAt: payload.expiresAt,
+        })
+        setDebuggerOpen(true)
+      } else {
+        setActiveBreak((prev) => (prev?.breakId === payload.breakId ? null : prev))
       }
     } else if (payload.kind === 'step' && payload.executionId === executionIdRef.current) {
       setExecSteps((prev) => {
@@ -538,11 +562,16 @@ function CanvasInner({ workflowId }) {
     [screenToFlowPosition, socket, workflowId]
   )
 
-  const handleRun = useCallback(async () => {
+  // `debug` (optional) carries the breakpoints this run should stop at. It is
+  // sent with the run submission and nowhere else, which is what makes it
+  // impossible for a schedule or a webhook to hit one.
+  const handleRun = useCallback(async (debug = null) => {
     setIsTestRun(false)
+    setActiveBreak(null)
     try {
       const { execution: ex } = await apiFetch(`/api/workflows/${workflowId}/execute`, {
         method: 'POST',
+        ...(debug ? { body: { debug } } : {}),
       })
       executionIdRef.current = ex.id
       setExecSteps([])
@@ -663,6 +692,7 @@ function CanvasInner({ workflowId }) {
   const handleToggleIssues = useCallback(() => setIssuesOpen((v) => !v), [])
   const handleToggleLineage = useCallback(() => setLineageOpen((v) => !v), [])
   const handleToggleGuarantees = useCallback(() => setGuaranteesOpen((v) => !v), [])
+  const handleToggleDebugger = useCallback(() => setDebuggerOpen((v) => !v), [])
 
   // Clicking an issue selects the offending node (opening its config panel)
   // and pans the viewport to it.
@@ -1111,6 +1141,8 @@ function CanvasInner({ workflowId }) {
         lineageOpen={lineageOpen}
         onToggleGuarantees={handleToggleGuarantees}
         guaranteesOpen={guaranteesOpen}
+        onToggleDebugger={handleToggleDebugger}
+        debuggerOpen={debuggerOpen}
         onDeploy={handleDeploy}
         onToggleHistory={handleToggleHistory}
         onOpenMerge={() => setMergeOpen(true)}
@@ -1268,6 +1300,19 @@ function CanvasInner({ workflowId }) {
           selectedNodeId={selectedNode?.id || null}
           onClose={() => setLineageOpen(false)}
           onSelectNode={handleSelectIssueNode}
+        />
+      )}
+      {/* Opens itself when a run stops, because a paused run is not going
+          anywhere until somebody acts and hiding that would look like a hang. */}
+      {debuggerOpen && (
+        <DebuggerPanel
+          nodes={nodes}
+          executionId={execution?.id || null}
+          activeBreak={activeBreak}
+          onClose={() => setDebuggerOpen(false)}
+          onSelectNode={handleSelectIssueNode}
+          onStartDebugRun={(debug) => handleRun(debug)}
+          onResumed={() => setActiveBreak(null)}
         />
       )}
       {/* Same side again, and for the same reason: this is the third answer to

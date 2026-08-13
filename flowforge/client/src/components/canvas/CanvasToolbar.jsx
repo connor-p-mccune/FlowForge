@@ -29,6 +29,8 @@ export default function CanvasToolbar({
   lineageOpen,
   onToggleGuarantees,
   guaranteesOpen,
+  onToggleDebugger,
+  debuggerOpen,
   issuesOpen,
   onDeploy,
   onToggleHistory,
@@ -181,11 +183,22 @@ export default function CanvasToolbar({
       >
         🛡 Guarantees
       </button>
+      <button
+        className={`toolbar-btn toolbar-btn--issues${debuggerOpen ? ' toolbar-btn--active' : ''}`}
+        title="Debugger — stop a run at a node and inspect what it is about to do"
+        onClick={onToggleDebugger}
+        aria-pressed={debuggerOpen}
+      >
+        🐞 Debug
+      </button>
       <span className="canvas-toolbar__divider" />
       <button
         className="toolbar-btn toolbar-btn--run"
         title={paused ? 'Workflow is paused — resume it to run' : 'Run workflow'}
-        onClick={onRun}
+        // Wrapped rather than passed directly: onRun takes an optional debug
+        // request, and handing it a MouseEvent would start every ordinary run
+        // as a malformed debug session.
+        onClick={() => onRun()}
         disabled={running || paused}
       >
         {running && !testing ? 'Running…' : '▶ Run'}

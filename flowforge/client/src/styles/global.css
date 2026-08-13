@@ -7813,3 +7813,109 @@ html, body, #root {
   gap: 6px;
   margin-top: 10px;
 }
+
+/* ── Debugger ────────────────────────────────────────────────────────────
+   Two states, and they are the two halves of using a debugger: arming (which
+   nodes stop the run) and stopped (what this node received, what it is about
+   to do). The stopped state is deliberately loud — a paused run is not going
+   anywhere until somebody acts, and a quiet panel would read as a hang. */
+.debugger-panel .issues-panel__body {
+  font-size: 12px;
+}
+
+.debugger__pill {
+  padding: 1px 8px;
+  border-radius: 9px;
+  background: #fef3c7;
+  color: #92400e;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.debugger__list {
+  list-style: none;
+  margin: 10px 0 0;
+  padding: 0;
+  max-height: 34vh;
+  overflow-y: auto;
+}
+
+.debugger__breakpoint {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 4px 2px;
+  cursor: pointer;
+}
+
+.debugger__breakpoint--step {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border, #e2e8f0);
+  font-weight: 600;
+}
+
+/* The familiar red dot, shown filled only when the breakpoint is armed. */
+.debugger__dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  border: 1.5px solid #cbd5e1;
+  flex: none;
+}
+.debugger__breakpoint input:checked ~ .debugger__dot {
+  border-color: #dc2626;
+  background: #dc2626;
+}
+
+.debugger__start {
+  width: 100%;
+  margin-top: 12px;
+}
+
+.debugger__node {
+  margin: 0;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.debugger__value {
+  margin: 0;
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: #0f172a;
+  color: #e2e8f0;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  line-height: 1.5;
+  max-height: 22vh;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.debugger__label {
+  display: block;
+  margin: 10px 0 4px;
+  color: var(--text-muted, #64748b);
+  font-size: 11px;
+}
+
+.debugger__editor {
+  width: 100%;
+  padding: 6px 8px;
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  resize: vertical;
+}
+
+.debugger__actions {
+  display: flex;
+  gap: 6px;
+  margin-top: 14px;
+}
