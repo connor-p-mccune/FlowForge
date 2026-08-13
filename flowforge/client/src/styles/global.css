@@ -7955,3 +7955,12 @@ html, body, #root {
   font-weight: 700;
   letter-spacing: 0.03em;
 }
+
+/* ── Lazily-loaded route fallback ────────────────────────────────────────
+   Sized and padded like a page body so the layout does not jump when the real
+   route's chunk arrives — the whole point of a skeleton over a spinner. */
+.route-fallback {
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 32px 24px;
+}
