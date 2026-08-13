@@ -1421,6 +1421,67 @@ reason it passed review.
 
 See [GUARANTEES.md](./GUARANTEES.md).
 
+### Breakpoints
+
+`services/debugger.js` plus one hook in the scheduler. Everything else that
+helps somebody understand a run is a **record** — the timeline says where the
+wall time went, run comparison says what changed since Tuesday, lineage says
+where a value came from. All of them answer after the fact, and none is any use
+for the question that actually stalls somebody:
+
+> why is this node about to send *that*?
+
+The answer is a value assembled from six upstream outputs, two workspace
+variables and a secret, and by the time it reaches a step row the run has moved
+on and the interesting intermediate is gone. So the run stops and waits.
+
+**Where the pause sits is the feature.** It suspends the node after its config
+is resolved and before its runner is called — the only moment where both facts
+exist at once: what the node received, and what it is about to do with it. A
+debugger that stopped anywhere else would show a value the node was never going
+to use.
+
+**Breakpoints belong to a run, not to a workflow**, and this is the decision the
+whole feature rests on. They are declared when a run is *started* and live on
+the execution row (`executions.debug_json`), so there is no path by which a
+schedule tick, a webhook delivery, or an API trigger can hit one. Nobody can
+leave a breakpoint in production the way they can leave a `console.log`, because
+there is nowhere to leave it. That removes an entire category of rule — no
+scoping, no expiry, no owner-only widening, none of the machinery a [chaos
+profile](#deliberate-fault-injection) needs — by making the unsafe state
+unrepresentable rather than forbidden.
+
+**A break stops the run, not the branch.** An `openBreaks` counter is checked in
+the scheduler's launch condition, so a parallel sibling does not race ahead
+while somebody reads the node they stopped at — the state under inspection going
+stale is precisely what a debugger exists to prevent. It is incremented
+synchronously at launch, *before* the task starts awaiting, so the round loop
+cannot observe zero in between, and released in the task's `finally` so a config
+that fails to resolve cannot wedge the scheduler forever.
+
+**Overrides are what make it a debugger rather than a viewer.** Resuming may
+carry a `{ config, input }` patch that is applied to what the node was about to
+use: change the amount and watch the condition below it take the other branch.
+The patch *merges* rather than replaces — changing one header should not mean
+retyping the URL — and an overridden input rewrites the step's recorded input,
+because a run whose history showed the pre-override value would be a debugger
+that lies about what it did.
+
+Waiting is [the approval pattern](#human-in-the-loop-approvals) deliberately: a
+database row the engine polls. A paused run therefore survives whatever the
+process does in between, the resume is a plain HTTP request from anywhere, and
+two people pressing Continue resolve to exactly one winner inside the UPDATE.
+The resume is scoped by execution id in the `WHERE` clause rather than checked
+afterwards — a break belonging to another run must never be resumed *and then*
+rejected.
+
+The wait is bounded, and the bound **fails** the run rather than quietly
+continuing it. A paused node holds an execution slot and a worker, so somebody
+who walks away from a debug session must not wedge a queue; and continuing would
+mean a node ran with nobody watching, in a session whose entire purpose was that
+somebody was watching. Failing names the node, says what happened, and leaves
+the run resumable from where it stopped.
+
 ### The node test bench
 
 `POST /workflows/:id/test-node` runs a single node in isolation — a sample

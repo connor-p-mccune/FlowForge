@@ -203,6 +203,39 @@ order while streaming live progress back to every collaborator on the canvas.
 - **CLI** — `flowforge trigger <id> --watch` runs a workflow and exits non-zero
   unless it completed, turning any workflow into a one-line CI gate. Zero
   dependencies; see [cli/README.md](./cli/README.md).
+- **Breakpoints (a real debugger for a workflow)** — every other tool here for
+  understanding a run is a *record*: the timeline says where the wall time went,
+  run comparison says what changed since Tuesday, lineage says where a value came
+  from. All of them answer after the fact, and none is any use for the question
+  that actually stalls somebody — *why is this node about to send **that**?* The
+  answer is a value assembled from six upstream outputs, two workspace variables
+  and a secret, and by the time it reaches a step row the run has moved on and
+  the interesting intermediate is gone. So the run **stops and waits**. Where it
+  stops is the feature: the node is suspended **after its config is resolved and
+  before its runner is called**, the only moment where both facts exist at once —
+  what it received, and what it is about to do with it (`{{trigger.orderId}}`
+  already substituted; a debugger showing the template would be showing what the
+  canvas already shows). Then **change it**: resume with a `{ config, input }`
+  patch and the node runs with that instead — edit the amount and watch the
+  condition below take the other branch. The patch merges rather than replaces
+  (changing one header shouldn't mean retyping the URL), and an overridden input
+  **rewrites the step's recorded input**, because a run whose history shows the
+  pre-override value would be a debugger that lies about what it did. Continue,
+  Step (stop again at the very next node), Step-from-start, or Abort. The safety
+  story is structural rather than a rule: **a breakpoint belongs to a run, not a
+  workflow** — declared with the run submission and stored on the execution row —
+  so a schedule tick, a webhook delivery, and an API trigger have nowhere to read
+  one from, and nobody can leave one in production the way they leave a
+  `console.log`. That deletes a whole category of machinery (scoping, expiry,
+  owner-only widening) by making the unsafe state unrepresentable. A break stops
+  the **run**, not the branch — the scheduler won't launch while one is open,
+  because a parallel sibling racing ahead makes the state you're reading stale —
+  and the wait is bounded, failing the run with the node named rather than
+  quietly letting it go with nobody watching. Pausing reuses the approval gate's
+  cooperative row-polling, so a paused run survives anything the process does,
+  the resume is an HTTP call from anywhere, two people pressing Continue resolve
+  to one winner, and every collaborator watching the run sees it stop at the same
+  node.
 - **Node test bench** — run a single node in isolation from its config panel
   with a sample input, without executing the whole graph: dry-run by default
   (side-effecting nodes report what they'd send), or fire for real. Reuses the
@@ -774,6 +807,7 @@ Copy `.env.example` to `.env` before running. **Never commit `.env`.**
 | `LOG_FORMAT`      | no       | `pretty` for human-readable dev logs (default: one JSON line per event) |
 | `SHUTDOWN_TIMEOUT_MS` | no   | Hard deadline for the graceful-shutdown drain (default 30000) |
 | `NODE_TEST_TIMEOUT_MS` | no  | Per-node timeout for the single-node test bench (default 30000) |
+| `DEBUG_BREAK_TIMEOUT_MS` | no | How long a run waits at a breakpoint before failing with the node named (default 900000 — 15 min) |
 | `STEP_CACHE_MAX_BYTES` | no  | Largest step output the result cache will store (default 262144) |
 | `WEBHOOK_MAX_ATTEMPTS` | no  | Delivery attempts per outbound webhook event (default 5) |
 | `CIRCUIT_BREAKER_THRESHOLD` | no | Consecutive failures to one host before its outbound circuit opens (default 5) |
@@ -824,6 +858,9 @@ SMTP_USER=        SMTP_PASS=         EMAIL_FROM=flowforge@example.com
    **Timeline** view to see a Gantt chart of where the time went.
    If the run hits an **Approval** gate it pauses right there — approve or
    reject inline from the panel (or from the notification every member gets).
+   To stop it somewhere on purpose, open 🐞 Debug, tick the nodes to break at,
+   and Run: the node pauses before it fires, showing what it received and what
+   it's about to send — change either and continue.
 7. **Webhooks:** open the Webhooks panel to mint a public trigger URL.
 8. **Collaborate:** share the workflow URL — edits, cursors, and runs sync live
    through a CRDT, so two people editing different fields of the same node both
