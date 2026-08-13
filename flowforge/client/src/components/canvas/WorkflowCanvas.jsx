@@ -29,6 +29,14 @@ import InsightsPanel from './InsightsPanel'
 import CanaryPanel from './CanaryPanel'
 import TestsPanel from './TestsPanel'
 import HistoryPanel from './HistoryPanel'
+import {
+  createClock,
+  observe,
+  nodeOps,
+  edgeOps,
+  applyEffect,
+  reconcileSnapshot,
+} from '../../services/graphOps'
 import IssuesPanel from './IssuesPanel'
 import LineagePanel from './LineagePanel'
 import GuaranteesPanel from './GuaranteesPanel'
@@ -238,9 +246,20 @@ function CanvasInner({ workflowId }) {
   // Collaboration state (Phase 4)
   const [remoteUsers, setRemoteUsers] = useState([])
   const [remoteCursors, setRemoteCursors] = useState({}) // userId -> { x, y, color, ts }
-  const lastLocalEditRef = useRef({}) // elementId -> ts of our latest local edit (LWW)
   const dragEmitRef = useRef({}) // nodeId -> last drag emit ts (throttle)
   const cursorEmitRef = useRef(0)
+
+  // Collaboration state (services/graphOps.js). The clock stamps every local
+  // edit — it has to be assigned when the edit is *made*, including offline, or
+  // a queued edit would rejoin with a timestamp from the past and lose to
+  // changes it should have beaten. `syncRef` is our position in the server's
+  // session, which is what a resync asks from. `pendingRef` holds operations
+  // made while the socket was down; `draggingRef` names the nodes whose
+  // position the local pointer currently owns.
+  const clockRef = useRef(createClock())
+  const syncRef = useRef({ epoch: null, seq: 0 })
+  const pendingRef = useRef([])
+  const draggingRef = useRef(new Set())
 
   // Canvas comments (Figma-style). commentMode flips the canvas into placement
   // mode (crosshair + click-to-comment); draft holds the pending new-comment
@@ -251,44 +270,70 @@ function CanvasInner({ workflowId }) {
   const [draft, setDraft] = useState(null)
   const [openCommentId, setOpenCommentId] = useState(null)
 
-  const handleRemoteNode = useCallback(
-    ({ action, node, ts }) => {
-      if (!node?.id) return
-      // Last-write-wins: drop remote changes older than our latest local edit
-      if (ts && ts < (lastLocalEditRef.current[node.id] || 0)) return
-      if (action === 'add') {
-        setNodes((nds) => (nds.some((n) => n.id === node.id) ? nds : [...nds, node]))
-      } else if (action === 'remove') {
-        setNodes((nds) => nds.filter((n) => n.id !== node.id))
-        setEdges((eds) => eds.filter((e) => e.source !== node.id && e.target !== node.id))
-      } else {
-        setNodes((nds) =>
-          nds.map((n) =>
-            n.id === node.id
-              ? {
-                  ...n,
-                  ...(node.position ? { position: node.position } : {}),
-                  ...(node.data ? { data: { ...n.data, ...node.data } } : {}),
-                }
-              : n
-          )
-        )
+  // Merged elements arriving from the server (services/graphOps.js). The client
+  // applies what the merge produced rather than re-deriving a winner from a
+  // timestamp its own machine generated — which is the whole reason the server
+  // holds the document.
+  //
+  // A node the local user is currently dragging is skipped: their pointer is
+  // the freshest information anywhere, and a position echo mid-gesture would
+  // yank the node under their cursor. It reconciles the moment they let go,
+  // because drag end emits a final operation.
+  const applyEffects = useCallback(
+    (effects) => {
+      for (const effect of effects || []) {
+        if (effect.kind === 'node') {
+          if (draggingRef.current.has(effect.id)) continue
+          setNodes((nds) => applyEffect(nds, effect))
+          // An edge cannot outlive its endpoints; the server drops those from
+          // its document, and this keeps the canvas from rendering a connection
+          // to nothing in the frame before the edge effects arrive.
+          if (effect.element === null) {
+            setEdges((eds) => eds.filter((e) => e.source !== effect.id && e.target !== effect.id))
+          }
+        } else {
+          setEdges((eds) => applyEffect(eds, effect))
+        }
       }
     },
     [setNodes, setEdges]
   )
 
-  const handleRemoteEdge = useCallback(
-    ({ action, edge, ts }) => {
-      if (!edge?.id) return
-      if (ts && ts < (lastLocalEditRef.current[edge.id] || 0)) return
-      if (action === 'add') {
-        setEdges((eds) => (eds.some((e) => e.id === edge.id) ? eds : [...eds, edge]))
-      } else if (action === 'remove') {
-        setEdges((eds) => eds.filter((e) => e.id !== edge.id))
+  const handleGraphEffects = useCallback(
+    ({ epoch, seq, lamport, effects }) => {
+      observe(clockRef.current, lamport)
+      syncRef.current = { epoch, seq }
+      applyEffects(effects)
+    },
+    [applyEffects]
+  )
+
+  // The reply to a resync. A delta lists what changed since our marker; a
+  // snapshot replaces the graph outright, which is what the server sends when
+  // it cannot prove a delta would be sufficient.
+  const handleGraphState = useCallback(
+    ({ epoch, seq, lamport, changes, snapshot }) => {
+      observe(clockRef.current, lamport)
+      syncRef.current = { epoch, seq }
+      if (snapshot) {
+        setNodes((nds) => reconcileSnapshot(nds, snapshot.nodes))
+        setEdges(snapshot.edges)
+      } else {
+        applyEffects(changes)
       }
     },
-    [setEdges]
+    [applyEffects, setNodes, setEdges]
+  )
+
+  // Our own operations came back refused: another site's edit won, and without
+  // this we would be the only replica still showing the value we typed.
+  const handleGraphAck = useCallback(
+    ({ epoch, seq, lamport, corrections }) => {
+      observe(clockRef.current, lamport)
+      syncRef.current = { epoch, seq }
+      applyEffects(corrections)
+    },
+    [applyEffects]
   )
 
   const handleRemoteCursor = useCallback(({ userId, color, x, y }) => {
@@ -335,8 +380,10 @@ function CanvasInner({ workflowId }) {
 
   const socket = useSocket(workflowId, {
     onExecUpdate: handleExecUpdate,
-    onRemoteNode: handleRemoteNode,
-    onRemoteEdge: handleRemoteEdge,
+    onGraphEffects: handleGraphEffects,
+    onGraphState: handleGraphState,
+    onGraphAck: handleGraphAck,
+    onResync: () => resync(),
     onRemoteCursor: handleRemoteCursor,
     onCommentAdded: ({ comment }) => upsertComment(comment),
     onCommentReplyAdded: ({ reply }) => addReplyToComment(reply),
@@ -369,22 +416,50 @@ function CanvasInner({ workflowId }) {
     },
   })
 
-  const emitNodeChange = useCallback(
-    (action, node) => {
-      const ts = Date.now()
-      if (node?.id) lastLocalEditRef.current[node.id] = ts
-      socket.emit('node-change', { workflowId, action, node, ts })
+  // Send a batch of operations, or queue it if the socket is down.
+  //
+  // Queueing rather than dropping is what makes a brief outage a delay instead
+  // of lost work: the operations already carry the timestamps they were made
+  // with, so replaying them on reconnect merges them at the position in the
+  // order they actually occupy — not at the back, where a naive resend would
+  // let them clobber edits made in the meantime.
+  const sendOps = useCallback(
+    (ops) => {
+      if (ops.length === 0) return
+      if (!socket.connected) {
+        pendingRef.current.push(...ops)
+        // Bounded: a tab left open on a dead connection for an hour must not
+        // grow an unbounded queue. The oldest go first, and the resync that
+        // follows reconnection repairs whatever they would have said.
+        if (pendingRef.current.length > 2000) {
+          pendingRef.current.splice(0, pendingRef.current.length - 2000)
+        }
+        return
+      }
+      socket.emit('graph-op', { workflowId, ops })
     },
     [socket, workflowId]
   )
 
+  // Reconnected (or joined). Flush what was made offline, then ask for what was
+  // missed. Order matters: sending first means the delta we get back already
+  // accounts for our own edits, so we never see the server's pre-flush state
+  // and then have to reconcile it away.
+  const resync = useCallback(() => {
+    const queued = pendingRef.current
+    pendingRef.current = []
+    if (queued.length > 0) socket.emit('graph-op', { workflowId, ops: queued })
+    socket.emit('graph-sync', { workflowId, ...syncRef.current })
+  }, [socket, workflowId])
+
+  const emitNodeChange = useCallback(
+    (action, node) => sendOps(nodeOps(clockRef.current, action, node)),
+    [sendOps]
+  )
+
   const emitEdgeChange = useCallback(
-    (action, edge) => {
-      const ts = Date.now()
-      if (edge?.id) lastLocalEditRef.current[edge.id] = ts
-      socket.emit('edge-change', { workflowId, action, edge, ts })
-    },
-    [socket, workflowId]
+    (action, edge) => sendOps(edgeOps(clockRef.current, action, edge)),
+    [sendOps]
   )
 
   // Undo/redo over debounced graph snapshots. Applying a step broadcasts the
@@ -664,10 +739,16 @@ function CanvasInner({ workflowId }) {
           const now = Date.now()
           const last = dragEmitRef.current[change.id] || 0
           if (change.dragging && change.position && now - last > 80) {
+            // While a drag is in flight the local pointer owns this node's
+            // position, so incoming effects for it are ignored (see
+            // applyEffects) rather than yanking it out from under the cursor.
+            draggingRef.current.add(change.id)
             dragEmitRef.current[change.id] = now
             emitNodeChange('update', { id: change.id, position: change.position })
           } else if (!change.dragging) {
-            // drag end — always send the final position
+            // drag end — always send the final position, then hand the node
+            // back to the merge.
+            draggingRef.current.delete(change.id)
             const position = change.position || getNode(change.id)?.position
             if (position) emitNodeChange('update', { id: change.id, position })
           }

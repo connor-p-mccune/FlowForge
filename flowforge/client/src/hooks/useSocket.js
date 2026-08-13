@@ -2,8 +2,9 @@ import { useEffect, useRef } from 'react'
 import socket from '../services/socket'
 
 const EVENT_MAP = {
-  'remote-node': 'onRemoteNode',
-  'remote-edge': 'onRemoteEdge',
+  'graph-effects': 'onGraphEffects',
+  'graph-state': 'onGraphState',
+  'graph-ack': 'onGraphAck',
   'remote-cursor': 'onRemoteCursor',
   'exec-update': 'onExecUpdate',
   'presence': 'onPresence',
@@ -32,6 +33,12 @@ export function useSocket(workflowId, handlers = {}) {
     const joinRoom = () => socket.emit('join-workflow', { workflowId })
     const onConnect = () => {
       joinRoom() // (re-)join the room on first connect and after reconnects
+      // Ask what changed while we were away, *every* time — including the first
+      // connect, where it fetches the authoritative document. Joining a room
+      // only subscribes to future changes; without this the missed ones are
+      // never reconciled and two canvases stay different until somebody
+      // reloads.
+      handlersRef.current.onResync?.()
       if (lostRef.current) {
         lostRef.current = false
         handlersRef.current.onReconnect?.()
