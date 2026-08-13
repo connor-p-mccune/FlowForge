@@ -153,6 +153,10 @@ if (process.env.NODE_ENV !== 'test') {
   onShutdown('maintenance-windows', () => require('./services/maintenanceWindow').stopMaintenanceWindows())
   onShutdown('canary-monitor', () => require('./services/canaryMonitor').stopCanaryMonitor())
   onShutdown('socket-io', () => new Promise((resolve) => io.close(() => resolve())))
+  // After the sockets are closed, so no operation can land between the flush
+  // and the exit, and before the database closes so the write can happen at
+  // all. A deploy otherwise costs everybody the last few seconds of editing.
+  onShutdown('collab-sessions', () => require('./services/collabSession').flushAll())
   onShutdown('redis', () => require('./config/redis').quit().catch(() => {}))
   onShutdown('database', () => require('./config/database').close())
   installSignalHandlers()

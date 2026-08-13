@@ -1,8 +1,20 @@
 // Real-time collaboration handlers. Each open workflow is a Socket.io "room"
-// (workflow:<id>). The server is a thin relay: it forwards node/edge/cursor
-// changes to everyone else in the room but never mutates the graph itself —
-// persistence is the REST layer's job, and conflict resolution is last-write-
-// wins on the client using the `ts` (sender timestamp) carried on each change.
+// (workflow:<id>).
+//
+// The server used to be a thin relay: forward each change to everyone else and
+// let the clients sort it out with last-write-wins on a wall clock. It is now
+// the **convergence point**. Graph edits arrive as CRDT operations, are merged
+// into a per-workflow document (services/collabSession.js), and the *resulting
+// element* is broadcast — so every replica converges on a value the merge
+// produced rather than each re-deriving one from a timestamp its own laptop
+// generated. Three things follow that the relay could not offer: a tiebreak
+// that does not depend on whose clock is fast, per-field granularity (two
+// people editing different fields of one node both keep their edit), and a
+// reconnecting client that can ask what it missed instead of silently
+// diverging until somebody reloads.
+//
+// Cursors stay a pure relay. They are ephemeral, lossy by nature, and merging
+// them would be inventing a problem.
 //
 // Authorization: the connection is already JWT-authenticated (socket/index.js),
 // but that only proves *who* the socket is, not *what* it may see. A workflow
@@ -15,6 +27,13 @@
 
 const db = require('../config/database')
 const { memberRole } = require('../services/workspaceRoles')
+const collab = require('../services/collabSession')
+const { isValidOp } = require('../services/graphCrdt')
+
+// Most edits arrive one at a time; a paste or an undo step arrives as a batch.
+// The cap bounds what one message can cost the merge, since every operation in
+// it is applied synchronously before the socket yields.
+const MAX_OPS_PER_MESSAGE = 200
 
 // The user's role in the workspace that owns `workflowId`, or null for a
 // non-member (or unknown workflow). Mirrors the isMember /
@@ -89,6 +108,64 @@ module.exports = function registerHandlers(socket, io) {
     if (!inRoom(socket, workflowId)) return
     socket.leave(`workflow:${workflowId}`)
     socket.to(`workflow:${workflowId}`).emit('user-left', { userId: socket.userId })
+    releaseIfEmpty(io, workflowId)
+  })
+
+  // What a (re)joining client missed. `since` is the last sequence number it
+  // saw; a client that has never synced sends 0 and gets a snapshot.
+  //
+  // This is the repair mechanism, and it is the reason a dropped connection is
+  // no longer permanent divergence. The reply is a *state* delta — the current
+  // value of everything touched since — rather than an operation replay, so it
+  // is correct however far behind the client is and cannot double-apply.
+  socket.on('graph-sync', ({ workflowId, epoch, since }) => {
+    if (!inRoom(socket, workflowId)) return
+    const state = collab.sync(workflowId, { epoch, since })
+    if (state) socket.emit('graph-state', { workflowId, ...state })
+  })
+
+  // A batch of CRDT operations from one client.
+  //
+  // The reply is split because a losing writer needs different information from
+  // everybody else: the rest of the room gets the elements that changed, while
+  // the sender gets back any element whose registers *refused* its operation.
+  // It applied that operation optimistically, so without the correction it is
+  // the one replica holding a value the merge rejected — diverged on precisely
+  // the edit it cared about.
+  socket.on('graph-op', ({ workflowId, ops }) => {
+    if (!inRoom(socket, workflowId)) return
+    if (socket.workflowRoles?.[workflowId] === 'viewer') return
+    if (!Array.isArray(ops) || ops.length === 0 || ops.length > MAX_OPS_PER_MESSAGE) return
+
+    // Validated at the boundary, not inside the merge: an operation from a
+    // browser is untrusted input, and one malformed entry must not discard the
+    // rest of a legitimate batch.
+    const valid = ops.filter(isValidOp)
+    if (valid.length === 0) return
+
+    const result = collab.applyOps(workflowId, valid)
+    if (!result) return
+
+    if (result.effects.length > 0) {
+      socket.to(`workflow:${workflowId}`).emit('graph-effects', {
+        workflowId,
+        userId: socket.userId,
+        epoch: result.epoch,
+        seq: result.seq,
+        lamport: result.lamport,
+        effects: result.effects,
+      })
+    }
+    // Always acked, even with nothing to correct: the sender advances its own
+    // epoch/sequence marker from this, which is what makes a later `graph-sync`
+    // ask for the right window.
+    socket.emit('graph-ack', {
+      workflowId,
+      epoch: result.epoch,
+      seq: result.seq,
+      lamport: result.lamport,
+      corrections: result.corrections,
+    })
   })
 
   // The workspace activity feed (workspace:<id> room) streams activity-event to
@@ -107,31 +184,9 @@ module.exports = function registerHandlers(socket, io) {
     socket.leave(`workspace:${workspaceId}`)
   })
 
-  // socket.to(room) emits to everyone in the room EXCEPT the sender, so the
-  // originating client keeps its own optimistic update and never echoes itself.
-  // Each relay first confirms the sender is actually in the room (see inRoom).
-  socket.on('node-change', ({ workflowId, action, node, ts }) => {
-    if (!inRoom(socket, workflowId)) return
-    if (socket.workflowRoles?.[workflowId] === 'viewer') return
-    socket.to(`workflow:${workflowId}`).emit('remote-node', {
-      userId: socket.userId,
-      action,
-      node,
-      ts, // sender clock — clients use this for last-write-wins
-    })
-  })
-
-  socket.on('edge-change', ({ workflowId, action, edge, ts }) => {
-    if (!inRoom(socket, workflowId)) return
-    if (socket.workflowRoles?.[workflowId] === 'viewer') return
-    socket.to(`workflow:${workflowId}`).emit('remote-edge', {
-      userId: socket.userId,
-      action,
-      edge,
-      ts,
-    })
-  })
-
+  // Cursors are the one thing still relayed rather than merged: they are
+  // ephemeral, lossy by nature, and a dropped cursor frame corrects itself on
+  // the next mouse move. socket.to(room) emits to everyone EXCEPT the sender.
   socket.on('cursor-move', ({ workflowId, x, y }) => {
     if (!inRoom(socket, workflowId)) return
     socket.to(`workflow:${workflowId}`).emit('remote-cursor', {
@@ -150,7 +205,23 @@ module.exports = function registerHandlers(socket, io) {
     for (const room of socket.rooms) {
       if (room.startsWith('workflow:')) {
         socket.to(room).emit('user-left', { userId: socket.userId })
+        // Deferred to the next tick: at `disconnecting` this socket is still
+        // counted in the room, so an immediate check would never see it empty
+        // and the last editor's work would wait for the debounce it may not
+        // survive.
+        const workflowId = room.slice('workflow:'.length)
+        setImmediate(() => releaseIfEmpty(io, workflowId))
       }
     }
   })
+}
+
+// Persist and drop a session once the last collaborator leaves. Holding a
+// document for an empty room would keep every workflow ever opened resident for
+// the process's lifetime; flushing on the way out is what makes a session's
+// work outlive the tab that produced it, rather than depending on the client's
+// own debounced save having fired before it closed.
+function releaseIfEmpty(io, workflowId) {
+  const room = io.sockets.adapter.rooms.get(`workflow:${workflowId}`)
+  if (!room || room.size === 0) collab.release(workflowId)
 }

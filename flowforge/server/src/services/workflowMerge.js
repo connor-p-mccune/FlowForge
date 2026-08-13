@@ -139,6 +139,10 @@ function mergeDocument(workflow, graphData, { strategy = 'manual', baseVersion }
 function applyMerge(workflow, graph) {
   db.prepare('UPDATE workflows SET graph_json = ?, updated_at = ? WHERE id = ?')
     .run(JSON.stringify(graph), new Date().toISOString(), workflow.id)
+  // A merge is a new baseline, not a concurrent edit. Any live collaboration
+  // session still holds the *pre*-merge document, and its next persist would
+  // write that back over the result — so drop it and let the room reload.
+  require('./collabSession').invalidate(workflow.id)
 }
 
 module.exports = { mergeDocument, applyMerge, resolveMergeBase, parseGraph }

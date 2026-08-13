@@ -5,6 +5,7 @@ process.env.NODE_ENV = 'test'
 const { v4: uuidv4 } = require('uuid')
 const db = require('../config/database')
 const registerHandlers = require('../socket/handlers')
+const collabSession = require('../services/collabSession')
 
 // A workspace with one member, one viewer, an outsider who is NOT a member,
 // and one workflow in that workspace — enough to prove join/relay are gated
@@ -108,20 +109,106 @@ describe('socket join-workflow authorization', () => {
   })
 })
 
-describe('socket relay events require room membership', () => {
-  it('relays node-change only after a successful join', () => {
+const addOp = (id, l) => ({
+  t: 'node.add',
+  id,
+  l,
+  s: 'site-1',
+  node: { type: 'action-http', position: { x: 0, y: 0 }, data: { label: id } },
+})
+
+describe('graph operations require room membership', () => {
+  afterEach(() => collabSession.invalidate(workflowId))
+
+  it('merges an operation only after a successful join', () => {
     const { socket, handlers, roomEmits } = makeSocket(memberId)
     registerHandlers(socket, makeIo())
 
-    // Before joining: the relay is dropped (a socket cannot inject into a room
-    // it never joined — socket.to(room) would otherwise broadcast regardless).
-    handlers['node-change']({ workflowId, action: 'update', node: { id: 'n1' }, ts: 1 })
-    expect(roomEmits.some((e) => e.event === 'remote-node')).toBe(false)
+    // Before joining: dropped. A socket cannot inject into a room it never
+    // joined — socket.to(room) would otherwise broadcast regardless.
+    handlers['graph-op']({ workflowId, ops: [addOp('n1', 1)] })
+    expect(roomEmits.some((e) => e.event === 'graph-effects')).toBe(false)
 
-    // After joining: the same event is relayed to the room.
     handlers['join-workflow']({ workflowId })
-    handlers['node-change']({ workflowId, action: 'update', node: { id: 'n1' }, ts: 2 })
-    expect(roomEmits).toContainEqual(expect.objectContaining({ room, event: 'remote-node' }))
+    handlers['graph-op']({ workflowId, ops: [addOp('n1', 2)] })
+    expect(roomEmits).toContainEqual(expect.objectContaining({ room, event: 'graph-effects' }))
+  })
+
+  it('broadcasts the merged element, not the operation', () => {
+    // The whole point of the server being the convergence point: peers receive
+    // a value the merge produced rather than re-deriving one themselves.
+    const { socket, handlers, roomEmits } = makeSocket(memberId)
+    registerHandlers(socket, makeIo())
+    handlers['join-workflow']({ workflowId })
+    handlers['graph-op']({ workflowId, ops: [addOp('n1', 1)] })
+
+    const broadcast = roomEmits.find((e) => e.event === 'graph-effects')
+    expect(broadcast.payload.effects).toEqual([
+      {
+        kind: 'node',
+        id: 'n1',
+        element: {
+          id: 'n1',
+          type: 'action-http',
+          position: { x: 0, y: 0 },
+          data: { label: 'n1' },
+        },
+      },
+    ])
+  })
+
+  it('sends the winning value back to a writer whose operation lost', () => {
+    // Without this the sender is the one replica holding a value the merge
+    // rejected — diverged on precisely the edit it cared about.
+    const winner = makeSocket(memberId)
+    registerHandlers(winner.socket, makeIo())
+    winner.handlers['join-workflow']({ workflowId })
+    winner.handlers['graph-op']({
+      workflowId,
+      ops: [{ t: 'node.add', id: 'n9', l: 9, s: 'zz', node: { data: { label: 'Winner' } } }],
+    })
+
+    const loser = makeSocket(memberId)
+    registerHandlers(loser.socket, makeIo())
+    loser.handlers['join-workflow']({ workflowId })
+    loser.handlers['graph-op']({
+      workflowId,
+      ops: [{ t: 'node.set', id: 'n9', l: 2, s: 'aa', path: 'data.label', value: 'Loser' }],
+    })
+
+    const ack = loser.selfEmits.find((e) => e.event === 'graph-ack')
+    expect(ack.payload.corrections[0].element.data.label).toBe('Winner')
+    // …and nothing was broadcast, because nothing changed.
+    expect(loser.roomEmits.some((e) => e.event === 'graph-effects')).toBe(false)
+  })
+
+  it('refuses a malformed operation without discarding the batch', () => {
+    const { socket, handlers, roomEmits } = makeSocket(memberId)
+    registerHandlers(socket, makeIo())
+    handlers['join-workflow']({ workflowId })
+
+    handlers['graph-op']({
+      workflowId,
+      ops: [
+        { t: 'node.set', id: 'n1', l: 1, s: 'a', path: 'data.__proto__', value: 1 },
+        addOp('good', 3),
+      ],
+    })
+
+    const effects = roomEmits.find((e) => e.event === 'graph-effects').payload.effects
+    expect(effects.map((e) => e.id)).toEqual(['good'])
+  })
+
+  it('ignores an oversized batch outright', () => {
+    const { socket, handlers, roomEmits } = makeSocket(memberId)
+    registerHandlers(socket, makeIo())
+    handlers['join-workflow']({ workflowId })
+
+    handlers['graph-op']({
+      workflowId,
+      ops: Array.from({ length: 500 }, (_, i) => addOp(`flood-${i}`, i + 1)),
+    })
+    expect(roomEmits.some((e) => e.event === 'graph-effects')).toBe(false)
   })
 
   it('a viewer joins and is seen, but their graph edits are dropped', () => {
@@ -132,26 +219,71 @@ describe('socket relay events require room membership', () => {
     expect(socket.rooms.has(room)).toBe(true)
     expect(roomEmits).toContainEqual(expect.objectContaining({ room, event: 'user-joined' }))
 
-    // Read-only holds at the socket layer too: node/edge events vanish…
-    handlers['node-change']({ workflowId, action: 'update', node: { id: 'n1' }, ts: 1 })
-    handlers['edge-change']({ workflowId, action: 'add', edge: { id: 'e1' }, ts: 1 })
-    expect(roomEmits.some((e) => e.event === 'remote-node')).toBe(false)
-    expect(roomEmits.some((e) => e.event === 'remote-edge')).toBe(false)
+    // Read-only holds at the socket layer too: operations vanish…
+    handlers['graph-op']({ workflowId, ops: [addOp('viewer-node', 1)] })
+    expect(roomEmits.some((e) => e.event === 'graph-effects')).toBe(false)
 
     // …while presence (cursor) still relays — watching is the role.
     handlers['cursor-move']({ workflowId, x: 3, y: 4 })
     expect(roomEmits).toContainEqual(expect.objectContaining({ room, event: 'remote-cursor' }))
   })
 
-  it('drops cursor/edge events from a socket that never joined', () => {
-    const { socket, handlers, roomEmits } = makeSocket(outsiderId)
+  it('drops cursor and sync requests from a socket that never joined', () => {
+    const { socket, handlers, roomEmits, selfEmits } = makeSocket(outsiderId)
     registerHandlers(socket, makeIo())
 
     handlers['cursor-move']({ workflowId, x: 1, y: 2 })
-    handlers['edge-change']({ workflowId, action: 'add', edge: { id: 'e1' }, ts: 1 })
+    handlers['graph-sync']({ workflowId, since: 0 })
 
     expect(roomEmits.some((e) => e.event === 'remote-cursor')).toBe(false)
-    expect(roomEmits.some((e) => e.event === 'remote-edge')).toBe(false)
+    expect(selfEmits.some((e) => e.event === 'graph-state')).toBe(false)
+  })
+})
+
+describe('graph-sync repairs a client that missed changes', () => {
+  afterEach(() => collabSession.invalidate(workflowId))
+
+  it('hands a never-synced client a snapshot', () => {
+    const { socket, handlers, selfEmits } = makeSocket(memberId)
+    registerHandlers(socket, makeIo())
+    handlers['join-workflow']({ workflowId })
+    handlers['graph-op']({ workflowId, ops: [addOp('n1', 1)] })
+
+    handlers['graph-sync']({ workflowId, since: 0 })
+    const state = selfEmits.find((e) => e.event === 'graph-state')
+    expect(state.payload.snapshot.nodes.map((n) => n.id)).toEqual(['n1'])
+  })
+
+  it('hands a client that is only slightly behind a delta', () => {
+    const { socket, handlers, selfEmits } = makeSocket(memberId)
+    registerHandlers(socket, makeIo())
+    handlers['join-workflow']({ workflowId })
+    handlers['graph-op']({ workflowId, ops: [addOp('n1', 1)] })
+    const ack = selfEmits.find((e) => e.event === 'graph-ack').payload
+    handlers['graph-op']({ workflowId, ops: [addOp('n2', 2)] })
+
+    handlers['graph-sync']({ workflowId, epoch: ack.epoch, since: ack.seq })
+    const state = selfEmits.filter((e) => e.event === 'graph-state').pop()
+    expect(state.payload.snapshot).toBeUndefined()
+    expect(state.payload.changes.map((c) => c.id)).toEqual(['n2'])
+  })
+
+  it('falls back to a snapshot when the client is from an older session', () => {
+    // A restart, or a merge that invalidated the document, starts a new
+    // session. A client still holding "I was at 7" would otherwise be handed a
+    // delta from 7 and quietly keep state that no longer exists.
+    const { socket, handlers, selfEmits } = makeSocket(memberId)
+    registerHandlers(socket, makeIo())
+    handlers['join-workflow']({ workflowId })
+    handlers['graph-op']({ workflowId, ops: [addOp('n1', 1)] })
+    const ack = selfEmits.find((e) => e.event === 'graph-ack').payload
+
+    collabSession.invalidate(workflowId)
+
+    handlers['graph-sync']({ workflowId, epoch: ack.epoch, since: ack.seq })
+    const state = selfEmits.filter((e) => e.event === 'graph-state').pop()
+    expect(state.payload.snapshot).toBeDefined()
+    expect(state.payload.epoch).not.toBe(ack.epoch)
   })
 })
 

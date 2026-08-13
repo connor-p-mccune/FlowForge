@@ -17,6 +17,7 @@ const { isValidPriority } = require('../services/runPriority')
 const { ROLLBACK_POLICIES } = require('../services/compensation')
 const { describeLineage, analyzeLineage, traceProvenance, traceImpact } = require('../services/lineage')
 const { verifyGuarantees, parseGuarantees } = require('../services/guarantees')
+const collabSession = require('../services/collabSession')
 const { mergeDocument, applyMerge } = require('../services/workflowMerge')
 const { forbidViewer } = require('../services/workspaceRoles')
 const { pauseWorkflow, resumeWorkflow } = require('../services/workflowPause')
@@ -1396,6 +1397,9 @@ router.post('/workflows/:id/versions/:versionId/restore', auth, (req, res) => {
       db.prepare('UPDATE workflows SET graph_json = ?, updated_at = ? WHERE id = ?')
         .run(target.graph_json, now, req.params.id)
     })()
+    // Same reason a merge does it: a restore replaces the graph wholesale, so a
+    // live collaboration session is holding a document that is now historical.
+    collabSession.invalidate(req.params.id)
 
     activityService.logEvent(workflow.workspace_id, req.user.id, 'workflow.restored', {
       type: 'workflow', id: workflow.id, name: workflow.name,
