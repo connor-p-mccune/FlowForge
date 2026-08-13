@@ -13,6 +13,7 @@ const { forbidViewer } = require('../services/workspaceRoles')
 const { isPaused, PAUSED_ERROR } = require('../services/workflowPause')
 const { rollbackExecution } = require('../services/executionEngine')
 const { recordAudit } = require('../services/auditLog')
+const { parseDebugRequest, resumeBreak, listBreaks } = require('../services/debugger')
 
 const router = express.Router()
 
@@ -75,14 +76,23 @@ router.post('/workflows/:id/execute', auth, async (req, res) => {
     const admission = admitRun(workflow)
     if (!admission.ok) return res.status(409).json({ error: admission.error })
 
-    const priority = resolvePriority(requested, workflow)
+    // Breakpoints (services/debugger.js). Declared here, on the run, and
+    // nowhere else — which is the whole safety story: there is no workflow-level
+    // place to leave one, so a schedule tick or a webhook delivery can never
+    // hit a breakpoint somebody forgot about. A debug run also takes the high
+    // lane, because a person is sitting in front of it.
+    const debug = parseDebugRequest(req.body?.debug, JSON.parse(workflow.graph_json))
+    const priority = debug ? 'high' : resolvePriority(requested, workflow)
     const executionId = uuidv4()
     const now = new Date().toISOString()
     // Manual runs carry no trigger payload (trigger_data null); trigger_type marks
     // the source so a replay of this run starts from the same empty input.
     db.prepare(
-      'INSERT INTO executions (id, workflow_id, status, triggered_by, trigger_type, priority, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)'
-    ).run(executionId, workflow.id, 'pending', req.user.id, 'manual', priority, now)
+      'INSERT INTO executions (id, workflow_id, status, triggered_by, trigger_type, priority, debug_json, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
+    ).run(
+      executionId, workflow.id, 'pending', req.user.id, 'manual', priority,
+      debug ? JSON.stringify(debug) : null, now
+    )
 
     await getExecutionQueue().add({ executionId, workflowId: workflow.id }, enqueueOpts(priority))
 
@@ -285,6 +295,67 @@ router.post('/executions/:id/cancel', auth, (req, res) => {
     }
     const updated = db.prepare('SELECT * FROM executions WHERE id = ?').get(execution.id)
     res.status(202).json({ execution: updated })
+  } catch (err) {
+    console.error(err)
+    res.status(500).json({ error: 'Internal server error' })
+  }
+})
+
+// GET /api/executions/:id/breaks — every pause this run took, with what the
+// node was about to receive and about to do (services/debugger.js).
+//
+// A read, and it doubles as the recovery path for a panel that missed the live
+// `exec-update`: the row is the source of truth, so a page refresh mid-pause
+// finds the run still waiting rather than showing a run that appears stuck.
+router.get('/executions/:id/breaks', auth, (req, res) => {
+  try {
+    const execution = db.prepare('SELECT * FROM executions WHERE id = ?').get(req.params.id)
+    if (!execution) return res.status(404).json({ error: 'Execution not found' })
+    if (!getWorkflowForMember(execution.workflow_id, req.user.id)) {
+      return res.status(404).json({ error: 'Execution not found' })
+    }
+    res.json({ breaks: listBreaks(execution.id) })
+  } catch (err) {
+    console.error(err)
+    res.status(500).json({ error: 'Internal server error' })
+  }
+})
+
+// POST /api/executions/:id/breaks/:breakId/resume — let a paused node run.
+//
+// `action` is `continue` (run to the next breakpoint), `step` (stop again at
+// the very next node), or `abort` (cancel the run from here). `override` is an
+// optional `{ config, input }` patch applied to what the node was about to use,
+// which is the part that makes this a debugger rather than a viewer: change the
+// amount and watch the condition below it take the other branch.
+//
+// A write in the strongest sense — it decides whether a real HTTP call happens
+// and with what — so viewers are refused, and the settled-guard lives inside the
+// UPDATE so two people pressing Continue resolve to one winner.
+router.post('/executions/:id/breaks/:breakId/resume', auth, (req, res) => {
+  try {
+    const execution = db.prepare('SELECT * FROM executions WHERE id = ?').get(req.params.id)
+    if (!execution) return res.status(404).json({ error: 'Execution not found' })
+    const workflow = getWorkflowForMember(execution.workflow_id, req.user.id)
+    if (!workflow) return res.status(404).json({ error: 'Execution not found' })
+    if (forbidViewer(res, workflow.workspace_id, req.user.id)) return
+
+    const result = resumeBreak(req.params.breakId, {
+      executionId: execution.id,
+      action: req.body?.action || 'continue',
+      override: req.body?.override,
+      userId: req.user.id,
+    })
+    if (result.error) return res.status(400).json({ error: result.error })
+    if (result.notFound) return res.status(404).json({ error: 'Break not found' })
+    if (result.alreadySettled) {
+      return res.status(409).json({
+        error: `This break was already ${result.status}`,
+        status: result.status,
+        action: result.action,
+      })
+    }
+    res.status(202).json({ ok: true })
   } catch (err) {
     console.error(err)
     res.status(500).json({ error: 'Internal server error' })

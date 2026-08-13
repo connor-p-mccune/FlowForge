@@ -25,6 +25,7 @@ const costModel = require('./costModel')
 const stepCache = require('./stepCache')
 const tracing = require('./tracing')
 const canary = require('./canary')
+const debuggerService = require('./debugger')
 
 const runners = {
   'action-http': require('./nodeRunners/httpRequest'),
@@ -711,6 +712,20 @@ async function runExecution(
   // already in flight always runs to completion — cancellation is inter-node.
   const cancelCheck = db.prepare('SELECT cancel_requested FROM executions WHERE id = ?')
   let cancelled = false
+  const isCancelRequested = () => Boolean(cancelCheck.get(executionId)?.cancel_requested)
+
+  // Breakpoints (services/debugger.js). Null on every run not started as a
+  // debug session, which is every scheduled, webhook and API-triggered run —
+  // the plan is read off the execution row, and only the manual run submission
+  // can put one there.
+  //
+  // `openBreaks` is what makes a break feel like the *run* pausing rather than
+  // one branch stalling: the scheduler stops launching while it is non-zero, so
+  // a parallel sibling does not quietly race ahead while somebody is reading
+  // the node they stopped at. It is incremented synchronously at launch — before
+  // the task starts awaiting — so the round loop cannot observe zero in between.
+  const debugPlan = dryRun ? null : debuggerService.planFor(execution)
+  let openBreaks = 0
 
   function launchNode(nodeId) {
     const node = nodeById[nodeId]
@@ -767,6 +782,11 @@ async function runExecution(
     updateStep.run('running', redact(JSON.stringify(input)), null, null, now(), null, stepIdByNode[nodeId])
     publishStep(nodeId, 'running')
 
+    // Decided synchronously so the round loop below cannot launch a sibling
+    // between here and the pause the task is about to take.
+    const willBreak = Boolean(debugPlan?.shouldBreak(nodeId))
+    if (willBreak) openBreaks += 1
+
     const task = (async () => {
       try {
         // Config templates resolve against upstream outputs plus the decrypted
@@ -774,12 +794,48 @@ async function runExecution(
         // ({{vars.NAME}}), and the run's callback URLs
         // ({{callbacks.<node-id>}}). Secrets ride only through this scope —
         // never through context — so they can't leak into a later node's input.
-        const config = resolveTemplates(node.data?.config || {}, {
+        let config = resolveTemplates(node.data?.config || {}, {
           ...context,
           secrets,
           vars,
           callbacks: callbackUrls,
         })
+
+        // The breakpoint sits exactly here: after the config is resolved and
+        // before the runner is called. It is the only moment where both facts
+        // exist at once — what the node received, and what it is about to do
+        // with it — and by the time either reaches a step row the interesting
+        // intermediate is gone.
+        if (willBreak) {
+          const decision = await debuggerService.pauseAt({
+            executionId,
+            node,
+            input,
+            config,
+            redact,
+            publish: pub,
+            isCancelled: isCancelRequested,
+          })
+          debugPlan.apply(decision.action)
+          if (decision.action === 'abort') {
+            db.prepare('UPDATE executions SET cancel_requested = 1 WHERE id = ?').run(executionId)
+          }
+          // An override is a patch over what the node was *about* to use, so it
+          // merges rather than replaces — somebody changing one header should
+          // not have to retype the URL. The step's recorded input is rewritten
+          // to match, because a run whose history shows the pre-override value
+          // would be a debugger that lies about what it did.
+          if (decision.override?.config) {
+            config = { ...config, ...decision.override.config }
+          }
+          if (decision.override?.input) {
+            Object.assign(input, decision.override.input)
+            updateStep.run(
+              'running', redact(JSON.stringify(input)), null, null, now(), null,
+              stepIdByNode[nodeId]
+            )
+          }
+        }
         // Engine context for runners that need to reach back into the engine (only
         // sub-workflow does today): the call stack for cycle detection, the parent
         // execution + node so a spawned child run can be linked back, and the publish
@@ -868,6 +924,10 @@ async function runExecution(
           if (!failure) failure = { node, err }
         }
       } finally {
+        // Released here rather than beside the pause: a config that fails to
+        // resolve throws before the break is ever taken, and an unreleased
+        // counter would stop the scheduler launching anything ever again.
+        if (willBreak) openBreaks -= 1
         inFlight.delete(nodeId)
       }
     })()
@@ -900,7 +960,12 @@ async function runExecution(
           unscheduled.splice(i, 1)
           reuseNode(nodeId)
           progressed = true
-        } else if (inFlight.size < cap) {
+        } else if (inFlight.size < cap && openBreaks === 0) {
+          // `openBreaks === 0` is what makes a breakpoint stop the *run* rather
+          // than one branch of it. Without it a parallel sibling races ahead
+          // while somebody is reading the node they stopped at, and the state
+          // they are inspecting is already stale — which is precisely the thing
+          // a debugger exists to prevent.
           unscheduled.splice(i, 1)
           launchNode(nodeId)
           progressed = true
@@ -929,6 +994,12 @@ async function runExecution(
 
   // Let in-flight siblings of a failed/cancelled run finish and record results.
   if (inFlight.size > 0) await Promise.all([...inFlight.values()])
+
+  // Defensive: a pause always resolves or throws inside its own task, so by
+  // here nothing should still be open. A worker that died mid-break is the case
+  // this covers, and an orphaned 'paused' row would show the panel a pause
+  // nothing is waiting on.
+  if (debugPlan) debuggerService.settleOpenBreaks(executionId)
 
   // Compensating transactions: unwind the side effects this run already caused.
   // Deliberately runs *after* the terminal status is written and published —

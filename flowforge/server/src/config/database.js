@@ -337,6 +337,41 @@ ensureColumn('execution_steps', 'completed_seq', 'INTEGER')
 // known and enumerated in execution_compensations rather than merely suspected).
 ensureColumn('executions', 'rollback_status', 'TEXT')
 
+// Breakpoints (services/debugger.js). debug_json declares the breakpoints a run
+// was *started* with — `{ breakpoints: [nodeId], stepFromStart }` — and NULL on
+// every ordinary run. On the execution rather than the workflow, deliberately:
+// a breakpoint that lived on the workflow could be hit by a schedule tick or a
+// webhook delivery, so the unsafe state is made unrepresentable instead of
+// forbidden by a rule somebody has to remember.
+ensureColumn('executions', 'debug_json', 'TEXT')
+
+// One row per pause. The engine inserts it and polls until somebody resumes —
+// the same cooperative pattern approvals use, which is what makes a paused run
+// survive whatever the process does in between and lets the resume be a plain
+// HTTP request from anywhere. input_json/config_json are the *resolved* values
+// the node was about to run with, stored through the run's redactor like every
+// other persisted artefact; override_json is the patch a person applied before
+// letting it continue.
+db.exec(`
+  CREATE TABLE IF NOT EXISTS execution_breaks (
+    id TEXT PRIMARY KEY,
+    execution_id TEXT NOT NULL REFERENCES executions(id) ON DELETE CASCADE,
+    node_id TEXT NOT NULL,
+    node_label TEXT,
+    status TEXT NOT NULL DEFAULT 'paused',
+    action TEXT,
+    input_json TEXT,
+    config_json TEXT,
+    override_json TEXT,
+    created_at TEXT NOT NULL,
+    expires_at TEXT,
+    resolved_at TEXT,
+    resolved_by TEXT REFERENCES users(id)
+  );
+  CREATE INDEX IF NOT EXISTS idx_execution_breaks_execution
+    ON execution_breaks (execution_id, created_at);
+`)
+
 // Workflow guarantees (services/guarantees.js): path invariants the author
 // declares about their own graph — "this charge never runs unless that approval
 // ran first" — verified over every execution the graph admits rather than over
