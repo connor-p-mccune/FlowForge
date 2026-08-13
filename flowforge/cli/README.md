@@ -49,6 +49,7 @@ export FLOWFORGE_TOKEN=ffp_…
 | `flowforge merge <id> <file> [--yes] [--ours\|--theirs] [--base <v>]` | Three-way merge a file into the live workflow, per config field — keeps both sides' work instead of picking one to lose. Previews unless `--yes`; exits **2** on conflicts ([docs](../docs/MERGE.md)) |
 | `flowforge lint <id> [file] [--strict]` | Run the app's linter as a CI gate — over the live workflow, or over an exported file against its target workspace (real secret/variable names, sub-workflow targets); exits non-zero on errors, `--strict` fails warnings too |
 | `flowforge verify <id> [--facts] [--suggest]` | Check the workflow's declared path invariants over **every execution the graph admits**; exits non-zero on one that broke *or* one that can no longer be checked ([docs](../docs/GUARANTEES.md)) |
+| `flowforge debug <id> --break <node>` | Run with breakpoints and report the **resolved** config each node was about to run with — templates substituted, secrets redacted. `--step` traces every node, `--stop` parks the run at the first one |
 | `flowforge types <id> [--node <id>] [--json]` | The workflow's inferred data schema — what each node produces and the exact `{{node.path}}` references it offers; exits non-zero on a type error ([docs](../docs/TYPES.md)) |
 | `flowforge release <id> [--promote] [--rollback] [--wait N]` | Canary release status — exits **0** promote, **1** roll back, **2** keep waiting, so a pipeline branches on the verdict without parsing a p-value ([docs](../docs/RELEASES.md)) |
 | `flowforge search <query> [--limit N]` | Find workflows by name **or by what's inside them** — node labels, config strings, sticky notes ([docs](../docs/API.md#search-workflows)) |
@@ -139,6 +140,40 @@ failing — a green pipeline forever, guarding nothing.
 (which nodes every run executes, where the decisions are); `--suggest` lists
 the invariants that hold today and look deliberate, which is the shortest path
 from *no guarantees declared* to a useful set.
+
+## See what a node was actually about to send
+
+Adding an output node to find out what an HTTP node posts means editing the
+workflow, deploying it, running it, reading it, and taking it out again — which
+changes the thing being investigated. `debug` doesn't touch the graph:
+
+```console
+$ flowforge debug 6f0c… --break charge-card
+run 4e9a…
+
+▸ Charge card (charge-card)
+  about to run with:
+    {
+      "url": "https://api.acme.com/v1/charges/ord-8891",
+      "method": "POST",
+      "headers": { "Authorization": "Bearer ••••••" }
+    }
+  received:
+    { "orderId": "ord-8891", "amount": 4500 }
+
+status completed
+```
+
+The run pauses before each named node, the command prints what it was about to
+do — every `{{…}}` already resolved, every secret already redacted — and
+resumes it. A breakpoint polled and immediately released is a **trace point**.
+
+`--step` traces every node instead of named ones. `--stop` parks the run at the
+first breakpoint and prints the id to resume it with, for when you want to hold
+it open and change something. Exits non-zero unless the run completed.
+
+Breakpoints attach to the run this command starts, never to the workflow — so a
+schedule tick or a webhook delivery of the same workflow can't hit one.
 
 ## Ask what a node actually produces
 

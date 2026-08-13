@@ -20,6 +20,7 @@ const { requestCancel } = require('../services/executionControl')
 const { rollbackExecution } = require('../services/executionEngine')
 const { describeLineage, analyzeLineage, traceProvenance, traceImpact } = require('../services/lineage')
 const { verifyGuarantees, parseGuarantees } = require('../services/guarantees')
+const { parseDebugRequest, resumeBreak, listBreaks } = require('../services/debugger')
 const { mergeDocument, applyMerge } = require('../services/workflowMerge')
 const { recordAudit } = require('../services/auditLog')
 const { respondToApproval } = require('../services/approvals')
@@ -289,6 +290,30 @@ router.post('/workflows/:id/trigger', tokenAuth('trigger'), async (req, res) => 
       return res.status(400).json({ error: 'priority must be "high", "normal", or "low"' })
     }
 
+    // ?breakAt=<node-id,…> or ?breakAt=all starts the run as a debug session
+    // (services/debugger.js): it pauses before each named node runs, exposing
+    // the *resolved* config and input. A query param for the same reason
+    // priority is one — the body is the trigger payload, and a control knob
+    // mixed into it would become data.
+    //
+    // The safety property survives intact: a breakpoint is attached to *this*
+    // submission and stored on the run, so a schedule tick or a webhook
+    // delivery of the same workflow still has nowhere to read one from.
+    let debug = null
+    if (req.query.breakAt !== undefined) {
+      const raw = String(req.query.breakAt)
+      const graph = JSON.parse(workflow.graph_json)
+      const request = raw === 'all'
+        ? { stepFromStart: true }
+        : { breakpoints: raw.split(',').map((s) => s.trim()).filter(Boolean) }
+      debug = parseDebugRequest(request, graph)
+      if (!debug) {
+        return res.status(400).json({
+          error: 'breakAt must be "all" or a comma-separated list of node ids in this workflow',
+        })
+      }
+    }
+
     const payload = req.body && typeof req.body === 'object' && !Array.isArray(req.body) ? req.body : {}
 
     const idempotencyKey = req.headers['idempotency-key']
@@ -336,15 +361,22 @@ router.post('/workflows/:id/trigger', tokenAuth('trigger'), async (req, res) => 
     const admission = admitRun(workflow)
     if (!admission.ok) return res.status(409).json({ error: admission.error })
 
-    const priority = resolvePriority(requestedPriority, workflow)
+    // A debug run always takes the high lane: something is waiting on each
+    // pause, and an interactive session stuck behind a bulk backlog defeats
+    // its purpose — the same rule dry runs follow.
+    const priority = debug ? 'high' : resolvePriority(requestedPriority, workflow)
     const executionId = uuidv4()
     const now = new Date().toISOString()
     // trigger_type 'api' marks the source; trigger_data persists the payload so
     // the run is replayable like a webhook-triggered one.
     db.prepare(
-      `INSERT INTO executions (id, workflow_id, status, triggered_by, trigger_type, trigger_data, priority, created_at)
-       VALUES (?, ?, 'pending', ?, 'api', ?, ?, ?)`
-    ).run(executionId, workflow.id, req.user.id, Object.keys(payload).length ? JSON.stringify(payload) : null, priority, now)
+      `INSERT INTO executions (id, workflow_id, status, triggered_by, trigger_type, trigger_data, priority, debug_json, created_at)
+       VALUES (?, ?, 'pending', ?, 'api', ?, ?, ?, ?)`
+    ).run(
+      executionId, workflow.id, req.user.id,
+      Object.keys(payload).length ? JSON.stringify(payload) : null,
+      priority, debug ? JSON.stringify(debug) : null, now
+    )
 
     if (requestHash) {
       db.prepare(
@@ -958,6 +990,63 @@ router.post('/workflows/:id/tests/run', tokenAuth('trigger'), async (req, res) =
     if (forbidViewer(res, workflow.workspace_id, req.user.id)) return
     const summary = await runSuite(workflow, { triggeredBy: req.user.id })
     res.json(summary)
+  } catch (err) {
+    console.error(err)
+    res.status(500).json({ error: 'Internal server error' })
+  }
+})
+
+// GET /api/v1/executions/:id/breaks — every pause a debug run has taken, with
+// the *resolved* config and input each node was about to use
+// (services/debugger.js).
+//
+// From a terminal this is the more useful half of the debugger. A pause that is
+// polled, printed, and immediately resumed is a **trace point**: a run that
+// reports exactly what each node was about to send, in order, with templates
+// substituted and secrets redacted. "Why did the staging run post that body?"
+// stops being a question you answer by adding log nodes.
+//
+// Read-only, so `read` is the whole authorisation story.
+router.get('/executions/:id/breaks', tokenAuth('read'), (req, res) => {
+  try {
+    const execution = db.prepare('SELECT * FROM executions WHERE id = ?').get(req.params.id)
+    if (!execution) return res.status(404).json({ error: 'Execution not found' })
+    if (!getWorkflowForMember(execution.workflow_id, req.user.id)) {
+      return res.status(404).json({ error: 'Execution not found' })
+    }
+    res.json({ executionId: execution.id, breaks: listBreaks(execution.id) })
+  } catch (err) {
+    console.error(err)
+    res.status(500).json({ error: 'Internal server error' })
+  }
+})
+
+// POST /api/v1/executions/:id/breaks/:breakId/resume — let a paused node run.
+//
+// `trigger` scope rather than `read`: resuming decides whether a real HTTP call
+// happens and, with an override, with what — it is the same category of act as
+// starting the run in the first place, and a read-only token must not be able
+// to do it.
+router.post('/executions/:id/breaks/:breakId/resume', tokenAuth('trigger'), (req, res) => {
+  try {
+    const execution = db.prepare('SELECT * FROM executions WHERE id = ?').get(req.params.id)
+    if (!execution) return res.status(404).json({ error: 'Execution not found' })
+    const workflow = getWorkflowForMember(execution.workflow_id, req.user.id)
+    if (!workflow) return res.status(404).json({ error: 'Execution not found' })
+    if (forbidViewer(res, workflow.workspace_id, req.user.id)) return
+
+    const result = resumeBreak(req.params.breakId, {
+      executionId: execution.id,
+      action: req.body?.action || 'continue',
+      override: req.body?.override,
+      userId: req.user.id,
+    })
+    if (result.error) return res.status(400).json({ error: result.error })
+    if (result.notFound) return res.status(404).json({ error: 'Break not found' })
+    if (result.alreadySettled) {
+      return res.status(409).json({ error: `This break was already ${result.status}` })
+    }
+    res.status(202).json({ ok: true })
   } catch (err) {
     console.error(err)
     res.status(500).json({ error: 'Internal server error' })

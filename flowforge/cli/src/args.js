@@ -3,7 +3,24 @@
 // `--flag=value`, and boolean flags (a --flag followed by another flag, or by
 // nothing, is `true`).
 
-const BOOLEAN_FLAGS = new Set(['watch', 'help', 'version', 'json', 'strict'])
+const BOOLEAN_FLAGS = new Set([
+  'watch', 'help', 'version', 'json', 'strict', 'yes', 'step', 'stop', 'facts', 'suggest',
+])
+
+// Flags that may appear more than once and collect their values into an array.
+// Everything else keeps last-wins, which is the right default for a scalar —
+// but a repeated `--break` silently discarding all but the last would set a
+// breakpoint the caller never asked for and skip the ones they did.
+const REPEATABLE_FLAGS = new Set(['break'])
+
+function assign(flags, name, value) {
+  if (!REPEATABLE_FLAGS.has(name)) {
+    flags[name] = value
+    return
+  }
+  if (flags[name] === undefined) flags[name] = [value]
+  else flags[name].push(value)
+}
 
 function parseArgs(argv) {
   const positionals = []
@@ -17,14 +34,14 @@ function parseArgs(argv) {
     const body = arg.slice(2)
     const eq = body.indexOf('=')
     if (eq !== -1) {
-      flags[body.slice(0, eq)] = body.slice(eq + 1)
+      assign(flags, body.slice(0, eq), body.slice(eq + 1))
       continue
     }
     const next = argv[i + 1]
     if (BOOLEAN_FLAGS.has(body) || next === undefined || next.startsWith('--')) {
       flags[body] = true
     } else {
-      flags[body] = next
+      assign(flags, body, next)
       i++
     }
   }

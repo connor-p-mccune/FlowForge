@@ -28,3 +28,25 @@ test('a trailing value flag is boolean', () => {
   const { flags } = parseArgs(['--interval'])
   assert.equal(flags.interval, true)
 })
+
+test('collects a repeatable flag instead of keeping the last value', () => {
+  // A repeated --break silently discarding all but the last would set a
+  // breakpoint the caller never asked for and skip the ones they did.
+  const { flags } = parseArgs(['debug', 'wf-1', '--break', 'h1', '--break', 'o1'])
+  assert.deepEqual(flags.break, ['h1', 'o1'])
+})
+
+test('a repeatable flag given once is still an array', () => {
+  assert.deepEqual(parseArgs(['--break', 'h1']).flags.break, ['h1'])
+  assert.deepEqual(parseArgs(['--break=h1']).flags.break, ['h1'])
+})
+
+test('a non-repeatable flag keeps last-wins', () => {
+  assert.equal(parseArgs(['--limit', '5', '--limit', '9']).flags.limit, '9')
+})
+
+test('treats --step and --stop as booleans even before a positional', () => {
+  const { positionals, flags } = parseArgs(['debug', '--step', 'wf-1'])
+  assert.equal(flags.step, true)
+  assert.deepEqual(positionals, ['debug', 'wf-1'])
+})

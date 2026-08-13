@@ -365,6 +365,24 @@ const spec = {
               'is the trigger payload.',
             schema: { type: 'string', enum: ['high', 'normal', 'low'] },
           },
+          {
+            name: 'breakAt',
+            in: 'query',
+            required: false,
+            description:
+              'Start the run as a **debug session**: it pauses before each ' +
+              'named node runs, exposing the resolved config and input via ' +
+              '`GET /executions/{id}/breaks`. A comma-separated list of node ' +
+              'ids, or `all` to stop at every node.\n\n' +
+              'Polled, printed and immediately resumed, a breakpoint becomes a ' +
+              '**trace point** — the run reports exactly what each node was ' +
+              'about to send, with templates substituted and secrets redacted, ' +
+              'without changing the graph to add logging.\n\n' +
+              'Attached to *this* submission, never to the workflow, so a ' +
+              'schedule tick or webhook delivery of the same workflow has ' +
+              'nowhere to read a breakpoint from. Debug runs take the high lane.',
+            schema: { type: 'string', example: 'charge-card,send-receipt' },
+          },
         ],
         requestBody: {
           required: false,
@@ -1457,6 +1475,125 @@ const spec = {
         },
       },
     },
+    '/executions/{executionId}/breaks': {
+      get: {
+        tags: ['executions'],
+        summary: 'Every pause a debug run has taken',
+        description:
+          'For a run started with `?breakAt=…`, each pause with the ' +
+          '**resolved** config and input the node was about to use — templates ' +
+          'substituted, secrets redacted, before the runner fired. `status` is ' +
+          '`paused` (waiting on a resume), `resumed`, `expired` (nobody ' +
+          'resumed it in time, which fails the run) or `cancelled`.\n\n' +
+          'Poll, print, resume: that turns a breakpoint into a trace point and ' +
+          'answers "why did this run send *that*?" without adding logging ' +
+          'nodes to the graph. `flowforge debug` is this loop. Requires `read`.',
+        operationId: 'listExecutionBreaks',
+        parameters: [{ $ref: '#/components/parameters/ExecutionId' }],
+        responses: {
+          200: {
+            description: 'The run’s pauses, oldest first.',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    executionId: { type: 'string' },
+                    breaks: {
+                      type: 'array',
+                      items: { $ref: '#/components/schemas/ExecutionBreak' },
+                    },
+                  },
+                },
+              },
+            },
+          },
+          401: { $ref: '#/components/responses/Unauthorized' },
+          403: { $ref: '#/components/responses/Forbidden' },
+          404: { $ref: '#/components/responses/NotFound' },
+          429: { $ref: '#/components/responses/RateLimited' },
+        },
+      },
+    },
+    '/executions/{executionId}/breaks/{breakId}/resume': {
+      post: {
+        tags: ['executions'],
+        summary: 'Let a paused node run',
+        description:
+          '`action` is `continue` (run to the next breakpoint), `step` (stop ' +
+          'again at the very next node), or `abort` (cancel the run from ' +
+          'here). An optional `override` of `{ config, input }` is **merged** ' +
+          'over what the node was about to use — change the amount and watch ' +
+          'the condition below it take the other branch. An overridden input ' +
+          'also rewrites the step’s recorded input, so the run’s history says ' +
+          'what actually happened.\n\n' +
+          'Requires `trigger`, not `read`: resuming decides whether a real ' +
+          'call happens and with what, which is the same category of act as ' +
+          'starting the run. Two callers racing resolve to one winner; the ' +
+          'loser gets a `409` naming the settled state.',
+        operationId: 'resumeExecutionBreak',
+        parameters: [
+          { $ref: '#/components/parameters/ExecutionId' },
+          {
+            name: 'breakId',
+            in: 'path',
+            required: true,
+            schema: { type: 'string' },
+          },
+        ],
+        requestBody: {
+          required: false,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                properties: {
+                  action: {
+                    type: 'string',
+                    enum: ['continue', 'step', 'abort'],
+                    default: 'continue',
+                  },
+                  override: {
+                    type: 'object',
+                    description: 'Shallow `{ config, input }` patches merged before the node runs.',
+                    properties: {
+                      config: { type: 'object', additionalProperties: true },
+                      input: { type: 'object', additionalProperties: true },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          202: {
+            description: 'Accepted — the node runs on the engine’s next poll.',
+            content: {
+              'application/json': {
+                schema: { type: 'object', properties: { ok: { type: 'boolean' } } },
+              },
+            },
+          },
+          400: {
+            description: 'Unknown action.',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } },
+          },
+          401: { $ref: '#/components/responses/Unauthorized' },
+          403: { $ref: '#/components/responses/Forbidden' },
+          404: { $ref: '#/components/responses/NotFound' },
+          409: {
+            description: 'The break was already resumed, expired, or cancelled.',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/Error' },
+              },
+            },
+          },
+          429: { $ref: '#/components/responses/RateLimited' },
+        },
+      },
+    },
     '/executions/{executionId}': {
       get: {
         tags: ['executions'],
@@ -2423,6 +2560,50 @@ const spec = {
           what: { type: 'string', example: 'the address this request is sent to' },
           via: { type: 'array', items: { type: 'string' } },
           origins: { type: 'array', items: { type: 'string' } },
+        },
+      },
+      ExecutionBreak: {
+        type: 'object',
+        description:
+          'One pause in a debug run — taken *after* the node’s config was ' +
+          'resolved and *before* its runner was called, the only moment where ' +
+          'both what it received and what it is about to do exist at once.',
+        properties: {
+          id: { type: 'string' },
+          nodeId: { type: 'string' },
+          nodeLabel: { type: 'string' },
+          status: {
+            type: 'string',
+            enum: ['paused', 'resumed', 'expired', 'cancelled'],
+            description:
+              '`expired` means nobody resumed it within the timeout, which ' +
+              'fails the run rather than letting the node go with nobody ' +
+              'watching.',
+          },
+          action: { type: 'string', enum: ['continue', 'step', 'abort'], nullable: true },
+          input: {
+            type: 'object',
+            nullable: true,
+            additionalProperties: true,
+            description: 'The merged upstream output the node received.',
+          },
+          config: {
+            type: 'object',
+            nullable: true,
+            additionalProperties: true,
+            description:
+              'The node’s config with every `{{…}}` already resolved and every ' +
+              'secret redacted — the value that exists nowhere else.',
+          },
+          override: {
+            type: 'object',
+            nullable: true,
+            additionalProperties: true,
+            description: 'The patch a caller applied before letting it run.',
+          },
+          createdAt: { type: 'string', format: 'date-time' },
+          expiresAt: { type: 'string', format: 'date-time', nullable: true },
+          resolvedAt: { type: 'string', format: 'date-time', nullable: true },
         },
       },
       Guarantee: {

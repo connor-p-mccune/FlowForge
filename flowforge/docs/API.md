@@ -797,6 +797,65 @@ results so a failure says exactly what broke.
 Requires the `trigger` scope (it executes the workflow). `flowforge test <id>`
 wraps this and exits non-zero on `ok: false`.
 
+### Debug a run (breakpoints as trace points)
+
+Add `?breakAt=` to a trigger and the run pauses before each named node, exposing
+the **resolved** config and input — templates substituted, secrets redacted —
+at the only moment both exist: after the config was built and before the runner
+fired.
+
+```bash
+# Start a run that stops before charge-card (or ?breakAt=all for every node)
+curl -s -X POST "https://your-flowforge-host/api/v1/workflows/6f0c…/trigger?breakAt=charge-card"   -H "Authorization: Bearer $FLOWFORGE_TOKEN" -H "Content-Type: application/json"   -d '{"orderId": "ord-8891"}'
+
+# See what it stopped on
+curl -s https://your-flowforge-host/api/v1/executions/4e9a…/breaks   -H "Authorization: Bearer $FLOWFORGE_TOKEN"
+
+# Let it go — optionally with a different config
+curl -s -X POST https://your-flowforge-host/api/v1/executions/4e9a…/breaks/b1/resume   -H "Authorization: Bearer $FLOWFORGE_TOKEN" -H "Content-Type: application/json"   -d '{"action": "continue", "override": {"config": {"url": "https://staging.acme.com/charges"}}}'
+```
+
+```json
+{
+  "executionId": "4e9a…",
+  "breaks": [
+    {
+      "id": "b1",
+      "nodeId": "charge-card",
+      "nodeLabel": "Charge card",
+      "status": "paused",
+      "input":  { "orderId": "ord-8891", "amount": 4500 },
+      "config": { "url": "https://api.acme.com/v1/charges/ord-8891", "method": "POST" }
+    }
+  ]
+}
+```
+
+Polled, printed and immediately resumed, a breakpoint becomes a **trace point**:
+the run reports exactly what each node was about to send, in order, without
+editing the graph to add logging — which would change the thing being
+investigated. `flowforge debug <id> --break <node>` is that loop.
+
+`action` is `continue`, `step` (stop again at the very next node), or `abort`.
+An `override` of `{ config, input }` is **merged** over what the node was about
+to use, and an overridden input rewrites the step's recorded input so the run's
+history says what actually happened.
+
+Three rules are worth knowing before you rely on it:
+
+- **A breakpoint attaches to this submission, never to the workflow.** A
+  schedule tick or a webhook delivery of the same workflow has nowhere to read
+  one from, so there is no way to leave one running in production.
+- **Reading a pause is `read`; resuming one is `trigger`.** Resuming decides
+  whether a real call happens and with what — the same category of act as
+  starting the run.
+- **A pause nobody resumes fails the run.** The wait is bounded
+  (`DEBUG_BREAK_TIMEOUT_MS`, default 15 minutes) and it fails rather than
+  quietly continuing, because continuing would mean a node ran with nobody
+  watching in a session whose whole purpose was that somebody was.
+
+See [ARCHITECTURE.md](./ARCHITECTURE.md#breakpoints).
+
 ### Poll an execution
 
 ```bash
