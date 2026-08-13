@@ -561,8 +561,40 @@ order while streaming live progress back to every collaborator on the canvas.
   each run as local time + the offset in effect *and* the UTC instant, and flag
   a DST change falling inside the window — because a correct schedule whose UTC
   column jumps an hour otherwise reads as a bug.
-- **Real-time collaboration** — multiple people edit the same workflow at once
-  with shared cursors, presence, and last-write-wins sync.
+- **Real-time collaboration (CRDT)** — multiple people edit the same workflow at
+  once with shared cursors and presence, converging through a **conflict-free
+  replicated data type** rather than a timestamp race. The version this replaced
+  was last-write-wins on `Date.now()`, and its three failure modes were all
+  ordinary: two browsers disagree by seconds, so *whose laptop is fast* decided
+  whose edit survived; the comparison was per **element**, so one person editing
+  an HTTP node's URL while another edited its retry count meant one of them
+  silently lost everything they typed — the exact case the three-way merge
+  handles cleanly, which made the offline merge better at this than the live
+  editor; and a dropped connection diverged **permanently**, because rejoining
+  subscribed to future changes and reconciled none of the missed ones. A graph is
+  now an LWW-Element-Set over existence plus an LWW-Map over fields, every
+  register ordered by `(lamport, site)` — causality instead of wall time, with
+  the site id breaking the ties Lamport clocks leave, together a *total* order.
+  Two properties follow and they are the whole design: the merge is
+  **commutative**, so out-of-order delivery needs no causal buffering (an
+  operation arriving before the one it logically follows still wins or loses on
+  its own timestamp), and **idempotent**, so an at-least-once transport needs no
+  dedupe. It is deliberately *not* an OR-Set — a concurrent edit does not
+  resurrect a deleted node, because a node reappearing with half its config
+  merged from an edit made against the version that was deleted is worse than a
+  lost edit, and undo exists while "why is this node back" doesn't. The server is
+  the **convergence point** rather than a relay: it merges and broadcasts the
+  *resulting element*, so no two clients ever re-derive a winner independently,
+  and a writer whose edit lost gets the winning value back instead of being left
+  as the one replica still showing what it typed. A dropped connection is now a
+  **delay, not a divergence** — edits made offline keep the timestamps they were
+  made with and merge at the position they actually occupy, and a reconnecting
+  client is handed a state delta of everything touched since (a **session epoch**
+  makes a stale position resync in full rather than plausibly wrong). Sessions
+  persist when the last collaborator leaves and on SIGTERM, so a canvas outlives
+  the tab that made it. Convergence is tested as the property it is: the suite
+  applies **every permutation** of an operation set and asserts one document
+  comes out.
 - **Webhook triggers** — generate a public URL that fires a workflow on POST;
   the request body flows into the graph as the trigger's output. Optionally
   **HMAC-signed**: deliveries must carry a timestamped SHA-256 signature over
@@ -733,6 +765,7 @@ Copy `.env.example` to `.env` before running. **Never commit `.env`.**
 | `AI_SERVICE_URL`  | no       | Server → AI service URL (defaults to the compose host) |
 | `SECRETS_ENCRYPTION_KEY` | no | Dedicated key material for workspace-secret encryption (falls back to `JWT_SECRET`) |
 | `EXEC_MAX_PARALLEL` | no     | Max concurrently-executing nodes per run (default 4; 1 = sequential) |
+| `COLLAB_PERSIST_MS` | no     | How long a collaboration session waits after the last edit before writing the graph (default 2000; 0 = only on the last collaborator leaving) |
 | `CONCURRENCY_RETRY_MS` | no  | How long a run parked at its workflow's concurrency cap waits before re-checking (default 1000) |
 | `COST_MODEL_PRICES` | no     | JSON override of the AI price table, e.g. `{"gpt-4o-mini":{"input":150000,"output":600000}}` (micro-USD per 1M tokens) |
 | `OTEL_SERVICE_NAME` | no     | `service.name` on exported OTLP spans (default `flowforge`) |
@@ -792,8 +825,10 @@ SMTP_USER=        SMTP_PASS=         EMAIL_FROM=flowforge@example.com
    If the run hits an **Approval** gate it pauses right there — approve or
    reject inline from the panel (or from the notification every member gets).
 7. **Webhooks:** open the Webhooks panel to mint a public trigger URL.
-8. **Collaborate:** share the workflow URL — edits, cursors, and runs sync live,
-   and `Ctrl/⌘-Z` undo/redo keeps everyone converged.
+8. **Collaborate:** share the workflow URL — edits, cursors, and runs sync live
+   through a CRDT, so two people editing different fields of the same node both
+   keep their work and a dropped connection reconciles instead of diverging.
+   `Ctrl/⌘-Z` undo/redo converges the same way.
 9. **Secrets & variables:** store API keys under the workspace's Secrets page
    (`{{secrets.NAME}}` — encrypted, masked in run logs) and plain config like
    base URLs under Variables (`{{vars.NAME}}` — readable, diffable, visible in

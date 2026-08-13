@@ -418,10 +418,10 @@ Socket.io connections authenticate in the handshake (JWT verified before any
 handler is registered) and join per-workflow rooms after a membership check.
 Within a room:
 
-- **Edits are last-write-wins.** Every node/edge change carries a timestamp;
-  a client drops remote changes older than its latest local edit to the same
-  element. Cursor positions are throttled client-side (50ms) and stale
-  cursors are garbage-collected.
+- **Edits merge through a CRDT.** See below — the server is the convergence
+  point rather than a relay. Cursor positions are the one thing still relayed:
+  they are ephemeral, lossy by nature, and a dropped frame corrects itself on
+  the next mouse move.
 - **Execution events ride Redis pub/sub.** The engine publishes
   `exec-update` events; the Socket.io layer relays them to the workflow's
   room. This decouples the worker from connected sockets — the run publishes
@@ -429,12 +429,125 @@ Within a room:
 - **Undo/redo converges rather than forks.** History is snapshot-based
   (debounced, bounded at 50 entries). Applying a step diffs the target
   snapshot against the live graph and broadcasts each difference through the
-  same channel as live edits — so peers apply the undo as ordinary changes
-  under the same LWW rules. The trade-off is explicit: remote edits are part
+  same channel as live edits — so peers apply the undo as ordinary
+  operations through the same merge. The trade-off is explicit: remote edits are part
   of local history, and undoing past them reverts them everywhere.
 - **Self-healing state.** Comments, notifications, and activity events are
   written to SQLite first and emitted live second; a missed emit heals on
   the next fetch because the row is the source of truth.
+
+### Why the relay was not enough
+
+The original design was a thin relay with last-write-wins on a wall clock: each
+client stamped `Date.now()` on every change and dropped anything older than its
+own last edit to the same element. That converges when it converges, and the
+three ways it doesn't are all ordinary rather than exotic.
+
+**Clocks.** Two browsers disagree by seconds. Whose laptop is fast is not a
+defensible tiebreak for whose edit survives.
+
+**Granularity.** The comparison was per *element*. One person changing an HTTP
+node's URL while another changed its retry count meant one of them silently lost
+everything they typed — which is precisely the case [MERGE.md](./MERGE.md) argues
+is the common one and merges cleanly per field. The offline three-way merge was
+strictly better at this than the live editor, which is a strange thing for a
+collaborative product to be true of.
+
+**Repair.** A dropped connection produced permanent divergence. Rejoining the
+room subscribed to *future* changes and reconciled none of the missed ones, so
+two canvases stayed different until somebody pressed reload and never knew why.
+
+### The data type
+
+`services/graphCrdt.js` models a graph as two maps of elements, each element
+being an **existence register** (present/absent) and a **field map** — one
+register per `position`, `data.label`, `config.url`, and so on. Every register
+is ordered by `(lamport, site)`: a Lamport clock, so causality rather than wall
+time decides, with the site id breaking the ties Lamport clocks leave. Together
+that is a *total* order over concurrent writes, which is what makes the merge
+deterministic rather than merely usually-right.
+
+Two properties follow, and they are the whole point:
+
+- **Commutative.** `max` over a total order does not care what order it sees its
+  arguments in, so applying the same operations in any permutation yields the
+  same document. No causal delivery, no buffering, no vector clocks — an
+  operation that arrives before the one it logically follows still lands
+  correctly, because it wins or loses on its timestamp either way.
+- **Idempotent.** Re-applying an operation changes nothing (a strict `>`
+  comparison, never `>=`), so an at-least-once transport needs no dedupe layer.
+
+Because a CRDT's claim is a property rather than an example, it is tested as
+one: the convergence suite generates an operation set, applies **every**
+ordering — or thirty random ones for the large set — and asserts a single
+document comes out.
+
+**It is deliberately not an OR-Set**, and the difference is visible to users: a
+concurrent edit does not resurrect a node somebody deleted. On a canvas, a node
+reappearing with half its config merged from an edit made against the version
+that was deleted is worse than a lost edit, and undo exists while "why is this
+node back" does not have an answer anybody can act on.
+
+One thing fell out of testing rather than out of reading the code. `materialize`
+followed Map insertion order, so two replicas holding *provably identical*
+documents serialised into different arrays — the set converged and the artefact
+did not. That artefact is what gets persisted and then compared by drift
+detection and the three-way merge, so it is now sorted by id: the stored graph
+is a pure function of the operation set, and "the file differs" can only mean
+the graphs differ.
+
+### The server is the convergence point
+
+Clients send operations; the server merges them and broadcasts the **resulting
+element**, not the operation. Every replica therefore converges on a value the
+merge produced instead of each re-deriving one, and the client never needs the
+merge algorithm at all.
+
+That split is a judgement about what a replica is here. A browser tab is a view
+that can be closed at any moment; the server is the durable replica. So the
+authoritative document lives there, which buys two things a peer-to-peer
+arrangement could not: a session's work survives every tab closing, and a
+reconnecting client can be *told* what it missed.
+
+What the client does keep is the clock, because a timestamp has to be assigned
+when an edit is **made** — including while offline. Operations made during an
+outage are queued, flushed on reconnect *before* the delta is requested (so the
+reply already accounts for them), and merged at the position in the order they
+actually occupy rather than at the back, where a naive resend would clobber
+whatever happened meanwhile.
+
+A losing writer gets a separate reply. It applied its operation optimistically,
+so if the registers refused it, that client is the one replica holding a value
+the merge rejected — diverged on precisely the edit it cared most about. The ack
+carries the winning element back.
+
+### Repair, and why it is a state delta
+
+`services/collabSession.js` keeps a bounded log of **which elements changed at
+which sequence**, not of the operations themselves. A reconnecting client
+reports its position and receives the *current value* of everything touched
+since.
+
+A state delta is the weaker mechanism and the right one here: it is correct
+however far behind the client is, it cannot double-apply, and its size is
+bounded by the number of distinct elements edited rather than by how long the
+client was away. A node dragged across the canvas produces hundreds of
+operations and exactly one log entry. When the log no longer reaches back far
+enough the answer is a snapshot rather than an error — the bias is deliberate,
+because guessing wrong here does not produce an error, it produces two canvases
+that disagree forever.
+
+A **session epoch** makes a stale position explicit rather than plausible. A
+restart, or a merge that invalidated the document, begins a new epoch, and a
+client still holding "I was at 7" resyncs in full instead of being handed a
+delta into state that no longer exists.
+
+Sessions persist on a debounce, when the last collaborator leaves, and on
+SIGTERM — so editing outlives the tab that produced it rather than depending on
+the client's own debounced save having fired before it closed. A merge or a
+version restore **invalidates** the session instead of flushing it: that
+document describes the state *before* the write, and flushing it would undo the
+merge.
 
 ---
 
