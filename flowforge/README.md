@@ -186,9 +186,26 @@ order while streaming live progress back to every collaborator on the canvas.
   data — so "on failure, file a ticket / page someone / roll back" is built on
   the same canvas with the same nodes. A one-line loop guard (handler runs
   never fire handlers) caps any chain at depth one.
-- **Encrypted secrets** — store API keys once per workspace (AES-256-GCM at
-  rest), reference them as `{{secrets.NAME}}`, and they're masked in run logs.
-  Values are write-only: rotate or delete, never read back.
+- **Encrypted secrets, with rotatable keys** — store API keys once per workspace,
+  reference them as `{{secrets.NAME}}`, and they're masked in run logs. Values
+  are write-only: rotate or delete, never read back. Encryption is an
+  **envelope** — each secret gets its own random data key, the value is
+  encrypted under that, and the data key is wrapped by a key from a **key
+  ring** — which exists to fix a real expiry date on the previous design: one
+  key encrypting every value directly means changing it makes every stored
+  credential undecryptable *at the same instant*, i.e. re-entering every
+  credential by hand, from wherever it originally came from, while production is
+  down. Now `SECRETS_KEY_RING` holds several keys and decryption picks one **by
+  the id recorded on each row**, so old and new coexist and there is no moment at
+  which a read fails: add the key, flip the active id, re-encrypt at leisure,
+  retire the old one. The re-encryption **never touches a credential** — it
+  unwraps a 32-byte data key and re-wraps it, copying the value's ciphertext
+  across byte-for-byte, so the process that rotates keys can't log a token it
+  never held. The Secrets page shows which secrets are behind (key *ids* only,
+  never material) and stays silent when none are; a re-key lands in the
+  tamper-evident audit log, because "when did we last rotate, and who?" is a
+  compliance question and nothing else would record it, since no value
+  changed.
 - **Workspace variables** — the plain-config counterpart to secrets: store
   environment base URLs, channel names, and thresholds once per workspace and
   reference them as `{{vars.NAME}}` in any node config. Values are **readable
@@ -797,6 +814,8 @@ Copy `.env.example` to `.env` before running. **Never commit `.env`.**
 | `VITE_API_URL`    | yes      | Browser-facing server URL (baked into the client build)|
 | `AI_SERVICE_URL`  | no       | Server → AI service URL (defaults to the compose host) |
 | `SECRETS_ENCRYPTION_KEY` | no | Dedicated key material for workspace-secret encryption (falls back to `JWT_SECRET`) |
+| `SECRETS_KEY_RING` | no | Key ring for secret encryption — `id:material` entries, so the key can be rotated without an outage |
+| `SECRETS_ACTIVE_KEY` | no | Which ring key new secrets are written under (default: the last entry) |
 | `EXEC_MAX_PARALLEL` | no     | Max concurrently-executing nodes per run (default 4; 1 = sequential) |
 | `COLLAB_PERSIST_MS` | no     | How long a collaboration session waits after the last edit before writing the graph (default 2000; 0 = only on the last collaborator leaving) |
 | `CONCURRENCY_RETRY_MS` | no  | How long a run parked at its workflow's concurrency cap waits before re-checking (default 1000) |

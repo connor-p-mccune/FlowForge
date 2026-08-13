@@ -2037,7 +2037,16 @@ bearing decisions:
   non-interchangeable surfaces.
 - **Personal access tokens** are stored hash-only (SHA-256), scoped,
   expiring, and revocable — revocation keeps the row as an audit trail.
-- **Workspace secrets** are AES-256-GCM at rest and write-only through the
+- **Workspace secrets** are AES-256-GCM at rest under **envelope encryption**:
+  each value has its own random data key, and that data key is wrapped by a key
+  from a ring (`services/secretVault.js`). The point of the indirection is
+  rotation. Encrypting every value directly under one derived key means changing
+  that key makes every stored credential undecryptable at the same instant —
+  a vault that cannot rotate is a vault with an expiry date. Decryption picks
+  the wrapping key by the **id recorded on the row**, so old and new keys
+  coexist and no read ever fails mid-rotation; and re-keying unwraps a 32-byte
+  data key rather than a credential, so the process that rotates keys never
+  holds an API token in memory. Secrets are also write-only through the
   API; the engine redacts them from everything it persists or publishes.
 - **SSRF guard:** user-supplied URLs (HTTP/Slack nodes) resolve through a
   scheme + private/reserved-IP egress check, re-applied per redirect hop.

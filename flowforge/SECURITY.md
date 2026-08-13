@@ -203,9 +203,35 @@ in `__tests__/eventDispatcher.test.js` and `__tests__/eventSubscriptions.test.js
 Workspace secrets (`routes/secrets.js` + `services/secretVault.js`) give node
 configs a safe place for credentials, referenced as `{{secrets.NAME}}`:
 
-- **AES-256-GCM at rest** — values are encrypted before insert (key derived via
-  scrypt from `SECRETS_ENCRYPTION_KEY`, falling back to `JWT_SECRET`); GCM's
-  auth tag makes tampered rows fail closed instead of decrypting to garbage.
+- **AES-256-GCM at rest, under envelope encryption** — each secret gets its own
+  random 256-bit data key (DEK); the value is encrypted under the DEK, and the
+  DEK is encrypted ("wrapped") under a key encryption key (KEK) from the ring.
+  GCM's auth tag makes a tampered row — or a swapped wrapped key — fail closed
+  instead of decrypting to garbage.
+- **Key rotation without an outage.** The first version encrypted every value
+  directly under one derived key, which meant changing that key made every
+  stored credential undecryptable at the same instant: re-enter every secret by
+  hand, from wherever it originally came from, while production is down. A vault
+  that cannot rotate is a vault with an expiry date. `SECRETS_KEY_RING` now holds
+  `id:material` entries and `SECRETS_ACTIVE_KEY` names the one new writes use;
+  decryption looks the KEK up **by the id stored on the row**, so old and new
+  keys coexist and there is no instant at which a read fails. Add the key, flip
+  the active id, re-encrypt at leisure, retire the old one.
+- **Rotation never touches a credential.** Re-keying unwraps a 32-byte data key
+  and re-wraps it under the new KEK; the value's ciphertext is copied across
+  byte-for-byte. The process that rotates keys therefore never holds an API
+  token in memory, and a bug in it cannot log one. (A row still in the
+  pre-envelope `v1` format is the exception — there is no data key to re-wrap, so
+  it is decrypted and re-encrypted exactly once. That is the cost of the format
+  that came before, paid on migration.)
+- **The report says what is behind.** `GET .../secrets/keys` lists the key *id*
+  each secret is stored under — read off the row with no key material involved —
+  so "is anything still on the old key?" is a question with an answer rather
+  than a manual read of a base64 column. A re-key is recorded in the
+  tamper-evident audit log (`secret.rekeyed`), because *when did we last rotate
+  the encryption key, and who did it* is a compliance question whose answer must
+  not be editable — and nothing else in the record would show it happened, since
+  no value changed.
 - **Write-only API** — list endpoints return names + metadata; a value can be
   rotated or deleted but never read back. Writes are workspace-owner-only.
 - **Run-log redaction** — the execution engine decrypts just-in-time, resolves
@@ -214,8 +240,10 @@ configs a safe place for credentials, referenced as `{{secrets.NAME}}`:
   input/output, published Socket.io events, and error messages. Downstream
   nodes still receive real values in memory.
 
-Tested in `__tests__/secretVault.test.js` and `__tests__/secrets.test.js`
-(including an end-to-end engine leak check).
+Tested in `__tests__/secretVault.test.js`, `__tests__/secretRotation.test.js`,
+and `__tests__/secrets.test.js` (including an end-to-end engine leak check, and
+a run that still resolves `{{secrets.NAME}}` to the original value after a
+rotation).
 
 **Workspace variables are deliberately not secrets.** `{{vars.NAME}}` values
 (`routes/variables.js`) are plain configuration — readable through the API,

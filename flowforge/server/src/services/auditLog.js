@@ -60,6 +60,11 @@ const ACTIONS = new Set([
   'secret.created',
   'secret.updated',
   'secret.deleted',
+  // Re-encrypting every secret under a new key. No value changed, which is
+  // exactly why it needs recording separately: "when did we last rotate the
+  // encryption key, and who did it?" is a compliance question with a date for
+  // an answer, and nothing else in the record would show it happened.
+  'secret.rekeyed',
   'variable.created',
   'variable.updated',
   'variable.deleted',

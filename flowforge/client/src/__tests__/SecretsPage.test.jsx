@@ -122,3 +122,95 @@ describe('SecretsPage', () => {
     expect(await screen.findByText('Workspace not found')).toBeInTheDocument()
   })
 })
+
+describe('encryption key rotation', () => {
+  // The banner exists to answer one question — is anything still on the old
+  // key? — so it appears only when the answer is yes.
+  const withKeyring = (keyring) => {
+    apiFetch.mockImplementation((url, options = {}) => {
+      if (url.endsWith('/secrets/keys')) return Promise.resolve(keyring)
+      if (url.endsWith('/secrets/rotate')) {
+        return Promise.resolve({ activeKeyId: 'k2', rotated: 1, unchanged: 1, names: ['STRIPE_KEY'], failed: [] })
+      }
+      if (!options.method) return Promise.resolve({ secrets: SECRETS })
+      return Promise.resolve({})
+    })
+  }
+
+  it('stays quiet when every secret is on the current key', async () => {
+    withKeyring({ activeKeyId: 'k2', stale: 0, secrets: [] })
+    render(<SecretsPage workspaceId="ws1" />)
+    await screen.findByText('SLACK_TOKEN')
+    expect(screen.queryByRole('button', { name: /Re-encrypt/ })).not.toBeInTheDocument()
+  })
+
+  it('offers to re-encrypt when something is behind, and says what that means', async () => {
+    withKeyring({
+      activeKeyId: 'k2',
+      stale: 1,
+      secrets: [{ name: 'STRIPE_KEY', keyId: 'k1', stale: true }],
+    })
+    render(<SecretsPage workspaceId="ws1" />)
+
+    expect(await screen.findByText(/1 secret is encrypted with an older key/)).toBeInTheDocument()
+    // The reassurance that matters: nothing is broken in the meantime.
+    expect(screen.getByText(/still decrypt normally/)).toBeInTheDocument()
+    expect(screen.getByText('key k1')).toBeInTheDocument()
+  })
+
+  it('re-encrypts and reports how many moved', async () => {
+    withKeyring({
+      activeKeyId: 'k2',
+      stale: 1,
+      secrets: [{ name: 'STRIPE_KEY', keyId: 'k1', stale: true }],
+    })
+    render(<SecretsPage workspaceId="ws1" />)
+    fireEvent.click(await screen.findByRole('button', { name: /Re-encrypt/ }))
+
+    await waitFor(() =>
+      expect(apiFetch).toHaveBeenCalledWith('/api/workspaces/ws1/secrets/rotate', { method: 'POST' })
+    )
+    await waitFor(() =>
+      expect(toast.success).toHaveBeenCalledWith(expect.stringContaining('Re-encrypted 1 secret'))
+    )
+  })
+
+  it('reports a secret whose key was retired instead of claiming success', async () => {
+    apiFetch.mockImplementation((url, options = {}) => {
+      if (url.endsWith('/secrets/keys')) {
+        return Promise.resolve({
+          activeKeyId: 'k2',
+          stale: 1,
+          secrets: [{ name: 'STRIPE_KEY', keyId: 'gone', stale: true }],
+        })
+      }
+      if (url.endsWith('/secrets/rotate')) {
+        return Promise.resolve({
+          activeKeyId: 'k2', rotated: 0, unchanged: 1,
+          names: [], failed: [{ name: 'STRIPE_KEY', error: 'key "gone" is not in the current key ring' }],
+        })
+      }
+      if (!options.method) return Promise.resolve({ secrets: SECRETS })
+      return Promise.resolve({})
+    })
+    render(<SecretsPage workspaceId="ws1" />)
+    fireEvent.click(await screen.findByRole('button', { name: /Re-encrypt/ }))
+
+    await waitFor(() =>
+      expect(toast.error).toHaveBeenCalledWith(expect.stringContaining('not in the current key ring'))
+    )
+  })
+
+  it('shows nothing at all to somebody who cannot manage keys', async () => {
+    apiFetch.mockImplementation((url, options = {}) => {
+      if (url.endsWith('/secrets/keys')) return Promise.reject(new Error('Only workspace owners can manage secrets'))
+      if (!options.method) return Promise.resolve({ secrets: SECRETS })
+      return Promise.resolve({})
+    })
+    render(<SecretsPage workspaceId="ws1" />)
+    await screen.findByText('SLACK_TOKEN')
+    // Refused is not an error worth surfacing — the section is an owner's concern.
+    expect(screen.queryByText(/older key/)).not.toBeInTheDocument()
+    expect(screen.queryByText('Only workspace owners can manage secrets')).not.toBeInTheDocument()
+  })
+})

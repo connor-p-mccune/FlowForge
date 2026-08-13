@@ -31,6 +31,13 @@ export default function SecretsPage({ workspaceId }) {
   const [rotateValue, setRotateValue] = useState('')
   const [rotateBusy, setRotateBusy] = useState(false)
 
+  // Encryption keys. A separate, owner-only fetch that reports which key each
+  // secret is stored under — key *ids*, never material — because the question a
+  // rotation turns on ("is anything still on the old key?") is otherwise a
+  // manual read of a base64 column. A non-owner simply never sees this section.
+  const [keyring, setKeyring] = useState(null)
+  const [rekeying, setRekeying] = useState(false)
+
   const load = useCallback(async () => {
     setError(null)
     try {
@@ -40,7 +47,39 @@ export default function SecretsPage({ workspaceId }) {
       setError(err.message)
       setSecrets([])
     }
+    try {
+      setKeyring(await apiFetch(`/api/workspaces/${workspaceId}/secrets/keys`))
+    } catch {
+      // Members and viewers are refused, which is not an error worth showing —
+      // the whole section is an owner's concern.
+      setKeyring(null)
+    }
   }, [workspaceId])
+
+  async function handleRekey() {
+    setRekeying(true)
+    try {
+      const result = await apiFetch(`/api/workspaces/${workspaceId}/secrets/rotate`, {
+        method: 'POST',
+      })
+      if (result.failed?.length) {
+        toast.error(
+          `${result.failed.length} secret${result.failed.length === 1 ? '' : 's'} could not be re-encrypted — ${result.failed[0].error}`
+        )
+      } else if (result.rotated === 0) {
+        toast.success('Every secret is already on the current key.')
+      } else {
+        toast.success(
+          `Re-encrypted ${result.rotated} secret${result.rotated === 1 ? '' : 's'} under ${result.activeKeyId}.`
+        )
+      }
+      await load()
+    } catch (err) {
+      toast.error(`Couldn’t re-encrypt: ${err.message}`)
+    } finally {
+      setRekeying(false)
+    }
+  }
 
   useEffect(() => {
     setSecrets(null)
@@ -115,6 +154,33 @@ export default function SecretsPage({ workspaceId }) {
 
       {error && <p className="secrets-page__error">{error}</p>}
 
+      {/* Only meaningful when something is actually behind: a workspace whose
+          secrets are all on the current key does not need to be told about
+          keys at all. */}
+      {keyring && keyring.stale > 0 && (
+        <div className="secrets-page__keyring" role="status">
+          <div>
+            <strong>
+              {keyring.stale} secret{keyring.stale === 1 ? ' is' : 's are'} encrypted with an
+              older key
+            </strong>
+            <p className="secrets-page__hint">
+              They still decrypt normally — the key ring holds both. Re-encrypting
+              moves them onto <code>{keyring.activeKeyId}</code> so the old key can
+              be retired. Only the wrapped data key changes; the values themselves
+              are never decrypted.
+            </p>
+          </div>
+          <button
+            className="secrets-page__btn secrets-page__btn--primary"
+            onClick={handleRekey}
+            disabled={rekeying}
+          >
+            {rekeying ? 'Re-encrypting…' : 'Re-encrypt with current key'}
+          </button>
+        </div>
+      )}
+
       <form className="secrets-page__add" onSubmit={handleAdd}>
         <div className="secrets-page__add-fields">
           <label className="secrets-page__field">
@@ -179,6 +245,13 @@ export default function SecretsPage({ workspaceId }) {
                 <div className="secrets-page__item-meta">
                   {s.created_by_name && <span>added by {s.created_by_name}</span>}
                   <span>updated {formatDate(s.updated_at)}</span>
+                  {/* Shown only when it is behind, so the common case stays
+                      quiet and the badge means something when it appears. */}
+                  {keyring?.secrets?.find((k) => k.name === s.name)?.stale && (
+                    <span className="secrets-page__stale-key">
+                      key {keyring.secrets.find((k) => k.name === s.name).keyId}
+                    </span>
+                  )}
                 </div>
                 <div className="secrets-page__item-actions">
                   <button

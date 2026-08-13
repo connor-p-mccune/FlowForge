@@ -63,7 +63,9 @@ describe('workspace secrets', () => {
       'SELECT value_encrypted FROM workspace_secrets WHERE workspace_id = ? AND name = ?'
     ).get(workspaceId, 'API_KEY')
     expect(row.value_encrypted).not.toContain('sk-live-supersecret-42')
-    expect(row.value_encrypted.startsWith('v1:')).toBe(true)
+    // v2 is the envelope format: the value is encrypted under its own data
+    // key, which is itself encrypted under a key from the ring.
+    expect(row.value_encrypted.startsWith('v2:')).toBe(true)
   })
 
   it('rotates an existing secret in place (200, same name)', async () => {
