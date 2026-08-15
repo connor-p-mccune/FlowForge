@@ -10,6 +10,7 @@ const db = require('../config/database')
 const auth = require('../middleware/auth')
 const { check } = require('../services/expression')
 const { runScenario, runSuite } = require('../services/workflowTester')
+const { analyzePaths } = require('../services/pathConstraints')
 const { forbidViewer } = require('../services/workspaceRoles')
 
 const router = express.Router()
@@ -43,6 +44,7 @@ function presentScenario(row) {
     name: row.name,
     input,
     assertions,
+    generatedFor: row.generated_for || null,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   }
@@ -179,6 +181,122 @@ router.post('/workflows/:id/tests/:testId/run', auth, async (req, res) => {
 
     const result = await runScenario(workflow, { ...scenario, triggered_by: req.user.id })
     res.json({ result })
+  } catch (err) {
+    console.error(err)
+    res.status(500).json({ error: 'Internal server error' })
+  }
+})
+
+// POST /api/workflows/:id/tests/generate — write a scenario for every branch a
+// trigger payload can drive (services/pathConstraints.js).
+//
+// The premise is that nobody writes the boring tests. A workflow's branches are
+// enumerable and the payload that takes each one is computable, so leaving that
+// to a person means the suite covers whatever somebody thought of on the day —
+// which is never the case that breaks.
+//
+// Three decisions keep the button safe to press:
+//
+//   * **It is idempotent.** A generated scenario records the branch it covers
+//     (`generated_for`), so a second run updates the payload and assertion
+//     rather than doubling the suite. Regeneration after a graph edit is
+//     therefore the normal way to use it, not a cleanup job.
+//   * **It never touches a hand-written scenario**, which has no
+//     `generated_for` at all. A person's test is theirs.
+//   * **It reports what it could not cover, and why** — an approval's rejected
+//     side, a branch that depends on an API response — instead of quietly
+//     producing a suite with holes in it. That list is the honest part: the
+//     coverage number means nothing without it.
+router.post('/workflows/:id/tests/generate', auth, (req, res) => {
+  try {
+    const workflow = getVisibleWorkflow(req.params.id, req.user.id)
+    if (!workflow) return res.status(404).json({ error: 'Workflow not found' })
+    if (forbidViewer(res, workflow.workspace_id, req.user.id)) return
+
+    // Same body contract as lint/types/paths: the canvas asks about the graph
+    // on screen, so a branch added a minute ago is covered without a save.
+    let graph
+    if (req.body && Array.isArray(req.body.nodes) && Array.isArray(req.body.edges)) {
+      graph = { nodes: req.body.nodes, edges: req.body.edges }
+    } else {
+      try {
+        const parsed = JSON.parse(workflow.graph_json)
+        graph = { nodes: parsed.nodes || [], edges: parsed.edges || [] }
+      } catch {
+        graph = { nodes: [], edges: [] }
+      }
+    }
+
+    const report = analyzePaths(graph)
+    if (!report.analysed) {
+      return res.status(400).json({
+        error:
+          report.reason === 'cycle'
+            ? 'The graph contains a cycle, so no execution exists to generate tests from'
+            : 'The graph has no nodes to generate tests from',
+      })
+    }
+
+    const existing = db.prepare(
+      'SELECT * FROM workflow_tests WHERE workflow_id = ? AND generated_for IS NOT NULL'
+    ).all(workflow.id)
+    const byBranch = new Map(existing.map((row) => [row.generated_for, row]))
+
+    const insert = db.prepare(
+      `INSERT INTO workflow_tests
+         (id, workflow_id, name, trigger_data, assertions, generated_for, created_by, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    )
+    const update = db.prepare(
+      `UPDATE workflow_tests
+          SET name = ?, trigger_data = ?, assertions = ?, updated_at = ?
+        WHERE id = ?`
+    )
+
+    const now = new Date().toISOString()
+    const created = []
+    const updated = []
+    const write = db.transaction(() => {
+      for (const scenario of report.scenarios) {
+        const branch = `${scenario.covers.nodeId}:${scenario.covers.outcome}`
+        const triggerData = Object.keys(scenario.triggerData).length
+          ? JSON.stringify(scenario.triggerData)
+          : null
+        const assertions = JSON.stringify(scenario.assertions)
+        const row = byBranch.get(branch)
+        if (row) {
+          update.run(scenario.name, triggerData, assertions, now, row.id)
+          updated.push(row.id)
+        } else {
+          const id = uuidv4()
+          insert.run(id, workflow.id, scenario.name, triggerData, assertions, branch, req.user.id, now, now)
+          created.push(id)
+        }
+      }
+    })
+    write()
+
+    const rows = db.prepare(
+      'SELECT * FROM workflow_tests WHERE workflow_id = ? ORDER BY created_at, rowid'
+    ).all(workflow.id)
+
+    res.json({
+      created: created.length,
+      updated: updated.length,
+      // The branches a payload cannot drive, each with the reason. A caller
+      // that only reads `created` is looking at half the answer.
+      uncovered: report.branches
+        .filter((b) => b.wired > 0 && !b.generatable)
+        .map((b) => ({
+          nodeId: b.nodeId,
+          label: b.label,
+          outcome: b.outcome,
+          status: b.status,
+          reason: b.blockers[0] || 'no input reaches this branch',
+        })),
+      coverage: report.coverage,
+      tests: rows.map(presentScenario),
+    })
   } catch (err) {
     console.error(err)
     res.status(500).json({ error: 'Internal server error' })

@@ -17,6 +17,7 @@ const { isValidPriority } = require('../services/runPriority')
 const { ROLLBACK_POLICIES } = require('../services/compensation')
 const { describeLineage, analyzeLineage, traceProvenance, traceImpact } = require('../services/lineage')
 const { verifyGuarantees, parseGuarantees } = require('../services/guarantees')
+const { analyzePaths } = require('../services/pathConstraints')
 const collabSession = require('../services/collabSession')
 const { mergeDocument, applyMerge } = require('../services/workflowMerge')
 const { forbidViewer } = require('../services/workspaceRoles')
@@ -890,6 +891,43 @@ router.post('/workflows/:id/lineage', auth, (req, res) => {
     }
 
     res.json({ workflowId: workflow.id, ...describeLineage(graph) })
+  } catch (err) {
+    console.error(err)
+    res.status(500).json({ error: 'Internal server error' })
+  }
+})
+
+// ---------------------------------------------------------------------------
+// Path feasibility (services/pathConstraints.js)
+// ---------------------------------------------------------------------------
+
+// POST /api/workflows/:id/paths — which branches an input can actually take,
+// and what payload takes each one.
+//
+// Same body contract as lint, types, lineage and guarantees: the canvas asks
+// about the graph on screen, because that is where a branch stops being
+// reachable. The response is deliberately three things rather than a verdict —
+// `branches` is the per-outcome answer with a witness, `findings` is the subset
+// the linter also reports, and `scenarios` is the generated test suite the
+// Tests panel can adopt in one click.
+router.post('/workflows/:id/paths', auth, (req, res) => {
+  try {
+    const workflow = db.prepare('SELECT * FROM workflows WHERE id = ?').get(req.params.id)
+    if (!workflow || !isMember(workflow.workspace_id, req.user.id)) {
+      return res.status(404).json({ error: 'Workflow not found' })
+    }
+
+    let graph
+    if (req.body && Array.isArray(req.body.nodes) && Array.isArray(req.body.edges)) {
+      if (req.body.nodes.length > 2000 || req.body.edges.length > 5000) {
+        return res.status(400).json({ error: 'Graph too large to analyse' })
+      }
+      graph = { nodes: req.body.nodes, edges: req.body.edges }
+    } else {
+      graph = parseGraphData(workflow.graph_json)
+    }
+
+    res.json({ workflowId: workflow.id, ...analyzePaths(graph) })
   } catch (err) {
     console.error(err)
     res.status(500).json({ error: 'Internal server error' })

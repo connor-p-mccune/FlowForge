@@ -20,6 +20,7 @@ const { requestCancel } = require('../services/executionControl')
 const { rollbackExecution } = require('../services/executionEngine')
 const { describeLineage, analyzeLineage, traceProvenance, traceImpact } = require('../services/lineage')
 const { verifyGuarantees, parseGuarantees } = require('../services/guarantees')
+const { analyzePaths } = require('../services/pathConstraints')
 const { parseDebugRequest, resumeBreak, listBreaks } = require('../services/debugger')
 const { mergeDocument, applyMerge } = require('../services/workflowMerge')
 const { recordAudit } = require('../services/auditLog')
@@ -868,6 +869,45 @@ router.get('/workflows/:id/guarantees', tokenAuth('read'), (req, res) => {
       /* unparseable stored graph — verify against the empty shape */
     }
     res.json({ workflowId: workflow.id, ...verifyGuarantees(graph, workflow.guarantees_json) })
+  } catch (err) {
+    console.error(err)
+    res.status(500).json({ error: 'Internal server error' })
+  }
+})
+
+// GET /api/v1/workflows/:id/paths — which branches an input can take, and what
+// payload takes each one (services/pathConstraints.js).
+//
+// The CI shape of this is a coverage gate rather than a correctness one, and it
+// is two numbers a pipeline can key on: `ok` is false when the analysis found a
+// branch no input can reach — a dead branch is a defect, and the same one the
+// linter reports — while `coverage` says how much of the workflow a generated
+// suite could actually drive. A team that wants "every branch is tested" has
+// somewhere to assert it.
+//
+// Read-only and pure; `read` is the whole authorisation story. Writing the
+// generated scenarios into the suite is a session-side write behind the
+// workspace's own roles.
+router.get('/workflows/:id/paths', tokenAuth('read'), (req, res) => {
+  try {
+    const workflow = getWorkflowForMember(req.params.id, req.user.id)
+    if (!workflow) return res.status(404).json({ error: 'Workflow not found' })
+    let graph = { nodes: [], edges: [] }
+    try {
+      const parsed = JSON.parse(workflow.graph_json)
+      graph = {
+        nodes: Array.isArray(parsed.nodes) ? parsed.nodes : [],
+        edges: Array.isArray(parsed.edges) ? parsed.edges : [],
+      }
+    } catch {
+      /* unparseable stored graph — analyse the empty shape */
+    }
+    const report = analyzePaths(graph)
+    res.json({
+      workflowId: workflow.id,
+      ok: report.findings.every((f) => f.severity !== 'error'),
+      ...report,
+    })
   } catch (err) {
     console.error(err)
     res.status(500).json({ error: 'Internal server error' })

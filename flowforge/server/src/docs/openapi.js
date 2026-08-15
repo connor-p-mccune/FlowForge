@@ -1475,6 +1475,106 @@ const spec = {
         },
       },
     },
+    '/workflows/{workflowId}/paths': {
+      get: {
+        tags: ['workflows'],
+        summary: 'Which branches an input can take, and what payload takes them',
+        description:
+          'Path feasibility. Every other static check reasons about the ' +
+          '*graph*; this one reasons about the **data**, and it answers the ' +
+          'question the others structurally cannot: is the conjunction of the ' +
+          'branch conditions along a path satisfiable, and if so, by what?\n\n' +
+          'That yields two things. **Dead branches** — a `case "refund"` ' +
+          'downstream of a condition that already required `kind == "order"` ' +
+          'is wired, typed, reachable in the graph, and can never run — each ' +
+          'reported with the decision it contradicts. And a **witness** per ' +
+          'live branch: the concrete trigger payload that drives it, separated ' +
+          'from the assumptions it rests on, which is what lets ' +
+          '`scenarios` be a generated test suite rather than a list of ' +
+          'guesses.\n\n' +
+          'Every approximation is on the satisfiable side. A comparison outside ' +
+          'the solver’s fragment, a field two nodes could have written, or a ' +
+          'search that hit its bound all report `unknown` — so the failure mode ' +
+          'is a missing finding, never a live branch reported dead. `ok` is ' +
+          'false only when a branch is provably unreachable. Requires `read`.',
+        operationId: 'getWorkflowPaths',
+        parameters: [{ $ref: '#/components/parameters/WorkflowId' }],
+        responses: {
+          200: {
+            description: 'Per-branch feasibility, findings, and generated scenarios.',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    workflowId: { type: 'string' },
+                    ok: {
+                      type: 'boolean',
+                      description: 'No branch was found unreachable. The CI gate.',
+                    },
+                    analysed: {
+                      type: 'boolean',
+                      description:
+                        'False for a graph that admits no execution — a cycle, ' +
+                        'or no nodes. Nothing is reported against one.',
+                    },
+                    truncated: {
+                      type: 'boolean',
+                      description:
+                        'The search hit its bound. A truncated report never ' +
+                        'claims a branch is dead: an unexplored path is not a ' +
+                        'non-existent one.',
+                    },
+                    branches: {
+                      type: 'array',
+                      items: { $ref: '#/components/schemas/PathBranch' },
+                    },
+                    findings: {
+                      type: 'array',
+                      description: 'The subset the linter also reports.',
+                      items: { $ref: '#/components/schemas/LintIssue' },
+                    },
+                    scenarios: {
+                      type: 'array',
+                      description:
+                        'A ready-to-save test scenario per branch a payload can ' +
+                        'drive: the trigger data, and an assertion that the run ' +
+                        'really took the branch it was written for.',
+                      items: {
+                        type: 'object',
+                        properties: {
+                          name: { type: 'string', example: 'Route → refund' },
+                          triggerData: { type: 'object' },
+                          assertions: { type: 'array', items: { type: 'object' } },
+                          covers: { type: 'object' },
+                        },
+                      },
+                    },
+                    coverage: {
+                      type: 'object',
+                      description:
+                        'Branch coverage a generated suite could reach. ' +
+                        '`generatable` below `reachable` is not a defect — an ' +
+                        'approval’s rejected side is real and untestable in ' +
+                        'dry-run mode, and each branch says which it is.',
+                      properties: {
+                        branches: { type: 'integer' },
+                        reachable: { type: 'integer' },
+                        generatable: { type: 'integer' },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+          401: { $ref: '#/components/responses/Unauthorized' },
+          403: { $ref: '#/components/responses/Forbidden' },
+          404: { $ref: '#/components/responses/NotFound' },
+          429: { $ref: '#/components/responses/RateLimited' },
+        },
+      },
+    },
     '/executions/{executionId}/breaks': {
       get: {
         tags: ['executions'],
@@ -2621,6 +2721,64 @@ const spec = {
           statement: {
             type: 'string',
             example: 'Charge card never runs unless Approve ran first',
+          },
+        },
+      },
+      PathBranch: {
+        type: 'object',
+        description:
+          'One outcome of one decision — a condition’s `true`, a switch case, ' +
+          'a schema gate’s `invalid`, a node’s caught-failure branch.',
+        properties: {
+          nodeId: { type: 'string' },
+          label: { type: 'string', example: 'Route' },
+          nodeType: { type: 'string', example: 'switch' },
+          outcome: { type: 'string', example: 'refund' },
+          wired: {
+            type: 'integer',
+            description:
+              'How many edges leave this outcome. Zero means the run simply ' +
+              'ends here, which is a linter concern rather than a dead branch.',
+          },
+          status: {
+            type: 'string',
+            enum: ['reachable', 'unreachable', 'unknown'],
+            description:
+              '`unknown` is never a defect: it means the fragment could not ' +
+              'decide, which is the safe direction.',
+          },
+          witness: {
+            type: 'object',
+            nullable: true,
+            description:
+              'How to get here. `triggerData` is the payload; `assumptions` are ' +
+              'the values it could *not* set — an upstream response, a gate’s ' +
+              'verdict — kept separate so a generated test never rests on one ' +
+              'silently.',
+            properties: {
+              triggerData: { type: 'object' },
+              assumptions: { type: 'array', items: { type: 'object' } },
+            },
+          },
+          generatable: {
+            type: 'boolean',
+            description: 'A dry-run payload can drive this branch on its own.',
+          },
+          blockers: {
+            type: 'array',
+            items: { type: 'string' },
+            description:
+              'Why not, in words — “test mode always takes the other side of ' +
+              'Approve”, “depends on Fetch.status”.',
+          },
+          conflict: {
+            type: 'array',
+            nullable: true,
+            items: { type: 'string' },
+            description:
+              'For an unreachable branch: the decisions it contradicts, from a ' +
+              'minimal unsatisfiable subset. The finding nobody has to ' +
+              'investigate.',
           },
         },
       },

@@ -384,6 +384,18 @@ db.exec(`
 // arrived without its invariants would be the interesting half missing.
 ensureColumn('workflows', 'guarantees_json', 'TEXT')
 
+// Which branch a generated test scenario was written to cover
+// (services/pathConstraints.js), as `<nodeId>:<outcome>`. NULL on every
+// hand-written scenario, which is the honest answer: a person's scenario
+// exercises whatever it exercises, and claiming otherwise would let the
+// coverage figure report branches nothing actually asserts.
+//
+// It does two jobs. Regenerating matches on it, so pressing the button twice
+// updates the suite instead of doubling it; and the Tests panel counts distinct
+// values against the branches the analysis found, which is what makes branch
+// coverage of a *workflow* a number that exists.
+ensureColumn('workflow_tests', 'generated_for', 'TEXT')
+
 // Two-factor authentication (TOTP). Optional, opt-in per user. totp_enabled stays
 // 0 until the user verifies a code from their authenticator, so a half-finished
 // setup never locks them out of login. totp_backup_codes is a JSON array of
