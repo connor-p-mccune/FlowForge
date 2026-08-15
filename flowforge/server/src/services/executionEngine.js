@@ -252,7 +252,11 @@ function defaultPublish(payload) {
 // result.
 function applyFault(runner, fault) {
   if (!fault) return runner
-  recordFaultInjected(fault.mode)
+  // A deploy preview's stub is the same mechanism pointed at a different
+  // problem, and it is deliberately not counted: `flowforge_faults_injected_total`
+  // exists so a spike in run failures beside a spike in faults reads as an
+  // experiment, and a preview is neither an experiment nor a failure.
+  if (!fault.silent) recordFaultInjected(fault.mode)
   if (fault.mode === 'fail') {
     return async () => {
       throw new Error(`[chaos] ${fault.message}`)
@@ -336,7 +340,7 @@ async function runExecution(executionId, options = {}) {
 // — conditions, transforms, AI nodes — runs for real, so test output is genuine.
 async function runLeasedExecution(
   executionId,
-  { publish, payload, dryRun = false, ancestorWorkflowIds = [] } = {},
+  { publish, payload, dryRun = false, ancestorWorkflowIds = [], graphOverride, stubs } = {},
   leaseToken = null
 ) {
   const pub = publish || defaultPublish
@@ -385,7 +389,22 @@ async function runLeasedExecution(
   // live graph, so this is a no-op for every run that isn't in an experiment.
   const release = canary.resolveRelease(execution, workflow, { dryRun })
   canary.recordRelease(executionId, release)
-  const graph = JSON.parse(release.graphJson)
+
+  // Deploy preview (services/backtest.js) hands a dry run two things the engine
+  // otherwise derives: the graph to execute, and canned outputs for the nodes
+  // whose work reaches outside FlowForge. Together they let a *candidate*
+  // definition be replayed against a run that already happened, so a routing
+  // difference is attributable to the edit rather than to test mode simulating
+  // an HTTP response.
+  //
+  // Both are refused outside a dry run, deliberately and structurally: running a
+  // definition the workflow does not hold, or settling a node from a value the
+  // caller supplied, is a hole if it can ever fire real effects. The node test
+  // bench makes the same trade one node at a time.
+  const preview = dryRun && (graphOverride || stubs) ? { graphOverride, stubs } : null
+  const graph = preview?.graphOverride
+    ? { nodes: preview.graphOverride.nodes || [], edges: preview.graphOverride.edges || [] }
+    : JSON.parse(release.graphJson)
 
   // Chaos profile, if this workflow has an armed one. Loading it here (rather
   // than per node) means one parse per run and one decision about scope: a
@@ -924,9 +943,25 @@ async function runLeasedExecution(
           // than of the run as a whole.
           traceparent: tracing.formatTraceparent(traceId, spanIdByNode[nodeId], true),
         }
+        // A previewed node settles from the value the caller supplied rather
+        // than running, expressed as a synthetic `stub` fault so it travels the
+        // same path every other node does. That is not incidental: the task
+        // below inserts itself into `inFlight` *after* it starts, so a body
+        // that never awaited would delete its own entry before the entry
+        // existed and leave the scheduler spinning on a settled promise
+        // forever. Every runner is async and awaited, which is what makes that
+        // unreachable — and a short-circuit here would have quietly made it
+        // reachable again.
+        //
+        // The step is still recorded either way, which is the point: the
+        // preview diffs *paths*, and a node with no step row is
+        // indistinguishable from one that was skipped.
+        const stub = preview?.stubs?.[nodeId]
         // Resolved once, before the retry ladder, so a `fail` rule exercises
         // the retries rather than re-rolling its luck between them.
-        const fault = faultInjection.faultFor(chaosProfile, node, { executionId, dryRun })
+        const fault = stub !== undefined
+          ? { mode: 'stub', output: stub, silent: true }
+          : faultInjection.faultFor(chaosProfile, node, { executionId, dryRun })
         const raw = (await runWithRetries(node, config, input, dryRun, ctx, fault)) ?? {}
         // Metering rides back from a runner on a reserved `usage` key, which is
         // then stripped: cost accounting is a side channel from runner to

@@ -19,6 +19,7 @@ const { POLICIES: RECOVERY_POLICIES } = require('../services/crashRecovery')
 const { describeLineage, analyzeLineage, traceProvenance, traceImpact } = require('../services/lineage')
 const { verifyGuarantees, parseGuarantees } = require('../services/guarantees')
 const { analyzePaths } = require('../services/pathConstraints')
+const { previewDeploy } = require('../services/backtest')
 const collabSession = require('../services/collabSession')
 const { mergeDocument, applyMerge } = require('../services/workflowMerge')
 const { forbidViewer } = require('../services/workspaceRoles')
@@ -898,6 +899,53 @@ router.post('/workflows/:id/lineage', auth, (req, res) => {
     }
 
     res.json({ workflowId: workflow.id, ...describeLineage(graph) })
+  } catch (err) {
+    console.error(err)
+    res.status(500).json({ error: 'Internal server error' })
+  }
+})
+
+// ---------------------------------------------------------------------------
+// Deploy preview (services/backtest.js)
+// ---------------------------------------------------------------------------
+
+// POST /api/workflows/:id/preview — what this change would have done to the
+// runs that already happened.
+//
+// Same body contract as lint, types, lineage, guarantees and paths, and for a
+// sharper version of the same reason: the graph on screen is the one about to
+// be deployed, and comparing anything else would answer a question nobody
+// asked.
+//
+// A write in one narrow sense — it executes graphs — so viewers are refused
+// even though nothing survives the call. Every replay is a dry run against a
+// graph the workflow does not hold, both of which the engine refuses outside
+// dry-run mode, so no side effect can escape; and the replays' execution rows
+// are deleted once their steps are read, because a preview is a question and a
+// question should not leave fifty rows in run history.
+router.post('/workflows/:id/preview', auth, async (req, res) => {
+  try {
+    const workflow = db.prepare('SELECT * FROM workflows WHERE id = ?').get(req.params.id)
+    if (!workflow || !isMember(workflow.workspace_id, req.user.id)) {
+      return res.status(404).json({ error: 'Workflow not found' })
+    }
+    if (forbidViewer(res, workflow.workspace_id, req.user.id)) return
+
+    let graph
+    if (req.body && Array.isArray(req.body.nodes) && Array.isArray(req.body.edges)) {
+      if (req.body.nodes.length > 500 || req.body.edges.length > 1000) {
+        return res.status(400).json({ error: 'Graph too large to preview' })
+      }
+      graph = { nodes: req.body.nodes, edges: req.body.edges }
+    } else {
+      graph = parseGraphData(workflow.graph_json)
+    }
+    if (graph.nodes.length === 0) {
+      return res.status(400).json({ error: 'Nothing to preview — the graph has no nodes' })
+    }
+
+    const report = await previewDeploy(workflow, graph, { runs: req.body?.runs })
+    res.json({ workflowId: workflow.id, ...report })
   } catch (err) {
     console.error(err)
     res.status(500).json({ error: 'Internal server error' })
