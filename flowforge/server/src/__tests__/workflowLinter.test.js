@@ -782,4 +782,42 @@ describe('lintGraph — type analysis', () => {
     }
     expect(lintGraph(graph)).toEqual([])
   })
+
+  // Path feasibility (services/pathConstraints.js) — the pass that reasons
+  // about the data rather than the graph. Its own suite covers the analysis;
+  // what matters here is that the linter runs it and that a graph it has
+  // nothing to say about stays clean.
+  it('flags a branch no input can take', () => {
+    const graph = {
+      nodes: [
+        node('t1', 'trigger-webhook'),
+        node('c1', 'condition', { operator: 'expression', expression: 'amount < 100' }, 'Small'),
+        node(
+          'c2',
+          'condition',
+          { operator: 'greater_than', left: '{{t1.amount}}', right: '1000' },
+          'Large'
+        ),
+        node('o1', 'output-log', { message: 'big' }),
+        node('o2', 'output-log', { message: 'small' }),
+      ],
+      edges: [edge('t1', 'c1'), edge('c1', 'c2', 'true'), edge('c2', 'o1', 'true'), edge('c2', 'o2', 'false')],
+    }
+    const found = lintGraph(graph).find((i) => i.code === 'unreachable-branch')
+    expect(found).toMatchObject({ severity: 'error', nodeId: 'c2' })
+    expect(found.message).toMatch(/contradicts Small → true/)
+  })
+
+  it('says nothing about branches whose conditions are genuinely independent', () => {
+    const graph = {
+      nodes: [
+        node('t1', 'trigger-webhook'),
+        node('c1', 'condition', { operator: 'expression', expression: 'amount < 100' }),
+        node('o1', 'output-log', { message: 'a' }),
+        node('o2', 'output-log', { message: 'b' }),
+      ],
+      edges: [edge('t1', 'c1'), edge('c1', 'o1', 'true'), edge('c1', 'o2', 'false')],
+    }
+    expect(lintGraph(graph)).toEqual([])
+  })
 })

@@ -21,6 +21,7 @@ const { CACHEABLE_TYPES, DEFAULT_TTL_SECONDS } = require('./stepCache')
 const { compensationPlan } = require('./compensation')
 const { analyzeLineage } = require('./lineage')
 const { guaranteeIssues } = require('./guarantees')
+const { pathIssues } = require('./pathConstraints')
 
 const PLACEHOLDER = /\{\{\s*([\w-]+(?:\.[\w-]+)*)\s*\}\}/g
 
@@ -913,6 +914,21 @@ function lintGraph({ nodes: rawNodes = [], edges: rawEdges = [] } = {}, { secret
     issues.push(...guaranteeIssues({ nodes: rawNodes, edges: rawEdges }, guarantees))
   } catch (err) {
     console.error(`Guarantee verification failed: ${err.message}`)
+  }
+
+  // Path feasibility (services/pathConstraints.js). The last additive pass, and
+  // the only one that reasons about the *data* rather than the graph: a branch
+  // whose conditions cannot all hold at once is wired, typed, reachable and
+  // dead, and every pass above it says so is fine.
+  //
+  // An error, like a guarantee violation, because it is not a matter of taste —
+  // either the branch or the condition above it is wrong. And it inherits the
+  // solver's one-sided honesty: a truncated search reports nothing, so the
+  // failure mode is a missing finding rather than a wrong one.
+  try {
+    issues.push(...pathIssues({ nodes: rawNodes, edges: rawEdges }))
+  } catch (err) {
+    console.error(`Path feasibility analysis failed: ${err.message}`)
   }
 
   const rank = { error: 0, warning: 1 }
