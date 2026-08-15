@@ -33,8 +33,8 @@ problem sounds familiar.
 | **Merging two graphs** | Drift detection tells you git and production diverged, then makes you pick a side to throw away. A two-way diff *can't* do better — telling "added here" from "deleted there" needs a common ancestor. So: a real three-way merge, per config field, that produces **no graph at all** on conflict. | [MERGE.md](./docs/MERGE.md) |
 | **Governance** | The linter asks "will this run?"; a policy asks "is this *allowed* here?". Rules are type-checked when saved, so one reading a misspelled field is refused rather than reporting every workflow compliant forever. | [POLICIES.md](./docs/POLICIES.md) |
 
-Everything above is covered by tests: **130 server suites (1738 tests)**, 58
-client files (506), 144 CLI tests, plus the AI service's pytest suite — lint and
+Everything above is covered by tests: **136 server suites (1850 tests)**, 59
+client files (521), 161 CLI tests, plus the AI service's pytest suite — lint and
 all four run on every push.
 
 ---
