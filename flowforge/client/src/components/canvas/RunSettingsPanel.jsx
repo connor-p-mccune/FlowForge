@@ -48,6 +48,7 @@ export default function RunSettingsPanel({ workflowId, open, onClose }) {
   // Compensating transactions: what a run that ends badly does about the side
   // effects it already caused. 'failure' (default) | 'failure-or-cancel' | 'off'.
   const [rollbackPolicy, setRollbackPolicy] = useState('failure')
+  const [recoveryPolicy, setRecoveryPolicy] = useState('safe')
   // Cross-workflow dependencies (read-only impact analysis). null while
   // loading; a fetch failure just hides the section — it's informational.
   const [deps, setDeps] = useState(null)
@@ -93,6 +94,7 @@ export default function RunSettingsPanel({ workflowId, open, onClose }) {
         }
         setPriority(wf.default_priority || 'normal')
         setRollbackPolicy(wf.rollback_policy || 'failure')
+        setRecoveryPolicy(wf.recovery_policy || 'safe')
         // Stored in ms / as a 0..1 fraction; shown in the friendlier seconds / %.
         setSlaDurationInput(wf.sla_max_duration_ms ? String(wf.sla_max_duration_ms / 1000) : '')
         setSlaSuccessInput(
@@ -233,6 +235,7 @@ export default function RunSettingsPanel({ workflowId, open, onClose }) {
           error_workflow_id: handlerId || null,
           default_priority: priority,
           rollback_policy: rollbackPolicy,
+          recovery_policy: recoveryPolicy,
         },
       })
       toast.success('Run settings saved')
@@ -491,6 +494,38 @@ export default function RunSettingsPanel({ workflowId, open, onClose }) {
                   Stopping a run will also undo what it had already done —
                   right for a half-finished deploy, wrong for a half-finished
                   report you’d rather keep.
+                </p>
+              )}
+
+              <div className="run-settings__section">Crash recovery</div>
+              <p className="webhook-panel__hint">
+                If the worker running this workflow stops existing — an eviction,
+                an out-of-memory kill — the run is picked up and{' '}
+                <strong>continued</strong>, not restarted: steps that already
+                succeeded are reused, exactly as a resume does. The judgement
+                call is a step that was <em>in flight</em> when the process died,
+                whose outcome nobody recorded.
+              </p>
+              <label className="run-settings__field">
+                <span className="run-settings__label">If a worker is lost</span>
+                <select value={recoveryPolicy} onChange={(e) => setRecoveryPolicy(e.target.value)}>
+                  <option value="safe">Continue, unless a step may already have acted (default)</option>
+                  <option value="resume">Always continue — this workflow’s steps are idempotent</option>
+                  <option value="manual">Never — record it and let someone decide</option>
+                </select>
+              </label>
+              {recoveryPolicy === 'resume' && (
+                <p className="webhook-panel__hint">
+                  A step that was mid-request when the worker died will be run
+                  again. Only choose this when repeating one is harmless — a
+                  fetch, not a charge.
+                </p>
+              )}
+              {recoveryPolicy === 'manual' && (
+                <p className="webhook-panel__hint">
+                  Lost runs are recorded as failed with the unknown steps marked{' '}
+                  <em>indeterminate</em>, and wait for a person to resume them
+                  from run history.
                 </p>
               )}
 

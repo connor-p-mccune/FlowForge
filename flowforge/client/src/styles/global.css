@@ -1749,6 +1749,18 @@ html, body, #root {
 .exec-timeline__bar--reused { background: #06b6d4; }
 /* Cached: adopted from the step cache — the node's exact work was already done. */
 .exec-timeline__bar--cached { background: #8b5cf6; }
+/* Indeterminate: the worker died while this step was running, so whether it
+   completed is genuinely unknown. Striped rather than a flat colour, because
+   every other status here is a fact and this one is the absence of one. */
+.exec-timeline__bar--indeterminate {
+  background: repeating-linear-gradient(
+    45deg,
+    #a1a1aa,
+    #a1a1aa 4px,
+    #d4d4d8 4px,
+    #d4d4d8 8px
+  );
+}
 
 /* Critical path: the steps that set the run's duration. The bar keeps its
    status colour but gains an indigo ring, and its row's label is emphasised, so
@@ -2699,6 +2711,10 @@ html, body, #root {
 .status-badge--caught { background: #ffedd5; color: #c2410c; }
 /* Cached: the step adopted a memoised output instead of re-executing. */
 .status-badge--cached { background: #ede9fe; color: #6d28d9; }
+/* Indeterminate: the worker holding this run stopped responding while the step
+   was in flight. Not failed and not succeeded — nobody recorded a result, and
+   the whole point of the status is refusing to pick one of the other two. */
+.status-badge--indeterminate { background: #f4f4f5; color: #52525b; }
 
 /* Step list */
 .step-list {

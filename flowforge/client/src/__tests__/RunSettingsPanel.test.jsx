@@ -440,6 +440,28 @@ describe('RunSettingsPanel', () => {
     expect(screen.queryByText(/live cached/i)).not.toBeInTheDocument()
   })
 
+  it('saves the crash-recovery policy with the rest of the settings', async () => {
+    setup()
+    await screen.findByLabelText(/max concurrent runs/i)
+
+    fireEvent.change(screen.getByLabelText(/if a worker is lost/i), {
+      target: { value: 'manual' },
+    })
+    // The consequence is spelled out rather than left to the option's wording.
+    expect(await screen.findByText(/indeterminate/i)).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: /save settings/i }))
+    await waitFor(() =>
+      expect(apiFetch).toHaveBeenCalledWith(
+        '/api/workflows/wf1',
+        expect.objectContaining({
+          method: 'PUT',
+          body: expect.objectContaining({ recovery_policy: 'manual' }),
+        })
+      )
+    )
+  })
+
   it('surfaces a server error and stays open', async () => {
     apiFetch.mockImplementation((path, opts) => {
       if (path === '/api/workflows/wf1' && !opts) return Promise.resolve({ workflow: WORKFLOW })

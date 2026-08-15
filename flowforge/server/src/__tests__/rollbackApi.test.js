@@ -190,6 +190,29 @@ describe('rollback API', () => {
     expect(untouched.body.workflow.rollback_policy).toBe('failure')
   })
 
+  it('accepts a crash-recovery policy and refuses an unknown one', async () => {
+    // The sibling of rollback_policy: rollback decides what to undo when a run
+    // ends badly, recovery decides what to do when the worker running it stops
+    // existing. Both are per-workflow judgement calls rather than platform
+    // settings, so both are validated at the door.
+    const ok = await authed(request(app).put(`/api/workflows/${workflowId}`))
+      .send({ name: 'Saga', recovery_policy: 'manual' })
+    expect(ok.status).toBe(200)
+    expect(ok.body.workflow.recovery_policy).toBe('manual')
+
+    const bad = await authed(request(app).put(`/api/workflows/${workflowId}`))
+      .send({ name: 'Saga', recovery_policy: 'whenever' })
+    expect(bad.status).toBe(400)
+    expect(bad.body.error).toMatch(/recovery_policy/)
+
+    const untouched = await authed(request(app).put(`/api/workflows/${workflowId}`))
+      .send({ name: 'Saga' })
+    expect(untouched.body.workflow.recovery_policy).toBe('manual')
+
+    await authed(request(app).put(`/api/workflows/${workflowId}`))
+      .send({ name: 'Saga', recovery_policy: 'safe' })
+  })
+
   it('surfaces a disabled rollback in the Issues panel', async () => {
     await authed(request(app).put(`/api/workflows/${workflowId}`))
       .send({ name: 'Saga renamed', rollback_policy: 'off' })
