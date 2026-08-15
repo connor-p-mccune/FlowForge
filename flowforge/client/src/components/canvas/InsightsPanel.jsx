@@ -76,9 +76,68 @@ function SlaRow({ ok, children }) {
   )
 }
 
+// One detected step in the workflow's duration, with what changed alongside it.
+//
+// The trend above says "slower over time", which is where this panel used to
+// stop and where the actual question begins. A change point turns that into a
+// date, a size, the step that moved and the deploy that landed in the gap — and
+// the case worth designing for is the one with *no* deploy in the gap, because
+// "nothing you did caused this" is the finding that stops somebody re-reading
+// their own diff for an afternoon.
+function ChangePoint({ change, labelFor }) {
+  const worse = change.direction === 'worse'
+  const size = change.ratio
+    ? `${change.ratio.toFixed(1)}×`
+    : `${fmtMs(Math.abs(change.delta))}`
+  return (
+    <li className={`regression regression--${worse ? 'worse' : 'better'}`}>
+      <div className="regression__head">
+        <span className="regression__glyph" aria-hidden="true">{worse ? '↗' : '↘'}</span>
+        <span className="regression__shift">
+          {fmtMs(change.before.median)} → {fmtMs(change.after.median)}
+        </span>
+        <span className="regression__size">{size} {worse ? 'slower' : 'faster'}</span>
+      </div>
+      <div className="regression__when">
+        {new Date(change.at).toLocaleString()} · {change.before.runs} runs before,{' '}
+        {change.after.runs} after
+      </div>
+      {change.cause === 'external' ? (
+        <p className="regression__cause">
+          Nothing was deployed in this window — the cause is outside this workflow.
+        </p>
+      ) : (
+        change.deploys.map((deploy) => (
+          <p className="regression__cause" key={deploy.version}>
+            <strong>Version {deploy.version}</strong>
+            {deploy.createdBy ? ` by ${deploy.createdBy}` : ''}
+            {deploy.changed?.changedNodes?.length ? (
+              <>
+                {' — changed '}
+                {deploy.changed.changedNodes
+                  .map((n) => `${n.label} (${n.changes.join(', ')})`)
+                  .join(', ')}
+              </>
+            ) : null}
+          </p>
+        ))
+      )}
+      {change.cause === 'ambiguous' && (
+        <p className="regression__cause">More than one deploy landed in this window.</p>
+      )}
+      {change.steps.map((step) => (
+        <p className="regression__step" key={step.nodeId}>
+          {labelFor(step.nodeId)}: {fmtMs(step.before)} → {fmtMs(step.after)}
+        </p>
+      ))}
+    </li>
+  )
+}
+
 export default function InsightsPanel({ workflowId, open, onClose, nodes = [] }) {
   const [data, setData] = useState(null)
   const [forecast, setForecast] = useState(null)
+  const [regressions, setRegressions] = useState(null)
   const [error, setError] = useState(null)
 
   useEffect(() => {
@@ -87,6 +146,7 @@ export default function InsightsPanel({ workflowId, open, onClose, nodes = [] })
     setError(null)
     setData(null)
     setForecast(null)
+    setRegressions(null)
     apiFetch(`/api/workflows/${workflowId}/insights`)
       .then((d) => {
         if (!cancelled) setData(d)
@@ -102,6 +162,15 @@ export default function InsightsPanel({ workflowId, open, onClose, nodes = [] })
       })
       .catch(() => {
         /* forecast is best-effort in the panel */
+      })
+    // Same treatment: a workflow with too little history to segment must not
+    // stop the rest of the panel rendering, and vice versa.
+    apiFetch(`/api/workflows/${workflowId}/regressions`)
+      .then((r) => {
+        if (!cancelled) setRegressions(r)
+      })
+      .catch(() => {
+        /* change-point detection is best-effort in the panel */
       })
     return () => {
       cancelled = true
@@ -203,6 +272,17 @@ export default function InsightsPanel({ workflowId, open, onClose, nodes = [] })
                       success ≥ {fmtPct(data.sla.minSuccessRate)}
                     </SlaRow>
                   )}
+                </ul>
+              </>
+            )}
+
+            {regressions?.changePoints?.length > 0 && (
+              <>
+                <div className="insights__section">What changed, and when</div>
+                <ul className="insights__regressions">
+                  {regressions.changePoints.map((change) => (
+                    <ChangePoint key={change.at} change={change} labelFor={labelFor} />
+                  ))}
                 </ul>
               </>
             )}

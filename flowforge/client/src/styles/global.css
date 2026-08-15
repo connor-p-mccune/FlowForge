@@ -7830,6 +7830,78 @@ html, body, #root {
   margin-top: 10px;
 }
 
+/* ── Regression attribution ──────────────────────────────────────────────
+   The insights trend is a direction; this is a date, a size, and a cause. The
+   colour distinguishes a step for the worse from one for the better, and the
+   cause line is deliberately given the same weight as the numbers — "nothing
+   was deployed in this window" is the most useful sentence in the block. */
+.insights__regressions {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.regression {
+  padding: 8px 10px;
+  border-radius: 7px;
+  border-left: 3px solid #e2e8f0;
+  background: #f8fafc;
+  font-size: 12px;
+}
+
+.regression--worse {
+  border-left-color: #dc2626;
+  background: #fef2f2;
+}
+.regression--better {
+  border-left-color: #16a34a;
+  background: #f0fdf4;
+}
+
+.regression__head {
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+  flex-wrap: wrap;
+}
+
+.regression__glyph { font-weight: 700; }
+.regression--worse .regression__glyph { color: #dc2626; }
+.regression--better .regression__glyph { color: #16a34a; }
+
+.regression__shift {
+  font-weight: 600;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+.regression__size {
+  margin-left: auto;
+  font-size: 11px;
+  color: #64748b;
+}
+
+.regression__when {
+  margin-top: 2px;
+  font-size: 11px;
+  color: #94a3b8;
+}
+
+.regression__cause {
+  margin: 5px 0 0;
+  line-height: 1.45;
+  color: #334155;
+}
+
+.regression__step {
+  margin: 3px 0 0;
+  font-size: 11px;
+  color: #64748b;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
 /* ── Path feasibility ────────────────────────────────────────────────────
    A dead branch is drawn like an error because it is one — wired, typed,
    reachable in the graph, and unreachable by any input — while an undecided

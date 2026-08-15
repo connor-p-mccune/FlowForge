@@ -42,10 +42,49 @@ const FORECAST = {
   coverage: { nodesWithHistory: 2, workNodes: 2, ratio: 1 },
 }
 
-// Resolve insights and forecast to their own payloads; the panel fetches both.
-function mockByPath({ insights = BUNDLE, forecast = FORECAST } = {}) {
+const REGRESSIONS = {
+  workflowId: 'wf1',
+  ok: false,
+  analysed: true,
+  runs: 60,
+  changePoints: [
+    {
+      at: '2026-07-05T09:00:00.000Z',
+      previousAt: '2026-07-05T08:00:00.000Z',
+      direction: 'worse',
+      pValue: 0.0004,
+      before: { median: 210, runs: 30 },
+      after: { median: 970, runs: 30 },
+      delta: 760,
+      ratio: 4.62,
+      cause: 'deploy',
+      deploys: [
+        {
+          version: 7,
+          createdAt: '2026-07-05T08:20:00.000Z',
+          createdBy: 'Ada',
+          changed: {
+            changedNodes: [{ nodeId: 'http-1', label: 'Fetch orders', changes: ['config.url'] }],
+            addedNodes: [],
+            removedNodes: [],
+          },
+        },
+      ],
+      steps: [{ nodeId: 'http-1', nodeType: 'action-http', before: 90, after: 850, delta: 760 }],
+    },
+  ],
+}
+
+// Resolve insights, forecast, and regressions to their own payloads; the panel
+// fetches all three independently so one being unavailable hides only itself.
+function mockByPath({ insights = BUNDLE, forecast = FORECAST, regressions = REGRESSIONS } = {}) {
   apiFetch.mockImplementation((path) => {
     if (path.endsWith('/forecast')) return Promise.resolve(forecast)
+    if (path.endsWith('/regressions')) {
+      return regressions instanceof Error
+        ? Promise.reject(regressions)
+        : Promise.resolve(regressions)
+    }
     return Promise.resolve(insights)
   })
 }
@@ -142,6 +181,43 @@ describe('InsightsPanel', () => {
     apiFetch.mockResolvedValue({ ...BUNDLE, window: { ...BUNDLE.window, runs: 0 } })
     setup()
     expect(await screen.findByText(/No runs yet/i)).toBeInTheDocument()
+  })
+
+  it('names the step change and the deploy that landed with it', async () => {
+    mockByPath()
+    setup()
+    expect(await screen.findByText(/What changed, and when/i)).toBeInTheDocument()
+    expect(screen.getByText('210ms → 970ms')).toBeInTheDocument()
+    expect(screen.getByText(/4\.6× slower/)).toBeInTheDocument()
+    expect(screen.getByText(/Version 7/)).toBeInTheDocument()
+    expect(screen.getByText(/changed Fetch orders \(config\.url\)/)).toBeInTheDocument()
+    // The step that moved is resolved to its label, like the bottleneck row.
+    expect(screen.getByText(/Fetch orders: 90ms → 850ms/)).toBeInTheDocument()
+  })
+
+  it('says nothing was deployed when nothing was — the finding, not a blank', async () => {
+    mockByPath({
+      regressions: {
+        ...REGRESSIONS,
+        changePoints: [{ ...REGRESSIONS.changePoints[0], cause: 'external', deploys: [] }],
+      },
+    })
+    setup()
+    expect(await screen.findByText(/Nothing was deployed in this window/i)).toBeInTheDocument()
+  })
+
+  it('hides the section for a workflow with no detected change', async () => {
+    mockByPath({ regressions: { ...REGRESSIONS, analysed: true, changePoints: [] } })
+    setup()
+    await screen.findByText('93.1%')
+    expect(screen.queryByText(/What changed, and when/i)).not.toBeInTheDocument()
+  })
+
+  it('still renders the rest of the panel when change detection is unavailable', async () => {
+    mockByPath({ regressions: new Error('nope') })
+    setup()
+    expect(await screen.findByText('93.1%')).toBeInTheDocument()
+    expect(screen.queryByText(/What changed, and when/i)).not.toBeInTheDocument()
   })
 
   it('surfaces a fetch error', async () => {
