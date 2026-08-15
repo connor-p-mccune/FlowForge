@@ -22,6 +22,7 @@ const { describeLineage, analyzeLineage, traceProvenance, traceImpact } = requir
 const { verifyGuarantees, parseGuarantees } = require('../services/guarantees')
 const { analyzePaths } = require('../services/pathConstraints')
 const { analyzeRegressions } = require('../services/regressions')
+const { previewDeploy } = require('../services/backtest')
 const { parseDebugRequest, resumeBreak, listBreaks } = require('../services/debugger')
 const { mergeDocument, applyMerge } = require('../services/workflowMerge')
 const { recordAudit } = require('../services/auditLog')
@@ -690,6 +691,56 @@ router.post('/workflows/:id/diff', tokenAuth('read'), (req, res) => {
     const document = { nodes: graphData.nodes, edges: graphData.edges }
     const diff = diffGraphs(document, live)
     res.json({ workflowId: workflow.id, ...presentDiff(diff, document, live) })
+  } catch (err) {
+    console.error(err)
+    res.status(500).json({ error: 'Internal server error' })
+  }
+})
+
+// POST /api/v1/workflows/:id/preview — replay the last N real runs against a
+// candidate definition and report which of them would behave differently.
+//
+// `diff` says the definition changed; `lint`, `verify` and `paths` say the new
+// one is well-formed, still keeps its promises, and has no dead branches. None
+// of them says what the change *does*, which is the question a reviewer has and
+// the one a promotion pipeline can now answer before merging:
+//
+//   flowforge preview $WORKFLOW_ID workflows/sync.json --strict
+//
+// `read` scope, deliberately, even though it executes graphs: every replay is a
+// dry run against a definition the workflow does not hold — both of which the
+// engine refuses outside dry-run mode — and each replay's execution row is
+// deleted once its steps are read. Nothing survives the call, so nothing here
+// is a change to the workspace.
+router.post('/workflows/:id/preview', tokenAuth('read'), async (req, res) => {
+  try {
+    const workflow = getWorkflowForMember(req.params.id, req.user.id)
+    if (!workflow) return res.status(404).json({ error: 'Workflow not found' })
+
+    const graphData = req.body?.graph_data
+    if (!graphData || !Array.isArray(graphData.nodes) || !Array.isArray(graphData.edges)) {
+      return res.status(400).json({ error: 'graph_data must include nodes and edges arrays' })
+    }
+    if (Buffer.byteLength(JSON.stringify(graphData), 'utf8') > MAX_IMPORT_GRAPH_BYTES) {
+      return res.status(413).json({ error: 'Workflow graph is too large (max 500KB)' })
+    }
+    if (graphData.nodes.length === 0) {
+      return res.status(400).json({ error: 'Nothing to preview — the document has no nodes' })
+    }
+
+    const report = await previewDeploy(
+      workflow,
+      { nodes: graphData.nodes, edges: graphData.edges },
+      { runs: req.body?.runs }
+    )
+    res.json({
+      workflowId: workflow.id,
+      // The CI gate: no run behaves differently. False is not a failure on its
+      // own — most changes are meant to change something — which is why the
+      // CLI only fails the build on it under --strict.
+      ok: report.changed.length === 0,
+      ...report,
+    })
   } catch (err) {
     console.error(err)
     res.status(500).json({ error: 'Internal server error' })

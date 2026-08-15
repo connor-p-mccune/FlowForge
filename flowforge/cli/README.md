@@ -49,6 +49,7 @@ export FLOWFORGE_TOKEN=ffp_…
 | `flowforge merge <id> <file> [--yes] [--ours\|--theirs] [--base <v>]` | Three-way merge a file into the live workflow, per config field — keeps both sides' work instead of picking one to lose. Previews unless `--yes`; exits **2** on conflicts ([docs](../docs/MERGE.md)) |
 | `flowforge lint <id> [file] [--strict]` | Run the app's linter as a CI gate — over the live workflow, or over an exported file against its target workspace (real secret/variable names, sub-workflow targets); exits non-zero on errors, `--strict` fails warnings too |
 | `flowforge verify <id> [--facts] [--suggest]` | Check the workflow's declared path invariants over **every execution the graph admits**; exits non-zero on one that broke *or* one that can no longer be checked ([docs](../docs/GUARANTEES.md)) |
+| `flowforge preview <id> <file> [--runs N] [--strict]` | Replay recent runs against a candidate definition — **what would this change do?** Reports by default; `--strict` fails the build on any behaviour change ([docs](../docs/PREVIEW.md)) |
 | `flowforge paths <id> [--cover]` | Which branches an input can actually take, and the payload that takes each one; exits non-zero on a **dead branch** (`--cover` also on an untested live one) ([docs](../docs/PATHS.md)) |
 | `flowforge debug <id> --break <node>` | Run with breakpoints and report the **resolved** config each node was about to run with — templates substituted, secrets redacted. `--step` traces every node, `--stop` parks the run at the first one |
 | `flowforge types <id> [--node <id>] [--json]` | The workflow's inferred data schema — what each node produces and the exact `{{node.path}}` references it offers; exits non-zero on a type error ([docs](../docs/TYPES.md)) |
@@ -181,6 +182,44 @@ A dead branch always fails. `--cover` additionally fails when a *live* branch
 has no payload that can drive it in test mode — deliberately opt-in, because a
 workflow with an approval gate can never satisfy it: the rejected side is real
 and untestable in dry-run mode, which the output says rather than hides.
+
+## Review a promotion by what it does, not by what it says
+
+`diff` says the definition changed. `lint` says the new one will run, `verify`
+that it still keeps its promises, `paths` that every branch is live. None of
+them says what the change **does** — which is the question a reviewer has, and
+the one a pipeline can now answer before merging:
+
+```console
+$ flowforge preview 6f0c… workflows/sync.json
+3 of 20 replayed runs would behave differently.
+
+~ e57a…  2026-01-12T09:00:00.000Z
+    Large order? routes true → false
+    now runs: Standard shipping
+    no longer runs: Priority shipping
+…
+
+1 status change · 3 rerouted · 1 node newly running · 1 no longer running
+```
+
+Each replay is a dry run against a definition the workflow does not hold, with
+every node that reaches outside FlowForge settled from **that run's own
+recorded output** — so nothing fires, nothing is stored, and a routing
+difference is attributable to the change rather than to test mode simulating a
+response. The corollary is the scope: it answers what the graph does with the
+same data, not what a different API returns.
+
+Behaviour changing is the *expected* outcome of a deploy, so this reports and
+exits `0`. `--strict` is what turns it into a build failure, for the promotion
+that claims to be inert:
+
+```yaml
+- run: npx --prefix cli flowforge preview $WORKFLOW_ID workflows/sync.json --strict
+```
+
+A refactor, a rename, or a config-only edit all claim to change nothing
+observable. That is now a claim CI can check.
 
 ## See what a node was actually about to send
 

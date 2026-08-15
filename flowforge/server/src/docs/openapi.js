@@ -1475,6 +1475,105 @@ const spec = {
         },
       },
     },
+    '/workflows/{workflowId}/preview': {
+      post: {
+        tags: ['workflows'],
+        summary: 'What would this change have done to the runs we already had?',
+        description:
+          'Replays the last N real runs against a candidate definition and ' +
+          'reports which of them would behave differently — a different ' +
+          'branch, a different terminal status, a node that starts or stops ' +
+          'running.\n\n' +
+          'Every other deploy check is static: `lint` asks whether the graph ' +
+          'is well-formed, `verify` whether it still keeps its promises, ' +
+          '`paths` whether every branch is live, `diff` whether it changed at ' +
+          'all. This asks what the change *does*, which is the question a ' +
+          'reviewer has.\n\n' +
+          'During each replay every node whose work reaches outside FlowForge ' +
+          'is settled from **that run’s own recorded output**, so what ' +
+          'executes is the graph’s decision logic and a routing ' +
+          'difference is attributable to the edit rather than to test mode ' +
+          'simulating a response. The corollary is the scope: it answers what ' +
+          'the graph does with the same data, not what a different API ' +
+          'returns.\n\n' +
+          'Nothing survives the call — the replays are dry runs against a ' +
+          'definition the workflow does not hold, and their execution rows are ' +
+          'deleted once read — which is why `read` is enough. `ok` means no ' +
+          'run behaved differently; that is not a pass/fail on its own, since ' +
+          'most changes are meant to change something.',
+        operationId: 'previewWorkflowDeploy',
+        parameters: [{ $ref: '#/components/parameters/WorkflowId' }],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                required: ['graph_data'],
+                properties: {
+                  graph_data: {
+                    type: 'object',
+                    description: 'The candidate definition, as `export` produces it.',
+                    properties: {
+                      nodes: { type: 'array', items: { type: 'object' } },
+                      edges: { type: 'array', items: { type: 'object' } },
+                    },
+                  },
+                  runs: {
+                    type: 'integer',
+                    default: 20,
+                    maximum: 50,
+                    description: 'How many recent runs to replay.',
+                  },
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          200: {
+            description: 'Which runs would behave differently, and how.',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    workflowId: { type: 'string' },
+                    ok: { type: 'boolean', description: 'No replayed run behaved differently.' },
+                    analysed: {
+                      type: 'boolean',
+                      description: 'False when the workflow has no run history to replay.',
+                    },
+                    truncated: {
+                      type: 'boolean',
+                      description:
+                        'The preview ran out of time and saw fewer runs than asked for — ' +
+                        'the difference between "nothing changed" and "we did not finish looking".',
+                    },
+                    runs: { type: 'integer' },
+                    identical: { type: 'integer' },
+                    changed: { type: 'array', items: { type: 'object' } },
+                    summary: { type: 'object' },
+                  },
+                },
+              },
+            },
+          },
+          400: {
+            description: 'graph_data is missing, malformed, or has no nodes.',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } },
+          },
+          401: { $ref: '#/components/responses/Unauthorized' },
+          403: { $ref: '#/components/responses/Forbidden' },
+          404: { $ref: '#/components/responses/NotFound' },
+          413: {
+            description: 'The graph exceeds the 500KB cap.',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } },
+          },
+          429: { $ref: '#/components/responses/RateLimited' },
+        },
+      },
+    },
     '/workflows/{workflowId}/regressions': {
       get: {
         tags: ['workflows'],
