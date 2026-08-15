@@ -9,6 +9,7 @@ Companion references: [EXPRESSIONS.md](./EXPRESSIONS.md) (the expression
 language), [TYPES.md](./TYPES.md) (static types over the canvas),
 [POLICIES.md](./POLICIES.md) (policy as code), [LINEAGE.md](./LINEAGE.md) (data
 lineage and taint), [GUARANTEES.md](./GUARANTEES.md) (path invariants),
+[PATHS.md](./PATHS.md) (path feasibility and generated tests),
 [MERGE.md](./MERGE.md) (three-way merge),
 [RELEASES.md](./RELEASES.md) (progressive delivery),
 [ROLLBACK.md](./ROLLBACK.md) (compensating transactions),
@@ -28,6 +29,7 @@ public API).
 - [Policy as code](#policy-as-code)
 - [Static analysis (the linter)](#static-analysis-the-linter)
   - [Path invariants (workflow guarantees)](#path-invariants-workflow-guarantees)
+  - [Path feasibility (the branch nothing can reach)](#path-feasibility-the-branch-nothing-can-reach)
 - [Run cost accounting and budgets](#run-cost-accounting-and-budgets)
 - [The tamper-evident audit log](#the-tamper-evident-audit-log)
 - [Security architecture](#security-architecture)
@@ -1420,6 +1422,88 @@ that dropped them would ship the workflow without the assertions that were the
 reason it passed review.
 
 See [GUARANTEES.md](./GUARANTEES.md).
+
+### Path feasibility (the branch nothing can reach)
+
+`services/constraints.js` (the decision procedure) +
+`services/pathConstraints.js` (the translation) add a fifth lens, and it varies
+from the other four along the axis they share: all of them reason about the
+**graph**, and this one reasons about the **data**.
+
+The case that makes the difference concrete is a switch case sitting below a
+condition that already ruled it out. It is wired, it type-checks, the graph
+reaches it, dominance agrees it is on a path, no policy is violated — and no
+run has ever taken it, because the two conditions cannot both hold. The
+question that sees it is not about a place or a path but about an input:
+
+> is the conjunction of the branch conditions along a path satisfiable, and if
+> so, by what?
+
+That is a solver question, so there is a solver. The user-facing reference is
+[PATHS.md](./PATHS.md); the decisions:
+
+- **The fragment is chosen for its decision procedure, not its
+  expressiveness.** Difference logic over the numbers, because satisfiability
+  is negative-cycle detection in a constraint graph — Bellman-Ford — and the
+  shortest-path distances *are* a model, so one classical algorithm answers
+  both halves of what the caller needs. Finite domains over everything else.
+  Free propositions for anything outside both, which constrain nothing yet
+  still keep a validate gate's `valid` and `invalid` outcomes mutually
+  exclusive without the solver knowing what a JSON Schema is — the same
+  mechanism covering an approval, a callback, and a node's caught-failure
+  branch.
+
+- **The search is DPLL(T)-shaped rather than a CNF conversion.** Negation
+  normal form, then depth-first over the disjunctions with a theory check after
+  every literal. Checking eagerly is what makes the `default` outcome of a
+  sixteen-case switch — the conjunction of sixteen negations — tractable
+  instead of 2¹⁶ cubes; the first contradictory literal prunes the subtree
+  rather than every leaf under it being rejected separately.
+
+- **Every approximation is on the satisfiable side**, and that direction is the
+  whole safety argument. A spurious *sat* costs a missing finding; a spurious
+  *unsat* reports a live branch as dead and sends somebody to fix a correct
+  workflow. So a comparison outside the fragment, a variable used as two sorts,
+  and an exhausted budget all report `unknown`, a truncated report never claims
+  a branch is dead, and an undecided branch marks its subgraph `unknown` rather
+  than leaving it unvisited and reading as unreachable.
+
+- **Variable identity follows the engine's two reference styles, because they
+  genuinely differ.** `{{node.field}}` reads the whole run context and names
+  its producer exactly; a bare identifier in an expression reads the *merge*,
+  which is `Object.assign` over the node's **immediate predecessors** — a
+  condition emits `{ result }`, so `amount` is not in scope below one however
+  far upstream it was produced. The latter resolves through the inferred output
+  types, and a field several predecessors could have written gets a variable of
+  its own. Merging two variables that are actually different can manufacture a
+  contradiction; splitting one that is actually the same can only lose a
+  finding, so the rule is to split unless the graph proves otherwise. The one
+  exception is the trigger namespace, merged because the engine's `baseInput`
+  makes every trigger node emit the run's single payload.
+
+- **The solver returns a model, so the analysis returns a test.** A witness
+  turned back into a trigger payload is an input that provably drives a branch,
+  which is what makes generating a workflow's test suite possible at all —
+  `POST /workflows/:id/tests/generate` writes one scenario per drivable branch,
+  each asserting the branch it covers (`steps["route"].result == "refund"`), so
+  it fails the moment an edit re-routes it. Idempotent through a
+  `workflow_tests.generated_for` column, and it never touches a hand-written
+  scenario.
+
+- **What cannot be covered is named rather than omitted.** Scenarios run in
+  dry-run mode, where approvals auto-approve and callbacks report `received`,
+  so an approval's rejected side is a real branch no generated test can drive.
+  A witness likewise separates its payload from its *assumptions* — an upstream
+  response's `status`, say — and generation refuses the ones that rest on one,
+  because a scenario failing for a reason nobody wrote down is worse than a
+  missing scenario. The coverage figure means nothing without that list.
+
+- **A lint error, and deliberately not a deploy gate.** A dead branch is a
+  defect, but it is a defect that has by definition never affected a run, so
+  refusing a deploy over one would block a fix for an unrelated outage in order
+  to complain about code that cannot execute. [Policies](#policy-as-code) and
+  [guarantees](#path-invariants-workflow-guarantees) gate the deploy because
+  their findings are about what *will* run.
 
 ### Breakpoints
 

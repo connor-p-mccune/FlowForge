@@ -21,6 +21,7 @@ problem sounds familiar.
 | | The problem | Where |
 |---|---|---|
 | **Path invariants** | Every static check asks about a *place* — this node's config, this value's shape. None could answer *"can this ever charge a card without the approval having run?"*, which is about a **path**. Turns out the engine's activation rule makes that question identical to graph dominance, so it's a solved compiler problem. Violations report the counterexample path. | [GUARANTEES.md](./docs/GUARANTEES.md) |
+| **Reaching a branch** | Every check here reasons about the *graph*, so a switch case sitting under a condition that already ruled it out is wired, typed, reachable and dead — and nothing says so. Asking whether an input exists is a solver question: difference logic, finite domains, DPLL(T). The solver returns a *model*, so the answer is also the payload that drives the branch — which is how the test suite gets generated. | [PATHS.md](./docs/PATHS.md) |
 | **Collaborative editing** | Last-write-wins on `Date.now()` meant whose laptop was fast decided whose edit survived, edits collided per *element* so two people editing different fields of one node lost half the work, and a dropped connection diverged **permanently**. Now a CRDT — commutative and idempotent, tested by applying every permutation of an operation set and asserting one document. | [ARCHITECTURE.md](./docs/ARCHITECTURE.md#real-time-collaboration) |
 | **Breakpoints** | Every other debugging tool here is a *record*, and none helps with *"why is this node about to send **that**?"* So the run stops — after the config resolves, before the runner fires — and you can change what it runs with. A breakpoint lives on the **run**, never the workflow, so a schedule tick has nowhere to hit one. | [ARCHITECTURE.md](./docs/ARCHITECTURE.md#breakpoints) |
 | **A safe expression language** | Users need real logic in a config field. `eval` is not an option. Hand-written lexer → Pratt parser → tree-walking evaluator, statically type-checked against the shapes the graph proves it will have. | [EXPRESSIONS.md](./docs/EXPRESSIONS.md) |
@@ -445,6 +446,37 @@ status completed
   export/import so a promotion can't ship the workflow without the assertions
   that were the reason it passed review. `flowforge verify`, and on the public
   API. See [docs/GUARANTEES.md](./docs/GUARANTEES.md).
+- **Path feasibility & generated tests** — every static check above reasons
+  about the **graph**. So a switch case sitting under a condition that already
+  ruled it out is wired, type-checked, reachable, on a path dominance agrees
+  exists — and no run has ever taken it, because an order under 100 is not over
+  1000. Nothing sees it, because the question is not about a place or a path
+  but about an **input**: *is the conjunction of the branch conditions along
+  this path satisfiable, and if so, by what?* That is a solver question, so
+  there is a solver — **difference logic** over the numbers (satisfiability is
+  negative-cycle detection, so Bellman-Ford decides it *and* its shortest paths
+  are the answer), finite domains over everything else, and free propositions
+  for anything outside both, which constrain nothing yet still keep a schema
+  gate's `valid` and `invalid` outcomes mutually exclusive without the solver
+  knowing what a JSON Schema is. The search is **DPLL(T)-shaped** — theory
+  check after every literal, which is what keeps the `default` outcome of a
+  sixteen-case switch from being 2¹⁶ cubes. A dead branch is a lint error
+  carrying the **minimal unsatisfiable subset**, so it names the decision it
+  contradicts rather than leaving you to find it. And because a solver returns
+  a **model** rather than a yes, the same pass answers the question nobody had
+  a way to ask: *what input gets here?* Turned back into a trigger payload,
+  that model is a **test scenario** — so `POST /workflows/:id/tests/generate`
+  writes one per drivable branch, each asserting the branch it covers
+  (`steps["route"].result == "refund"`), which is what makes **branch coverage
+  of a workflow** a number that can exist. Every approximation is on the
+  satisfiable side, because a spurious "unreachable" would send somebody to fix
+  a correct graph: an undecidable comparison, a field two nodes could have
+  written, and a search that hit its bound all report *unknown*, and a
+  truncated report never calls anything dead. What it *can't* cover is named
+  rather than omitted — an approval's rejected side is real and untestable in
+  dry-run mode — because a coverage figure without that list is a lie. On the
+  canvas as 🧭 Paths, in `flowforge paths --cover`, and on the public API. See
+  [docs/PATHS.md](./docs/PATHS.md).
 - **Policy as code** — the linter asks "will this run?"; a policy asks **"is
   this allowed here?"**, which is a different question and the one that appears
   the moment more than one person builds workflows in the same place. A graph
@@ -1089,7 +1121,8 @@ flowforge/
 ├── ai-service/    Flask microservice for LLM-backed features
 ├── cli/           Zero-dependency terminal client for the public API
 ├── docs/          API reference, architecture deep dive, and one design record per hard part
-│                 (FXL, types, guarantees, lineage, policies, merge, releases, rollback, insights)
+│                 (FXL, types, guarantees, paths, lineage, policies, merge, releases,
+│                  rollback, insights)
 ├── docker-compose.yml
 ├── .env.example
 ├── .env.production.example
