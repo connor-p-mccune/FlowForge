@@ -40,6 +40,7 @@ import {
 import IssuesPanel from './IssuesPanel'
 import LineagePanel from './LineagePanel'
 import GuaranteesPanel from './GuaranteesPanel'
+import PathsPanel from './PathsPanel'
 import DebuggerPanel from './DebuggerPanel'
 import MergeModal from './MergeModal'
 import ExecutionPanel from '../execution/ExecutionPanel'
@@ -122,6 +123,7 @@ function CanvasInner({ workflowId }) {
   const [issuesOpen, setIssuesOpen] = useState(false)
   const [lineageOpen, setLineageOpen] = useState(false)
   const [guaranteesOpen, setGuaranteesOpen] = useState(false)
+  const [pathsOpen, setPathsOpen] = useState(false)
   // The pause this run is currently sitting at, or null. Driven by the
   // `debug` exec-update, which is why a collaborator watching the same run sees
   // it stop too — a breakpoint is a property of the run, so everybody in the
@@ -692,6 +694,7 @@ function CanvasInner({ workflowId }) {
   const handleToggleIssues = useCallback(() => setIssuesOpen((v) => !v), [])
   const handleToggleLineage = useCallback(() => setLineageOpen((v) => !v), [])
   const handleToggleGuarantees = useCallback(() => setGuaranteesOpen((v) => !v), [])
+  const handleTogglePaths = useCallback(() => setPathsOpen((v) => !v), [])
   const handleToggleDebugger = useCallback(() => setDebuggerOpen((v) => !v), [])
 
   // Clicking an issue selects the offending node (opening its config panel)
@@ -1141,6 +1144,8 @@ function CanvasInner({ workflowId }) {
         lineageOpen={lineageOpen}
         onToggleGuarantees={handleToggleGuarantees}
         guaranteesOpen={guaranteesOpen}
+        onTogglePaths={handleTogglePaths}
+        pathsOpen={pathsOpen}
         onToggleDebugger={handleToggleDebugger}
         debuggerOpen={debuggerOpen}
         onDeploy={handleDeploy}
@@ -1325,6 +1330,20 @@ function CanvasInner({ workflowId }) {
           edges={edges}
           onClose={() => setGuaranteesOpen(false)}
           onSelectNode={handleSelectIssueNode}
+        />
+      )}
+      {/* And the fourth, which is the only one that reasons about the *data*:
+          the linter's answer is about the nodes, lineage's about where values
+          come from, guarantees' about the paths the graph admits, and this
+          one's about which of those paths any input can actually take. */}
+      {pathsOpen && (
+        <PathsPanel
+          workflowId={workflowId}
+          nodes={nodes}
+          edges={edges}
+          onClose={() => setPathsOpen(false)}
+          onSelectNode={handleSelectIssueNode}
+          onToast={toast}
         />
       )}
       {/* A merge rewrites the live graph server-side, so the canvas reloads it

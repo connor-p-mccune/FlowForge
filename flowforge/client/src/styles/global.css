@@ -7814,6 +7814,97 @@ html, body, #root {
   margin-top: 10px;
 }
 
+/* ── Path feasibility ────────────────────────────────────────────────────
+   A dead branch is drawn like an error because it is one — wired, typed,
+   reachable in the graph, and unreachable by any input — while an undecided
+   one is drawn as undecided rather than as fine. The failure mode of the whole
+   analysis is a missing finding, so the panel has to look like that is what
+   happened instead of like a clean bill of health. Every verdict carries an
+   icon and a visually-hidden word beside its colour, for the same reason the
+   guarantees panel does. */
+.paths-panel .issues-panel__body {
+  font-size: 12px;
+}
+
+.path-group {
+  margin-top: 10px;
+}
+
+.path-group__label {
+  font-weight: 600;
+  font-size: 12px;
+}
+
+.path-branches {
+  list-style: none;
+  margin: 5px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.path-branch {
+  padding: 6px 9px;
+  border-radius: 7px;
+  border-left: 3px solid #e2e8f0;
+  background: #f8fafc;
+}
+
+.path-branch--live { border-left-color: #16a34a; }
+.path-branch--dead {
+  border-left-color: #dc2626;
+  background: #fef2f2;
+}
+.path-branch--unknown {
+  border-left-color: #d97706;
+  background: #fffbeb;
+}
+
+.path-branch__head {
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+}
+
+.path-branch__icon { font-weight: 700; }
+.path-branch--live .path-branch__icon { color: #16a34a; }
+.path-branch--dead .path-branch__icon { color: #dc2626; }
+.path-branch--unknown .path-branch__icon { color: #d97706; }
+
+.path-branch__outcome {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+}
+
+.path-branch__note {
+  margin: 3px 0 0;
+  color: #64748b;
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+/* The payload is the panel's most copy-worthy value, so it is set as code and
+   allowed to wrap rather than being truncated to fit. */
+.path-branch__payload {
+  margin: 4px 0 0;
+  padding: 4px 6px;
+  border-radius: 5px;
+  background: #eef2ff;
+  color: #3730a3;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.path-coverage {
+  margin: 0 0 8px;
+  color: #475569;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
 /* ── Debugger ────────────────────────────────────────────────────────────
    Two states, and they are the two halves of using a debugger: arming (which
    nodes stop the run) and stopped (what this node received, what it is about

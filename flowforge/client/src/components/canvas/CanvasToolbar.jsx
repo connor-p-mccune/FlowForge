@@ -29,6 +29,8 @@ export default function CanvasToolbar({
   lineageOpen,
   onToggleGuarantees,
   guaranteesOpen,
+  onTogglePaths,
+  pathsOpen,
   onToggleDebugger,
   debuggerOpen,
   issuesOpen,
@@ -182,6 +184,14 @@ export default function CanvasToolbar({
         aria-pressed={guaranteesOpen}
       >
         🛡 Guarantees
+      </button>
+      <button
+        className={`toolbar-btn toolbar-btn--issues${pathsOpen ? ' toolbar-btn--active' : ''}`}
+        title="Paths — which branches an input can actually take, and the payload that takes each one"
+        onClick={onTogglePaths}
+        aria-pressed={pathsOpen}
+      >
+        🧭 Paths
       </button>
       <button
         className={`toolbar-btn toolbar-btn--issues${debuggerOpen ? ' toolbar-btn--active' : ''}`}
