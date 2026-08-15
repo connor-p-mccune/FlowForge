@@ -11,6 +11,7 @@ const db = require('../config/database')
 const auth = require('../middleware/auth')
 const { summarizeDurations, classifyRuns, mannKendall, percentile } = require('../services/runStats')
 const { computeForecast } = require('../services/runForecast')
+const { analyzeRegressions } = require('../services/regressions')
 
 // How many recent completed runs' steps feed the forecast's per-node timing.
 const FORECAST_RUN_WINDOW = 200
@@ -296,6 +297,31 @@ router.get('/workflows/:id/insights', auth, (req, res) => {
     if (!workflow) return res.status(404).json({ error: 'Workflow not found' })
     const limit = parseLimit(req.query.limit)
     res.json({ workflowId: workflow.id, ...computeInsights(workflow.id, limit) })
+  } catch (err) {
+    console.error(err)
+    res.status(500).json({ error: 'Internal server error' })
+  }
+})
+
+// GET /api/workflows/:id/regressions?limit=N — when this workflow's duration
+// changed, and what changed with it.
+//
+// The insights panel's trend already says "degrading", which is true and
+// unactionable: it leaves whoever reads it the whole window to search. This
+// answers the question they actually have — *when*, by how much, which step
+// moved, and which deploy landed in the gap — from rows the product was keeping
+// anyway.
+//
+// Read-only and derived; it raises no alerts and writes nothing. `ok` is false
+// only when a change for the worse was detected, so a pipeline can key on it.
+router.get('/workflows/:id/regressions', auth, (req, res) => {
+  try {
+    const workflow = getVisibleWorkflow(req.params.id, req.user.id)
+    if (!workflow) return res.status(404).json({ error: 'Workflow not found' })
+    res.json({
+      workflowId: workflow.id,
+      ...analyzeRegressions(workflow.id, { limit: req.query.limit }),
+    })
   } catch (err) {
     console.error(err)
     res.status(500).json({ error: 'Internal server error' })

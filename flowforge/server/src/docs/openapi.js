@@ -1475,6 +1475,73 @@ const spec = {
         },
       },
     },
+    '/workflows/{workflowId}/regressions': {
+      get: {
+        tags: ['workflows'],
+        summary: 'When this workflow’s duration changed, and what changed with it',
+        description:
+          'The insights trend says *degrading*, which is true and leaves the ' +
+          'whole window to search. This answers the question behind it: **when** ' +
+          'the duration stepped, by how much, **which step** moved, and **which ' +
+          'deploy** landed in the gap.\n\n' +
+          'Detection is Pettitt’s test — the Mann-Whitney statistic evaluated at ' +
+          'every split point — under binary segmentation, so it is rank-based ' +
+          'like the trend and canary tests already here and makes no assumption ' +
+          'about a distribution that is always right-skewed. Attribution joins ' +
+          'each change against `workflow_versions`: exactly one deploy in the ' +
+          'window is a suspect and comes with its semantic diff, several are a ' +
+          'list, and **none is a finding of its own** — the cause is outside ' +
+          'this workflow.\n\n' +
+          'The CI shape is a release gate: `ok` is false only when a change *for ' +
+          'the worse* was detected, so a pipeline running it after a promotion ' +
+          'fails on the regression its own deploy caused, and the response names ' +
+          'the version. A history too short to analyse is `ok`. Requires `read`.',
+        operationId: 'getWorkflowRegressions',
+        parameters: [
+          { $ref: '#/components/parameters/WorkflowId' },
+          {
+            name: 'limit',
+            in: 'query',
+            schema: { type: 'integer', default: 300, maximum: 1000 },
+            description: 'How many recent completed runs to analyse.',
+          },
+        ],
+        responses: {
+          200: {
+            description: 'Detected change points, each with its cause.',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    workflowId: { type: 'string' },
+                    ok: {
+                      type: 'boolean',
+                      description: 'No change for the worse was detected.',
+                    },
+                    analysed: {
+                      type: 'boolean',
+                      description:
+                        'False when the history is too short for a rank test to ' +
+                        'mean anything — which is not the same as "nothing found".',
+                    },
+                    runs: { type: 'integer' },
+                    changePoints: {
+                      type: 'array',
+                      items: { $ref: '#/components/schemas/RegressionChangePoint' },
+                    },
+                  },
+                },
+              },
+            },
+          },
+          401: { $ref: '#/components/responses/Unauthorized' },
+          403: { $ref: '#/components/responses/Forbidden' },
+          404: { $ref: '#/components/responses/NotFound' },
+          429: { $ref: '#/components/responses/RateLimited' },
+        },
+      },
+    },
     '/workflows/{workflowId}/paths': {
       get: {
         tags: ['workflows'],
@@ -2721,6 +2788,62 @@ const spec = {
           statement: {
             type: 'string',
             example: 'Charge card never runs unless Approve ran first',
+          },
+        },
+      },
+      RegressionChangePoint: {
+        type: 'object',
+        description: 'One detected step in the workflow’s duration, with its cause.',
+        properties: {
+          at: {
+            type: 'string',
+            format: 'date-time',
+            description: 'The first run that behaved differently.',
+          },
+          previousAt: {
+            type: 'string',
+            format: 'date-time',
+            description:
+              'The last run that behaved as before. Together with `at` this is ' +
+              'the window a deploy has to fall inside to be a suspect.',
+          },
+          direction: { type: 'string', enum: ['worse', 'better'] },
+          pValue: { type: 'number' },
+          before: {
+            type: 'object',
+            properties: { median: { type: 'number' }, runs: { type: 'integer' } },
+          },
+          after: {
+            type: 'object',
+            properties: { median: { type: 'number' }, runs: { type: 'integer' } },
+          },
+          delta: { type: 'number', description: 'Median shift in milliseconds.' },
+          ratio: {
+            type: 'number',
+            nullable: true,
+            description: 'Null rather than infinite when the earlier median was zero.',
+          },
+          cause: {
+            type: 'string',
+            enum: ['deploy', 'ambiguous', 'external'],
+            description:
+              '`external` means nothing was deployed in the window — a finding ' +
+              'in its own right, and the one that stops somebody re-reading ' +
+              'their own diff.',
+          },
+          deploys: {
+            type: 'array',
+            description:
+              'Versions that landed in the window. A single suspect carries its ' +
+              'semantic diff; with several, the list is the answer.',
+            items: { type: 'object' },
+          },
+          steps: {
+            type: 'array',
+            description:
+              'Steps whose own timing moved at the same moment, largest ' +
+              'absolute shift first — so the finding names a node on the canvas.',
+            items: { type: 'object' },
           },
         },
       },

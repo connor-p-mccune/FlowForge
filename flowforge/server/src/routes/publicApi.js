@@ -21,6 +21,7 @@ const { rollbackExecution } = require('../services/executionEngine')
 const { describeLineage, analyzeLineage, traceProvenance, traceImpact } = require('../services/lineage')
 const { verifyGuarantees, parseGuarantees } = require('../services/guarantees')
 const { analyzePaths } = require('../services/pathConstraints')
+const { analyzeRegressions } = require('../services/regressions')
 const { parseDebugRequest, resumeBreak, listBreaks } = require('../services/debugger')
 const { mergeDocument, applyMerge } = require('../services/workflowMerge')
 const { recordAudit } = require('../services/auditLog')
@@ -486,6 +487,29 @@ router.get('/workflows/:id/insights', tokenAuth('read'), (req, res) => {
     if (!workflow) return res.status(404).json({ error: 'Workflow not found' })
     const limit = parseLimit(req.query.limit)
     res.json({ workflowId: workflow.id, ...computeInsights(workflow.id, limit) })
+  } catch (err) {
+    console.error(err)
+    res.status(500).json({ error: 'Internal server error' })
+  }
+})
+
+// GET /api/v1/workflows/:id/regressions — when this workflow's duration
+// changed, by how much, which step moved, and which deploy landed in the gap.
+//
+// The CI shape is a release gate rather than a health check: `ok` is false only
+// when a change *for the worse* was detected, so a pipeline that runs this
+// after promoting a version fails on a regression its own deploy caused — and
+// the response names the version, so the failure message is the answer rather
+// than the start of an investigation. A history too short to analyse is `ok`,
+// because failing every young workflow's build would get the check removed.
+router.get('/workflows/:id/regressions', tokenAuth('read'), (req, res) => {
+  try {
+    const workflow = getWorkflowForMember(req.params.id, req.user.id)
+    if (!workflow) return res.status(404).json({ error: 'Workflow not found' })
+    res.json({
+      workflowId: workflow.id,
+      ...analyzeRegressions(workflow.id, { limit: req.query.limit }),
+    })
   } catch (err) {
     console.error(err)
     res.status(500).json({ error: 'Internal server error' })
