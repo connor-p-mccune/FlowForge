@@ -677,6 +677,25 @@ status completed
   outage alerts once, not on every run. Available in the panel, via
   `flowforge insights`, and on the public API. See
   [docs/INSIGHTS.md](./docs/INSIGHTS.md).
+- **Regression attribution** — the trend above says *degrading*, which is true
+  and almost never actionable: a workflow that ran in 200ms for a month and
+  900ms since Tuesday is correctly called degrading, and you still have the
+  whole month to search. So FlowForge finds the **step** — **Pettitt's test**,
+  which is the Mann-Whitney statistic evaluated at every possible split point,
+  under **binary segmentation** for the second and third changes. Rank-based
+  like everything else here, because run durations are right-skewed and a test
+  built on means would be dragged around by exactly the retry tail this data
+  always has; the double sum is computed as `2·Σr − t(n+1)` over ranks, so one
+  sort answers every split point at once. Then it says **what changed with it**:
+  the deploys that landed between the last old-behaviour run and the first new
+  one (exactly one is a suspect and arrives with its semantic diff, several are
+  a list), and the step whose own timing moved at the same moment — so the
+  finding names a node on your canvas. **No deploy in the window is a finding,
+  not a blank**: the cause is outside this workflow, which is the sentence that
+  stops someone re-reading their own diff for an afternoon. In the insights
+  panel, and as a release gate — `flowforge regressions <id>` straight after a
+  promotion exits non-zero only on a change for the worse, so the build fails on
+  the regression its own deploy caused and the message names the version.
 - **SLO error budgets & burn-rate alerts** — a 99% objective *allows* 1% of
   runs to fail; that allowance is the whole reason for choosing 99% over 100%.
   So instead of paging on every dip, declare an objective and FlowForge tracks

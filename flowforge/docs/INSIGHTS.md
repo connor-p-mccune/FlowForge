@@ -12,6 +12,7 @@ panel, `flowforge insights` in the terminal, and
 - [SLA targets and the monitor](#sla-targets-and-the-monitor)
 - [Where the hook lives](#where-the-hook-lives-and-why)
 - [Forecasting the next run](#forecasting-the-next-run)
+- [When it changed, and what changed with it](#when-it-changed-and-what-changed-with-it)
 - [Surfaces](#surfaces)
 
 ---
@@ -208,6 +209,82 @@ make the run finish sooner.
 
 ---
 
+## When it changed, and what changed with it
+
+The trend above is correct and almost never actionable. A workflow that ran in
+200ms for a month and 900ms since Tuesday is reported as *degrading*, which is
+true, and leaves whoever reads it the whole month to search. The question behind
+it has two halves, and both are derivable from rows the product already keeps:
+
+> when did it change, and what else changed then?
+
+### Detection: Pettitt's test
+
+`services/changePoint.js`. Not a new tool so much as one already in this
+document pointed sideways — **Pettitt's test is the Mann-Whitney statistic
+evaluated at every possible split point**, with the largest taken as the
+candidate change:
+
+```
+U(t) = Σ_{i≤t} Σ_{j>t} sgn(xᵢ − xⱼ)
+K    = max_t |U(t)|                    the candidate change point
+p    ≈ 2 exp( −6K² / (n³ + n²) )
+```
+
+That keeps the whole statistics layer in one family. Run durations are
+right-skewed with a long retry tail — the reason the canary comparison is
+Mann-Whitney rather than a mean, and the reason the anomaly score is median and
+MAD rather than a classical z — so a change-point test built on means and
+variances would be dragged around by exactly the tail this data always has.
+
+Three implementation notes:
+
+- **The double sum is not computed.** `U(t) = 2·Σ_{i≤t} rᵢ − t(n+1)` over the
+  ranks, so one sort and one prefix pass give every split point at once.
+  Average ranks handle the ties that millisecond-rounded durations produce
+  constantly.
+- **Several changes come from binary segmentation** — accept the strongest, then
+  re-test each side of it. The classical procedure, no new statistic, and it
+  terminates on its own: a segment too short to split is one the test declines
+  to report.
+- **α is 0.01, not the 0.05 the canary tests use.** This runs over every
+  workflow's history rather than over a deliberate experiment, so the
+  multiple-comparisons pressure is far higher and a false positive costs
+  somebody an afternoon.
+
+Durations are rounded to the millisecond before ranking, for the reason [the
+canary analysis](./RELEASES.md) already documents: `julianday()`'s subtraction
+leaves sub-microsecond dust that varies with the absolute date, and a rank test
+handed that across a series which necessarily spans time reads it as exactly the
+systematic ordering being looked for.
+
+### Attribution: three joins, each able to decline
+
+`services/regressions.js`.
+
+| Join | Answers | Declines when |
+|---|---|---|
+| `workflow_versions` | which deploy landed between the last old-behaviour run and the first new one | several did — the list is the answer, and each diff would be noise |
+| the snapshot before it ([`graphDiff`](./MERGE.md)) | *what* that deploy changed | it is the first version; there is nothing to compare against |
+| `execution_steps`, re-detected per node | which step's own timing moved at the same moment | its change lands somewhere else entirely |
+
+**No deploy in the window is a finding, not a blank.** `cause: "external"` says
+the cause is outside this workflow — a dependency, a data volume, a noisy
+neighbour — and it is the answer that stops somebody re-reading their own diff.
+
+The result reads as a sentence somebody can act on:
+
+```
+Order sync got 4.6× slower on 12 Jan (210ms → 970ms over 84 runs).
+Version 7 was deployed 40 minutes earlier and changed Fetch orders' config.url.
+The step that moved is Fetch orders: 90ms → 850ms.
+```
+
+Nothing here is a monitor: it raises no alerts and writes nothing. It is a
+question asked about a workflow that already looks wrong.
+
+---
+
 ## Surfaces
 
 Everything reads the one `computeInsights`, so the panel, the CLI, and the public
@@ -226,6 +303,14 @@ API can't drift:
   [OpenAPI spec](./API.md#machine-readable-spec).
 - **Forecast** — the panel's *Forecast · next run* section, `flowforge forecast
   <id>`, and the public forecast endpoint all read one `computeForecast`.
+- **Regressions** — the panel's *What changed, and when* section,
+  `flowforge regressions <id>`, and `GET /api/v1/workflows/:id/regressions`.
+  The CLI form is a **release gate** rather than a health check: run it straight
+  after a promotion and it exits non-zero only on a change *for the worse*, so
+  the build fails on the regression its own deploy caused and the message names
+  the version. An improvement passes, and so does a history too short to
+  analyse — a check that fails every young workflow's build is a check somebody
+  removes.
 
 ## Comparing two runs
 
