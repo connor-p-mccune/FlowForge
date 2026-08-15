@@ -11,6 +11,7 @@ language), [TYPES.md](./TYPES.md) (static types over the canvas),
 lineage and taint), [GUARANTEES.md](./GUARANTEES.md) (path invariants),
 [PATHS.md](./PATHS.md) (path feasibility and generated tests),
 [DURABILITY.md](./DURABILITY.md) (leases and crash recovery),
+[PREVIEW.md](./PREVIEW.md) (replaying a change against past runs),
 [MERGE.md](./MERGE.md) (three-way merge),
 [RELEASES.md](./RELEASES.md) (progressive delivery),
 [ROLLBACK.md](./ROLLBACK.md) (compensating transactions),
@@ -1571,6 +1572,60 @@ That is a solver question, so there is a solver. The user-facing reference is
   to complain about code that cannot execute. [Policies](#policy-as-code) and
   [guarantees](#path-invariants-workflow-guarantees) gate the deploy because
   their findings are about what *will* run.
+
+### Deploy preview (replaying a change against past runs)
+
+`services/backtest.js`. Every gate on a deploy above is **static** — the linter
+on form, the type checker on shape, a policy on permission, a guarantee on the
+author's invariants, path feasibility on reachability. All five are worth having
+and none of them answers what the person about to press Deploy is actually
+asking: *what would this change have done to last week's traffic?* A canary
+answers it eventually, with real traffic and real consequences; this answers it
+beforehand against traffic that already happened, with none.
+
+The user-facing reference is [PREVIEW.md](./PREVIEW.md); the decisions:
+
+- **The replay is not a dry run of the candidate graph.** A plain dry run
+  answers an HTTP call with a "would send" preview, so a condition branching on
+  `status == 200` behaves differently for a reason that has nothing to do with
+  the edit — the comparison would report a difference for every run. Every node
+  whose work reaches outside FlowForge is therefore settled from **the original
+  run's own recorded output**, and what executes is exactly the graph's decision
+  logic. That is what makes a routing difference attributable to the change,
+  which is the only claim the feature makes.
+
+- **The scope is stated rather than hidden.** It answers what the graph does
+  with the same data, not what a different API returns: point an HTTP node at a
+  new URL and the preview keeps the old response, because nothing here can know
+  the new one. A preview that invented one would be worse than none, since its
+  findings would look exactly like the true ones.
+
+- **Two narrow engine options, both refused outside dry-run.** A graph to
+  execute that the workflow does not hold, and canned outputs for chosen nodes.
+  Making the guard structural rather than a rule is the same trade the node test
+  bench makes one node at a time — the unsafe state is unrepresentable rather
+  than forbidden.
+
+- **The replays leave no trace.** Each execution row is deleted once its steps
+  have been read, because a preview is a question and leaving fifty rows in run
+  history every time somebody asks one would make run history useless — the
+  opposite of what this exists for.
+
+- **Behaviour changing is not a failure.** Most changes are meant to change
+  something, so the gate reports and passes by default; `--strict` is for the
+  promotion that claims to be inert, which a refactor or a config-only edit
+  does. A gate that failed on every real change would be switched off in a week
+  — the same argument that keeps the type checker silent about what it cannot
+  prove.
+
+One implementation detail is recorded because a hang found it rather than
+reasoning. The scheduler inserts a launched task into `inFlight` *after* starting
+it, which is safe only because every runner is `async` and awaited: a task body
+that completed without yielding would delete its own entry before the entry
+existed and spin the round loop on a settled promise forever. The first
+stubbing implementation short-circuited the runner call and did exactly that, so
+a stub is now expressed as a synthetic `stub` fault and travels the same path
+every other node does.
 
 ### Breakpoints
 

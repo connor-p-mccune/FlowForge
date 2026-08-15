@@ -29,6 +29,7 @@ problem sounds familiar.
 | **Taint analysis** | Untrusted data deciding where a request goes is SSRF with a drag-and-drop interface. Precision is the whole design: taint stops at external boundaries, and a pinned host is not a finding — a checker nobody reads is worse than none. | [LINEAGE.md](./docs/LINEAGE.md) |
 | **Surviving the worker** | Every reliability control here bounds a *running* system; all of them assume the process lives. A `kill -9` leaves a row saying `running` forever, and the queue's redelivery would re-run the whole graph — re-charging the card. A lease renewed by a timer (not by progress, or an approval gate would look like a crash), fenced by a token, and a recovery that records an in-flight step as **indeterminate** rather than guessing which lie to tell. | [DURABILITY.md](./docs/DURABILITY.md) |
 | **Undoing side effects** | Every other control bounds *whether* something runs; none undoes what already ran. Compensations unwind in **reverse completion order** (the DAG doesn't know what finished first), and a step that did no work this run is never compensated. | [ROLLBACK.md](./docs/ROLLBACK.md) |
+| **Reviewing a change** | Every deploy gate here is static — well-formed, typed, permitted, invariant-preserving, reachable. None says what the change *does*. So replay last week's runs against the candidate graph, with every step that reaches outside settled from that run's own recording — a routing difference is then attributable to the edit rather than to test mode inventing a response. | [PREVIEW.md](./docs/PREVIEW.md) |
 | **Deciding a release** | A canary is a small sample, and a threshold on a small sample is a coin flip with a UI. Two-proportion z-test on failures, Mann-Whitney U on durations, Wilson intervals so "0 failures in 12" isn't reported as certainty. | [RELEASES.md](./docs/RELEASES.md) |
 | **Merging two graphs** | Drift detection tells you git and production diverged, then makes you pick a side to throw away. A two-way diff *can't* do better — telling "added here" from "deleted there" needs a common ancestor. So: a real three-way merge, per config field, that produces **no graph at all** on conflict. | [MERGE.md](./docs/MERGE.md) |
 | **Governance** | The linter asks "will this run?"; a policy asks "is this *allowed* here?". Rules are type-checked when saved, so one reading a misspelled field is refused rather than reporting every workflow compliant forever. | [POLICIES.md](./docs/POLICIES.md) |
@@ -534,6 +535,34 @@ status completed
   whether it sits on a **stale cross-workflow cycle** (A→B→A) — the kind that
   fails at run time with a circular-reference error, surfaced statically before
   it does.
+- **Deploy preview (replay a change against past runs)** — every gate above is
+  **static**: the linter says the graph is well-formed, the type checker that
+  the data lines up, a policy that it's permitted, a guarantee that the
+  invariants hold, path feasibility that every branch is live. Not one of them
+  answers the question somebody actually has with their cursor over Deploy —
+  *what would this change have done to last week's traffic?* A canary answers it
+  eventually, with real traffic and real consequences; this answers it
+  beforehand, against traffic that already happened, with none. It replays the
+  last N real runs' recorded trigger payloads against your **candidate** graph
+  and reports which of them would take a different branch, end in a different
+  status, or run a node they didn't. The load-bearing detail is what runs for
+  real during that replay: a plain dry run answers an HTTP call with a "would
+  send" preview, so a condition branching on `status == 200` would differ for a
+  reason that has nothing to do with your edit — so **every step that reaches
+  outside FlowForge is settled from that run's own recording**, and what
+  executes is exactly the graph's decision logic. That is what makes a
+  difference attributable to the change. The scope is stated rather than hidden:
+  it answers *what the graph does with the same data*, not what a different API
+  returns — repoint an HTTP node and the preview keeps the old response, because
+  a preview that invented one would be worse than none. Nothing fires and
+  nothing is kept (the replays are dry runs against a graph the workflow doesn't
+  hold — both refused outside dry-run mode — and their rows are deleted once
+  read), which is why the public endpoint needs only `read`. In the canvas as 🔮
+  Preview, and as `flowforge preview <id> <file>` — reporting by default,
+  because most changes are *meant* to change something, and `--strict` for the
+  promotion that claims to be inert, which is a claim a refactor or a
+  config-only edit makes and CI can now check. See
+  [docs/PREVIEW.md](./docs/PREVIEW.md).
 - **Progressive delivery (canary releases)** — every control in this list bounds
   a *deployed* workflow; none bounds the risk of the deploy itself. A deployed
   workflow runs its **live graph**, so editing the canvas of something in
@@ -1167,7 +1196,7 @@ flowforge/
 ├── cli/           Zero-dependency terminal client for the public API
 ├── docs/          API reference, architecture deep dive, and one design record per hard part
 │                 (FXL, types, guarantees, paths, lineage, policies, merge, releases,
-│                  rollback, durability, insights)
+│                  preview, rollback, durability, insights)
 ├── docker-compose.yml
 ├── .env.example
 ├── .env.production.example
