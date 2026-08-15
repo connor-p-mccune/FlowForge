@@ -7830,6 +7830,55 @@ html, body, #root {
   margin-top: 10px;
 }
 
+/* ── Deploy preview ──────────────────────────────────────────────────────
+   The headline carries the answer and the list carries the detail, so a
+   reviewer who reads one line has read the important one. Each differing run is
+   a small block rather than a table row: what changed about a run is two or
+   three sentences, and a column layout would truncate exactly the interesting
+   part. */
+.preview-panel .issues-panel__body {
+  font-size: 12px;
+}
+
+.preview__headline {
+  margin: 10px 0 4px;
+  font-weight: 600;
+  font-size: 13px;
+  color: #1e293b;
+}
+
+.preview-list {
+  list-style: none;
+  margin: 6px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.preview-run {
+  padding: 7px 9px;
+  border-radius: 7px;
+  border-left: 3px solid #f59e0b;
+  background: #fffbeb;
+}
+
+.preview-run__when {
+  font-size: 11px;
+  color: #92400e;
+  margin-bottom: 3px;
+}
+
+.preview-run__line {
+  margin: 2px 0 0;
+  line-height: 1.45;
+  color: #334155;
+}
+
+.preview-run__line--start { color: #15803d; }
+.preview-run__line--stop { color: #b91c1c; }
+.preview-run__line--bad { color: #b91c1c; }
+
 /* ── Regression attribution ──────────────────────────────────────────────
    The insights trend is a direction; this is a date, a size, and a cause. The
    colour distinguishes a step for the worse from one for the better, and the

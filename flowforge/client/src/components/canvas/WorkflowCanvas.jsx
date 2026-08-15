@@ -41,6 +41,7 @@ import IssuesPanel from './IssuesPanel'
 import LineagePanel from './LineagePanel'
 import GuaranteesPanel from './GuaranteesPanel'
 import PathsPanel from './PathsPanel'
+import PreviewPanel from './PreviewPanel'
 import DebuggerPanel from './DebuggerPanel'
 import MergeModal from './MergeModal'
 import ExecutionPanel from '../execution/ExecutionPanel'
@@ -124,6 +125,7 @@ function CanvasInner({ workflowId }) {
   const [lineageOpen, setLineageOpen] = useState(false)
   const [guaranteesOpen, setGuaranteesOpen] = useState(false)
   const [pathsOpen, setPathsOpen] = useState(false)
+  const [previewOpen, setPreviewOpen] = useState(false)
   // The pause this run is currently sitting at, or null. Driven by the
   // `debug` exec-update, which is why a collaborator watching the same run sees
   // it stop too — a breakpoint is a property of the run, so everybody in the
@@ -695,6 +697,7 @@ function CanvasInner({ workflowId }) {
   const handleToggleLineage = useCallback(() => setLineageOpen((v) => !v), [])
   const handleToggleGuarantees = useCallback(() => setGuaranteesOpen((v) => !v), [])
   const handleTogglePaths = useCallback(() => setPathsOpen((v) => !v), [])
+  const handleTogglePreview = useCallback(() => setPreviewOpen((v) => !v), [])
   const handleToggleDebugger = useCallback(() => setDebuggerOpen((v) => !v), [])
 
   // Clicking an issue selects the offending node (opening its config panel)
@@ -1146,6 +1149,8 @@ function CanvasInner({ workflowId }) {
         guaranteesOpen={guaranteesOpen}
         onTogglePaths={handleTogglePaths}
         pathsOpen={pathsOpen}
+        onTogglePreview={handleTogglePreview}
+        previewOpen={previewOpen}
         onToggleDebugger={handleToggleDebugger}
         debuggerOpen={debuggerOpen}
         onDeploy={handleDeploy}
@@ -1344,6 +1349,20 @@ function CanvasInner({ workflowId }) {
           onClose={() => setPathsOpen(false)}
           onSelectNode={handleSelectIssueNode}
           onToast={toast}
+        />
+      )}
+      {/* The fifth, and the only one that is not a pure function of the graph:
+          it replays real runs, which is why it has a button instead of a
+          debounce. Same side as the others — it answers "what is wrong with
+          this graph?" in the sharpest form there is, which is "here is what it
+          would have done differently". */}
+      {previewOpen && (
+        <PreviewPanel
+          workflowId={workflowId}
+          nodes={nodes}
+          edges={edges}
+          onClose={() => setPreviewOpen(false)}
+          onSelectNode={handleSelectIssueNode}
         />
       )}
       {/* A merge rewrites the live graph server-side, so the canvas reloads it

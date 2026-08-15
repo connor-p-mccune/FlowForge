@@ -31,6 +31,8 @@ export default function CanvasToolbar({
   guaranteesOpen,
   onTogglePaths,
   pathsOpen,
+  onTogglePreview,
+  previewOpen,
   onToggleDebugger,
   debuggerOpen,
   issuesOpen,
@@ -192,6 +194,14 @@ export default function CanvasToolbar({
         aria-pressed={pathsOpen}
       >
         🧭 Paths
+      </button>
+      <button
+        className={`toolbar-btn toolbar-btn--issues${previewOpen ? ' toolbar-btn--active' : ''}`}
+        title="Preview — replay recent runs against this canvas and see which would behave differently"
+        onClick={onTogglePreview}
+        aria-pressed={previewOpen}
+      >
+        🔮 Preview
       </button>
       <button
         className={`toolbar-btn toolbar-btn--issues${debuggerOpen ? ' toolbar-btn--active' : ''}`}
