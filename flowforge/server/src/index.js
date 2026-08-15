@@ -127,6 +127,12 @@ if (process.env.NODE_ENV !== 'test') {
   // back. Another sweep for the same reason as the two above — "enough runs
   // have accumulated to judge this" is the passage of time, not an event.
   require('./services/canaryMonitor').startCanaryMonitor()
+  // Runs whose worker stopped existing. A fourth sweep, and the one with the
+  // least choice about being one: nothing publishes "I have stopped existing",
+  // so a lapsed lease is only ever discovered by looking. It runs once at boot
+  // as well as on its interval, because the runs it exists for are precisely
+  // the ones a restart left behind.
+  require('./services/crashRecovery').startRecoverySweep()
 
   // Graceful shutdown (services/shutdown.js): on SIGTERM/SIGINT, drain in
   // dependency order instead of dying mid-run. Sources of new work stop first
@@ -152,6 +158,7 @@ if (process.env.NODE_ENV !== 'test') {
   onShutdown('heartbeat-monitor', () => require('./services/heartbeatMonitor').stopHeartbeatMonitor())
   onShutdown('maintenance-windows', () => require('./services/maintenanceWindow').stopMaintenanceWindows())
   onShutdown('canary-monitor', () => require('./services/canaryMonitor').stopCanaryMonitor())
+  onShutdown('crash-recovery', () => require('./services/crashRecovery').stopRecoverySweep())
   onShutdown('socket-io', () => new Promise((resolve) => io.close(() => resolve())))
   // After the sockets are closed, so no operation can land between the flush
   // and the exit, and before the database closes so the write can happen at

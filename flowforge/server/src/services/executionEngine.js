@@ -26,6 +26,7 @@ const stepCache = require('./stepCache')
 const tracing = require('./tracing')
 const canary = require('./canary')
 const debuggerService = require('./debugger')
+const executionLease = require('./executionLease')
 
 const runners = {
   'action-http': require('./nodeRunners/httpRequest'),
@@ -280,12 +281,63 @@ async function runWithRetries(node, config, input, isDryRun, ctx, fault) {
   }
 }
 
+// The lease wrapper (services/executionLease.js). Everything below assumes the
+// process survives the run; this is what happens when it does not, and it does
+// two jobs that are really the same job seen from either end.
+//
+// **A duplicate delivery becomes a no-op.** Bull re-delivers a job whose worker
+// stopped reporting progress, and running the body again would insert a fresh
+// step row per node and execute the whole graph a second time — re-sending the
+// email, re-charging the card. `acquire` only succeeds on a run that has not
+// started, so the second delivery returns instead. Restarting a run that is
+// half-done is never the right recovery; continuing it is, and that is what the
+// recovery sweep does with the persisted steps.
+//
+// **A worker that died stops being believed.** The lease is renewed by a timer
+// rather than by the scheduler, because a run parked on an approval gate makes
+// no progress for hours by design and must not look like a corpse; a dead
+// process runs no timers, which is the whole mechanism.
+//
+// Only top-level, non-dry runs are leased. A sub-workflow child executes inside
+// its parent's engine loop, so its parent's lease is the only one that means
+// anything, and a dry run is interactive — somebody is watching it, which is a
+// better liveness check than a column.
+async function runExecution(executionId, options = {}) {
+  const { dryRun = false, ancestorWorkflowIds = [] } = options
+  if (dryRun || ancestorWorkflowIds.length > 0) {
+    return runLeasedExecution(executionId, options, null)
+  }
+
+  const token = executionLease.acquire(executionId)
+  if (!token) {
+    const row = db.prepare('SELECT status FROM executions WHERE id = ?').get(executionId)
+    // A missing row is a caller error and keeps its familiar message; a row
+    // that has already started is a redelivery, and dropping it is the point.
+    if (!row) throw new Error(`Execution ${executionId} not found`)
+    if (row.status !== 'pending') {
+      console.warn(
+        `Execution ${executionId} is already ${row.status} — dropping duplicate delivery`
+      )
+    }
+    return {}
+  }
+
+  const stopRenewal = executionLease.startRenewal(executionId, token)
+  try {
+    return await runLeasedExecution(executionId, options, token)
+  } finally {
+    stopRenewal()
+    executionLease.release(executionId, token)
+  }
+}
+
 // dryRun (test mode): side-effecting node runners (email/Slack/HTTP) skip their
 // external call and instead return what they *would* have sent. Everything else
 // — conditions, transforms, AI nodes — runs for real, so test output is genuine.
-async function runExecution(
+async function runLeasedExecution(
   executionId,
-  { publish, payload, dryRun = false, ancestorWorkflowIds = [] } = {}
+  { publish, payload, dryRun = false, ancestorWorkflowIds = [] } = {},
+  leaseToken = null
 ) {
   const pub = publish || defaultPublish
 
@@ -452,9 +504,25 @@ async function runExecution(
     }
   }
 
-  const updateExecution = db.prepare(
+  // Every write that decides this run's outcome carries the fencing token when
+  // one was taken. A worker stalled long enough to lose its lease still holds
+  // all of its in-memory state and can wake up mid-write; the token is what
+  // stops it finalising a run another worker has already adopted. Kleppmann's
+  // argument, and the reason checking `held()` alone would not be enough — a
+  // check is only true until it isn't.
+  const updateExecutionRow = db.prepare(
     'UPDATE executions SET status = ?, started_at = COALESCE(started_at, ?), finished_at = ? WHERE id = ?'
   )
+  const updateExecutionFenced = db.prepare(
+    `UPDATE executions SET status = ?, started_at = COALESCE(started_at, ?), finished_at = ?
+      WHERE id = ? AND lease_token = ?`
+  )
+  const updateExecution = {
+    run: (status, startedAt, finishedAt, id) =>
+      leaseToken
+        ? updateExecutionFenced.run(status, startedAt, finishedAt, id, leaseToken)
+        : updateExecutionRow.run(status, startedAt, finishedAt, id),
+  }
 
   function publishExecution(status, error) {
     // dryRun rides along so clients (including collaborators who adopt a run they
@@ -713,6 +781,11 @@ async function runExecution(
   const cancelCheck = db.prepare('SELECT cancel_requested FROM executions WHERE id = ?')
   let cancelled = false
   const isCancelRequested = () => Boolean(cancelCheck.get(executionId)?.cancel_requested)
+
+  // Set when this worker's lease was taken while the run was in flight. It is
+  // the one terminal path that writes nothing at all: the run has an owner, and
+  // it is not this process.
+  let leaseLost = false
 
   // Breakpoints (services/debugger.js). Null on every run not started as a
   // debug session, which is every scheduled, webhook and API-triggered run —
@@ -981,6 +1054,15 @@ async function runExecution(
       cancelled = true
       break
     }
+    // Somebody else now owns this run — the recovery sweep decided this worker
+    // was gone and adopted it. Stop launching and write nothing terminal: the
+    // adopter's record is the true one. Cooperative and inter-node, exactly
+    // like cancellation, because tearing down a half-sent HTTP call is worse
+    // than letting it finish into a run nobody is watching.
+    if (leaseToken && !executionLease.held(executionId, leaseToken)) {
+      leaseLost = true
+      break
+    }
     scheduleRound()
     if (failure) break
     if (inFlight.size === 0) {
@@ -1046,6 +1128,16 @@ async function runExecution(
     } catch (err) {
       console.error(`Rollback failed for execution ${executionId}: ${err.message}`)
     }
+  }
+
+  // Lost the lease: another worker adopted this run and is (or already has
+  // been) recording its outcome. Persisting anything here would fight it, and
+  // rolling back would unwind side effects the adopter may be relying on.
+  // Every fenced write above would have been refused anyway; returning early
+  // makes that explicit rather than incidental.
+  if (leaseLost) {
+    console.warn(`Execution ${executionId} lost its lease mid-run — another worker owns it`)
+    return {}
   }
 
   if (failure) {

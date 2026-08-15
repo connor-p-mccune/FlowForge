@@ -93,8 +93,13 @@ function startWorker() {
       // Engine handles per-node failures itself; this catches setup errors
       // (execution/workflow missing, DB issues) so the run never hangs.
       console.error(`Execution ${executionId} crashed:`, err.message)
+      // Guarded on the run not having settled already. A setup error is the
+      // case this catches, but the same path is reached when the engine's own
+      // lease was taken mid-run — and overwriting the adopting worker's
+      // terminal status with this one's would undo the recovery.
       db.prepare(
-        "UPDATE executions SET status = 'failed', finished_at = ? WHERE id = ?"
+        `UPDATE executions SET status = 'failed', finished_at = ?
+          WHERE id = ? AND status IN ('pending', 'running')`
       ).run(new Date().toISOString(), executionId)
       notifyExecutionFailed(executionId)
       evaluateRunSla(executionId)

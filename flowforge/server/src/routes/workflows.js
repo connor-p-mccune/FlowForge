@@ -15,6 +15,7 @@ const { checkWorkflow, policyIssues } = require('../services/policyGate')
 const stepCache = require('../services/stepCache')
 const { isValidPriority } = require('../services/runPriority')
 const { ROLLBACK_POLICIES } = require('../services/compensation')
+const { POLICIES: RECOVERY_POLICIES } = require('../services/crashRecovery')
 const { describeLineage, analyzeLineage, traceProvenance, traceImpact } = require('../services/lineage')
 const { verifyGuarantees, parseGuarantees } = require('../services/guarantees')
 const { analyzePaths } = require('../services/pathConstraints')
@@ -397,6 +398,9 @@ function validateRollbackPolicy(body) {
   if ('rollback_policy' in body && !ROLLBACK_POLICIES.includes(body.rollback_policy)) {
     return `rollback_policy must be one of ${ROLLBACK_POLICIES.join(', ')}`
   }
+  if ('recovery_policy' in body && !RECOVERY_POLICIES.includes(body.recovery_policy)) {
+    return `recovery_policy must be one of ${RECOVERY_POLICIES.join(', ')}`
+  }
   return null
 }
 
@@ -490,6 +494,8 @@ router.put('/workflows/:id', auth, validate(workflowRule), (req, res) => {
       'default_priority' in req.body ? req.body.default_priority : workflow.default_priority
     const rollbackPolicyValue =
       'rollback_policy' in req.body ? req.body.rollback_policy : workflow.rollback_policy
+    const recoveryPolicyValue =
+      'recovery_policy' in req.body ? req.body.recovery_policy : workflow.recovery_policy
 
     const now = new Date().toISOString()
     db.prepare(
@@ -498,8 +504,9 @@ router.put('/workflows/:id', auth, validate(workflowRule), (req, res) => {
          maintenance_cron = ?, maintenance_duration_minutes = ?, maintenance_timezone = ?,
          sla_max_duration_ms = ?, sla_min_success_rate = ?, heartbeat_interval_minutes = ?, heartbeat_alerted_at = ?,
          slo_target = ?, slo_window_days = ?,
-         error_workflow_id = ?, default_priority = ?, rollback_policy = ?, updated_at = ? WHERE id = ?`
-    ).run(name, description ?? workflow.description, maxConcurrent, policy, rateMax, rateWindow, maintenanceCron, maintenanceDuration, maintenanceTimezone, slaMaxDuration, slaMinSuccess, heartbeatInterval, heartbeatAlertedAt, sloTarget, sloWindowDays, errorWorkflowId, defaultPriority, rollbackPolicyValue, now, req.params.id)
+         error_workflow_id = ?, default_priority = ?, rollback_policy = ?, recovery_policy = ?,
+         updated_at = ? WHERE id = ?`
+    ).run(name, description ?? workflow.description, maxConcurrent, policy, rateMax, rateWindow, maintenanceCron, maintenanceDuration, maintenanceTimezone, slaMaxDuration, slaMinSuccess, heartbeatInterval, heartbeatAlertedAt, sloTarget, sloWindowDays, errorWorkflowId, defaultPriority, rollbackPolicyValue, recoveryPolicyValue, now, req.params.id)
 
     // Clearing (or removing) the window while it still holds a maintenance
     // pause would strand the workflow paused — the sweep no longer sees it to

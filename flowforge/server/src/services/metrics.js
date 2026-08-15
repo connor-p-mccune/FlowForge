@@ -281,6 +281,19 @@ const rollbacksTotal = counter(
   ['outcome']
 )
 
+// Runs whose worker stopped existing (services/crashRecovery.js), by what was
+// done about them. Labelled by outcome rather than counted flat because the
+// three mean different things to whoever is on call: `resumed` is the platform
+// healing itself, `failed` is a run that needs a person precisely because a
+// step's effect is unknown, and `abandoned` is a workflow that went away
+// underneath its own run. A rising total with the label mix unchanged is an
+// infrastructure problem; a rising `failed` alone is a workflow problem.
+const executionsRecovered = counter(
+  'flowforge_executions_recovered_total',
+  'Runs whose lease lapsed and were recovered, by outcome.',
+  ['outcome']
+)
+
 const processUptime = gauge('process_uptime_seconds', 'Process uptime in seconds.')
 const processMemory = gauge(
   'process_resident_memory_bytes',
@@ -377,6 +390,11 @@ function recordRollback(outcome) {
   rollbacksTotal.inc({ outcome })
 }
 
+// Called by the crash-recovery sweep for each run whose lease lapsed.
+function recordExecutionRecovered(outcome) {
+  executionsRecovered.inc({ outcome })
+}
+
 module.exports = {
   counter,
   gauge,
@@ -397,6 +415,7 @@ module.exports = {
   recordFaultInjected,
   recordCompensation,
   recordRollback,
+  recordExecutionRecovered,
   queueJobs,
   webhookPending,
 }

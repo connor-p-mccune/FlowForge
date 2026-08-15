@@ -384,6 +384,50 @@ db.exec(`
 // arrived without its invariants would be the interesting half missing.
 ensureColumn('workflows', 'guarantees_json', 'TEXT')
 
+// Execution leases (services/executionLease.js): which worker believes it is
+// running this execution, a fencing token proving it still is, and when that
+// belief stops being credible. Everything else in the reliability story assumes
+// the process survives the run; these three columns are what makes "the worker
+// died" a state the system can observe instead of a row stuck on 'running'
+// forever.
+//
+// lease_token is regenerated on every acquisition and compared on every write
+// that decides the run's outcome, so a worker that stalled long enough to lose
+// its lease — and then came back holding all of its in-memory state — cannot
+// finalise a run another worker has already adopted. lease_attempts counts
+// pickups, which is what bounds a run that reliably kills its worker.
+ensureColumn('executions', 'lease_owner', 'TEXT')
+ensureColumn('executions', 'lease_token', 'TEXT')
+ensureColumn('executions', 'lease_expires_at', 'TEXT')
+ensureColumn('executions', 'lease_attempts', 'INTEGER')
+
+// Why this run was declared lost, and how many recoveries deep it is
+// (services/crashRecovery.js). NULL on the overwhelming majority of runs.
+// recovery_depth rides forward onto the run a recovery creates, so a workflow
+// that reliably kills its worker stops after a bounded number of attempts
+// rather than looping — the same shape as the error-handler loop guard.
+ensureColumn('executions', 'recovery_reason', 'TEXT')
+ensureColumn('executions', 'recovery_depth', 'INTEGER')
+
+// The sweep reads exactly this predicate — running, top-level, lease past due —
+// so an instance with a long execution history does not scan the table to find
+// the handful of rows that are lost.
+db.exec(`
+  CREATE INDEX IF NOT EXISTS idx_executions_lease
+    ON executions (status, lease_expires_at);
+`)
+
+// What a workflow wants done when a worker dies mid-run
+// (services/crashRecovery.js): 'safe' (default — resume automatically unless a
+// step whose outcome is genuinely unknown could have had a side effect),
+// 'resume' (always resume; for a graph whose steps are idempotent), or
+// 'manual' (never — record the loss and leave it to a person).
+//
+// A policy rather than a boolean for the same reason rollback_policy is one:
+// the honest answer differs per workflow. Re-running a possibly-sent charge is
+// unacceptable; re-running a possibly-refetched report is nothing.
+ensureColumn('workflows', 'recovery_policy', "TEXT NOT NULL DEFAULT 'safe'")
+
 // Which branch a generated test scenario was written to cover
 // (services/pathConstraints.js), as `<nodeId>:<outcome>`. NULL on every
 // hand-written scenario, which is the honest answer: a person's scenario
