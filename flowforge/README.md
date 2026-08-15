@@ -27,6 +27,7 @@ problem sounds familiar.
 | **A safe expression language** | Users need real logic in a config field. `eval` is not an option. Hand-written lexer → Pratt parser → tree-walking evaluator, statically type-checked against the shapes the graph proves it will have. | [EXPRESSIONS.md](./docs/EXPRESSIONS.md) |
 | **Types over a canvas** | A visual builder normally discovers its data doesn't line up by running. A real type lattice — unions, per-field optionality, structural join — mirrors the engine instead of approximating it, and `any` vs `unknown` are kept as *different facts*. | [TYPES.md](./docs/TYPES.md) |
 | **Taint analysis** | Untrusted data deciding where a request goes is SSRF with a drag-and-drop interface. Precision is the whole design: taint stops at external boundaries, and a pinned host is not a finding — a checker nobody reads is worse than none. | [LINEAGE.md](./docs/LINEAGE.md) |
+| **Surviving the worker** | Every reliability control here bounds a *running* system; all of them assume the process lives. A `kill -9` leaves a row saying `running` forever, and the queue's redelivery would re-run the whole graph — re-charging the card. A lease renewed by a timer (not by progress, or an approval gate would look like a crash), fenced by a token, and a recovery that records an in-flight step as **indeterminate** rather than guessing which lie to tell. | [DURABILITY.md](./docs/DURABILITY.md) |
 | **Undoing side effects** | Every other control bounds *whether* something runs; none undoes what already ran. Compensations unwind in **reverse completion order** (the DAG doesn't know what finished first), and a step that did no work this run is never compensated. | [ROLLBACK.md](./docs/ROLLBACK.md) |
 | **Deciding a release** | A canary is a small sample, and a threshold on a small sample is a coin flip with a UI. Two-proportion z-test on failures, Mann-Whitney U on durations, Wilson intervals so "0 failures in 12" isn't reported as certainty. | [RELEASES.md](./docs/RELEASES.md) |
 | **Merging two graphs** | Drift detection tells you git and production diverged, then makes you pick a side to throw away. A two-way diff *can't* do better — telling "added here" from "deleted there" needs a common ancestor. So: a real three-way merge, per config field, that produces **no graph at all** on conflict. | [MERGE.md](./docs/MERGE.md) |
@@ -824,6 +825,31 @@ status completed
   outbound webhook deliveries are all covered — per host, so one dead API
   can't fast-fail a healthy one. Trips and open circuits are visible on
   `/metrics`.
+- **Crash recovery (execution leases)** — every control above bounds what a
+  *running* system does, and every one of them assumes the process survives the
+  run. It doesn't always: an OOM kill or a node evicted mid-deploy leaves the
+  row saying `running` **forever** — the timeline never finishes, the badge
+  never flips, insights count it as neither success nor failure, and the only
+  cure is somebody noticing. Worse, the queue does its job and redelivers the
+  abandoned work, and re-running the engine on it would insert a fresh step per
+  node and execute the whole graph again — re-sending the email, re-charging the
+  card. So a run is **leased**: renewed by a timer rather than by progress
+  (a run parked on an approval gate makes none for hours *by design*, and a
+  dead process runs no timers, which is the whole mechanism), and fenced by a
+  **token** compared inside every write that decides the run's outcome — because
+  a worker stalled long enough to lose its lease can come back still holding all
+  of its in-memory state, and "check, then act" is only true until it isn't.
+  Acquisition requires the run **not to have started**, which is the one
+  condition that makes a duplicate delivery inert. When a lease lapses, the run
+  is **continued, not restarted** — through the same resume machinery, so a
+  recovered run and a hand-resumed one can't drift. The interesting part is the
+  step that was *in flight*: it is recorded **`indeterminate`**, because calling
+  it failed invites a retry that double-charges and calling it succeeded invites
+  a resume that skips work that never happened. Which way to resolve that is the
+  workflow's call, not the platform's (`safe` / `resume` / `manual`), the chain
+  is depth-bounded so a run that reliably kills its worker stops being retried,
+  and a worker that comes back and finishes properly still wins the race. See
+  [docs/DURABILITY.md](./docs/DURABILITY.md).
 - **Graceful shutdown** — on SIGTERM the process drains instead of dying
   mid-run: new work stops, in-flight runs settle, the readiness probe flips
   to `503 draining` so the orchestrator routes around it, and a hard deadline
@@ -1122,7 +1148,7 @@ flowforge/
 ├── cli/           Zero-dependency terminal client for the public API
 ├── docs/          API reference, architecture deep dive, and one design record per hard part
 │                 (FXL, types, guarantees, paths, lineage, policies, merge, releases,
-│                  rollback, insights)
+│                  rollback, durability, insights)
 ├── docker-compose.yml
 ├── .env.example
 ├── .env.production.example

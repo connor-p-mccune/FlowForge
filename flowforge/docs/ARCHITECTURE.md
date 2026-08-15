@@ -10,6 +10,7 @@ language), [TYPES.md](./TYPES.md) (static types over the canvas),
 [POLICIES.md](./POLICIES.md) (policy as code), [LINEAGE.md](./LINEAGE.md) (data
 lineage and taint), [GUARANTEES.md](./GUARANTEES.md) (path invariants),
 [PATHS.md](./PATHS.md) (path feasibility and generated tests),
+[DURABILITY.md](./DURABILITY.md) (leases and crash recovery),
 [MERGE.md](./MERGE.md) (three-way merge),
 [RELEASES.md](./RELEASES.md) (progressive delivery),
 [ROLLBACK.md](./ROLLBACK.md) (compensating transactions),
@@ -20,6 +21,7 @@ public API).
   - [Compensating transactions](#compensating-transactions)
 - [Real-time collaboration](#real-time-collaboration)
 - [Jobs and reliability](#jobs-and-reliability)
+  - [Surviving the worker](#surviving-the-worker)
 - [Schedule backfill](#schedule-backfill)
 - [Outbound webhooks](#outbound-webhooks)
 - [Run insights & SLA monitoring](#run-insights--sla-monitoring)
@@ -566,6 +568,71 @@ Replays re-run the workflow's **current** definition against the original
 run's persisted trigger payload (`trigger_data`) — matching how a redeploy
 affects future runs — and a replayed dry-run stays a dry-run, so re-running
 a test can never fire real side effects.
+
+### Surviving the worker
+
+Everything else in this section bounds what a *running* system does. Retries
+bound a flaky call, the circuit breaker bounds a dead host, compensations undo
+what a failed run already caused, graceful shutdown drains a planned stop. All
+of them assume the process survives the run, and when it does not — an OOM
+kill, a node evicted mid-deploy — the execution row says `running` forever: the
+timeline never finishes, the badge never flips, insights count the run as
+neither success nor failure, and the only cure is somebody noticing.
+
+`services/executionLease.js` and `services/crashRecovery.js` close that, plus a
+second failure hiding in the same place. Bull re-delivers a job whose worker
+stopped reporting progress — exactly what an at-least-once queue is supposed to
+do — and running the engine again on that job would insert a fresh step row per
+node and execute the whole graph a second time, re-sending the email and
+re-charging the card. The full treatment is
+[DURABILITY.md](./DURABILITY.md); the load-bearing decisions:
+
+- **The lease is renewed by a timer, not by the scheduler.** A run parked on an
+  approval gate makes no progress for hours by design, so renewal riding on a
+  node settling would make the most legitimate wait in the product look exactly
+  like a crash. A timer separates "this process is alive" from "this run is
+  advancing", which are different facts — and a dead process runs no timers,
+  which is the whole mechanism.
+
+- **It carries a fencing token, not just an owner.** A worker stalled long
+  enough to lose its lease can come back, still holding every in-memory
+  variable it had, so the token is compared *inside* every write that decides
+  the run's outcome. This is Kleppmann's argument, and the reason checking
+  first is not enough: a check is only true until it isn't. The engine
+  additionally reads its own token once per scheduling round and stops
+  launching when it no longer holds it — cooperative and inter-node, like
+  cancellation, because tearing down a half-sent HTTP call is worse than
+  letting it finish into a run nobody is watching.
+
+- **Acquisition requires the run not to have started**, which is the single
+  condition that makes a duplicate delivery inert whether the first worker is
+  alive (its lease is live) or dead (recovery owns that case). Restarting a
+  half-done graph is never the right recovery; continuing it is.
+
+- **`indeterminate` is a real step status, and refusing to resolve it is the
+  design.** A step that was `running` when the process died is not failed — the
+  request may well have been received — and not succeeded, because nobody
+  recorded a result. Recording it as `failed` invites a retry that
+  double-charges; recording it as `succeeded` invites a resume that skips work
+  that never happened. It is the one status the engine never writes during a
+  normal run.
+
+- **The continuation is resume-from-failure, unchanged.** Reusing it rather
+  than inventing a second mechanism is what stops a recovered run and a
+  hand-resumed one from drifting, including the freshness rule that reuse stops
+  at the first node which actually re-executes. An indeterminate step is not
+  succeeded, so it re-executes — right for a Transform and unacceptable for a
+  charge, which is why `workflows.recovery_policy` exists: the judgement is a
+  property of the workflow, not of the platform.
+
+- **The boundaries mirror decisions made elsewhere.** A run with no lease is
+  never recovered (a nested child is covered by its parent, and deciding a
+  six-hour wait-callback is a corpse would be worse than the bug); the lost run
+  is finalised rather than restarted, so history keeps both what was lost and
+  what was done about it; `recovery_depth` bounds the chain exactly as the
+  error-handler loop guard does; and the finalising UPDATE is guarded on the row
+  still being `running`, so a worker that came back and finished properly wins
+  the race.
 
 ### Per-workflow concurrency limits
 
