@@ -4,7 +4,7 @@
 // nothing, is `true`).
 
 const BOOLEAN_FLAGS = new Set([
-  'watch', 'help', 'version', 'json', 'strict', 'yes', 'step', 'stop', 'facts', 'suggest',
+  'watch', 'help', 'version', 'json', 'strict', 'yes', 'step', 'stop', 'facts', 'suggest', 'cover',
 ])
 
 // Flags that may appear more than once and collect their values into an array.

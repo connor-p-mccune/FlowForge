@@ -49,6 +49,7 @@ export FLOWFORGE_TOKEN=ffp_…
 | `flowforge merge <id> <file> [--yes] [--ours\|--theirs] [--base <v>]` | Three-way merge a file into the live workflow, per config field — keeps both sides' work instead of picking one to lose. Previews unless `--yes`; exits **2** on conflicts ([docs](../docs/MERGE.md)) |
 | `flowforge lint <id> [file] [--strict]` | Run the app's linter as a CI gate — over the live workflow, or over an exported file against its target workspace (real secret/variable names, sub-workflow targets); exits non-zero on errors, `--strict` fails warnings too |
 | `flowforge verify <id> [--facts] [--suggest]` | Check the workflow's declared path invariants over **every execution the graph admits**; exits non-zero on one that broke *or* one that can no longer be checked ([docs](../docs/GUARANTEES.md)) |
+| `flowforge paths <id> [--cover]` | Which branches an input can actually take, and the payload that takes each one; exits non-zero on a **dead branch** (`--cover` also on an untested live one) ([docs](../docs/PATHS.md)) |
 | `flowforge debug <id> --break <node>` | Run with breakpoints and report the **resolved** config each node was about to run with — templates substituted, secrets redacted. `--step` traces every node, `--stop` parks the run at the first one |
 | `flowforge types <id> [--node <id>] [--json]` | The workflow's inferred data schema — what each node produces and the exact `{{node.path}}` references it offers; exits non-zero on a type error ([docs](../docs/TYPES.md)) |
 | `flowforge release <id> [--promote] [--rollback] [--wait N]` | Canary release status — exits **0** promote, **1** roll back, **2** keep waiting, so a pipeline branches on the verdict without parsing a p-value ([docs](../docs/RELEASES.md)) |
@@ -140,6 +141,45 @@ failing — a green pipeline forever, guarding nothing.
 (which nodes every run executes, where the decisions are); `--suggest` lists
 the invariants that hold today and look deliberate, which is the shortest path
 from *no guarantees declared* to a useful set.
+
+## Gate on the branch nothing has ever run
+
+`lint` and `verify` both reason about the graph. `paths` reasons about the
+**data**, which is the only way to see a branch that is wired, typed, reachable
+in the graph, and dead:
+
+```console
+$ flowforge paths 6f0c…
+Route (switch)
+  ✓ refund  — drivable
+      trigger: {"kind":"refund"}
+  ✗ narrow
+      contradicts Route → wide
+  ✓ default  — drivable
+      trigger: {"kind":"v0"}
+
+2/3 branches reachable · 2 drivable from a trigger payload
+
+1 branch no input can take.
+```
+
+The second case sits behind a wider one that already matched everything it
+would have, so nothing has ever taken it and nothing ever will — and the
+finding names the case it lost to rather than leaving that to be worked out.
+
+The `trigger:` lines are the other half. Each one is a payload that provably
+drives its branch, which is what makes generating a scenario per branch
+possible at all (the canvas's 🧪 Tests panel writes them straight into the
+suite). `--cover` turns that into a build rule:
+
+```yaml
+- run: npx --prefix cli flowforge paths $WORKFLOW_ID --cover
+```
+
+A dead branch always fails. `--cover` additionally fails when a *live* branch
+has no payload that can drive it in test mode — deliberately opt-in, because a
+workflow with an approval gate can never satisfy it: the rejected side is real
+and untestable in dry-run mode, which the output says rather than hides.
 
 ## See what a node was actually about to send
 

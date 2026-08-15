@@ -22,6 +22,7 @@ const COMMANDS = {
   lint: require('../src/commands/lint'),
   debug: require('../src/commands/debug'),
   verify: require('../src/commands/verify'),
+  paths: require('../src/commands/paths'),
   types: require('../src/commands/types'),
   lineage: require('../src/commands/lineage'),
   release: require('../src/commands/release'),
@@ -60,6 +61,7 @@ Usage:
   flowforge merge <workflow-id> <file> [--yes]     Three-way merge a file into the live workflow (exits 2 on conflicts)
   flowforge lint <workflow-id> [file] [--strict]   Lint the live workflow — or an exported file against its workspace (exits non-zero on errors)
   flowforge verify <id> [--facts] [--suggest]      Check declared path invariants over every execution the graph admits (exits non-zero on a break)
+  flowforge paths <workflow-id> [--cover]          Which branches an input can take, and what payload takes them (exits non-zero on a dead branch)
   flowforge debug <id> --break <node> [--step]     Run with breakpoints and report what each node was about to do (--stop parks it)
   flowforge types <workflow-id> [--node <id>]      Inferred data schema per node — what each one produces (exits non-zero on a type error)
   flowforge lineage <id> [--node <id>] [--strict]  Where data comes from and where it leaves — provenance, impact, and taint
