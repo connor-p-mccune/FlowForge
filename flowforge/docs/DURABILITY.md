@@ -143,6 +143,55 @@ platform:
 | `resume` | always continue — for a graph whose steps are idempotent, which only its author can know |
 | `manual` | never; record the loss and let a person decide |
 
+### The escape hatch: a key the far side recognises
+
+`safe` as stated is blunt: it blocks on anything externally-effectful, which is
+the wrong answer for most endpoints workflows actually call. Stripe, Adyen,
+GitHub, Shopify and most payment and provisioning APIs deduplicate on an
+**`Idempotency-Key`**. A workflow whose charge node calls one of those never
+needed a person.
+
+FlowForge cannot make a third party idempotent. It can send the header the third
+party is waiting for, and an HTTP node that declares `idempotent` does
+(`services/stepIdempotency.js`). `safe` then blocks on an indeterminate step
+whose **repeat is unsafe**, rather than on anything that reaches outside — which
+is the distinction that actually matters.
+
+**What the key is derived from is the whole design.** It must be the same for
+every attempt at one logical step and different for a genuinely new request,
+which rules out every obvious candidate:
+
+| Candidate | Why not |
+|---|---|
+| the execution id alone | two HTTP nodes of one run collide |
+| … plus the attempt number | a retry becomes a new request — the one thing this prevents |
+| … plus a timestamp or random value | the same problem, more expensively |
+| … plus a digest of the resolved config | a retry after a rotated secret changes the key |
+
+What is left is `(logical run, node)`, and *logical* is the interesting half. A
+resume or a recovery creates a **new** execution row pointing back at the one it
+continues, so the key is derived from the **root** of that chain. A recovered run
+presents the key its predecessor did — the only way the far side can recognise
+the repeat. A fresh webhook delivery has itself as its root and gets a different
+key, because it *is* a different request.
+
+The value is a truncated SHA-256 rather than the ids themselves, for the reason
+the step cache hashes rather than stores: it is sent to a third party, and an
+internal execution id is not something to hand out.
+
+Three details follow shapes the engine already has. The declaration is read from
+the **raw** config, like `onError` and the cache policy, because whether a
+request is safe to repeat is a static fact about the endpoint rather than
+something a payload decides. The header is computed in the engine and handed to
+the runner through `ctx`, exactly as `traceparent` is — and an explicitly
+configured header always wins, for the same reason. And the linter guards the
+declaration in both directions: on a node that cannot send the header it is
+worse than untidy, because recovery *acts* on it; on a GET it is merely
+redundant.
+
+It is a claim FlowForge cannot verify, which is precisely why it is a per-node
+declaration and not an inference.
+
 ### Four things it deliberately does not do
 
 - **It does not recover an unleased run.** A `running` row with no lease is

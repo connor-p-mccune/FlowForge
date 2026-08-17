@@ -627,6 +627,20 @@ re-charging the card. The full treatment is
   charge, which is why `workflows.recovery_policy` exists: the judgement is a
   property of the workflow, not of the platform.
 
+- **Idempotency keys make that judgement precise rather than blunt**
+  (`services/stepIdempotency.js`). An HTTP node whose author declares the
+  endpoint deduplicates sends an `Idempotency-Key`, so `safe` blocks on a step
+  whose *repeat* is unsafe instead of on anything that reaches outside. The key
+  is derived from `(logical run, node)` and *logical* is the whole point: a
+  resume or a recovery points back at the run it continues, so the key comes from
+  the **root** of that chain and a recovered run presents the key its predecessor
+  did — the only way the far side can recognise the repeat. Not the attempt
+  number, not a timestamp, not a digest of the resolved config: each of those
+  makes a retry a *new* request, which is the one thing this prevents. Read from
+  the raw config like `onError`, handed to the runner through `ctx` like
+  `traceparent`, and hashed rather than sent raw because an internal execution id
+  is not something to hand a third party.
+
 - **The boundaries mirror decisions made elsewhere.** A run with no lease is
   never recovered (a nested child is covered by its parent, and deciding a
   six-hour wait-callback is a corpse would be worse than the bug); the lost run

@@ -36,8 +36,8 @@ problem sounds familiar.
 | **Promotion provenance** | `export → git → review → CI → import` passes a definition through four systems that can change it, and a `manage` token imports anything. So a document carries an Ed25519 signature — over the graph's *semantics*, not its bytes, because a signature that breaks when somebody drags a node is one people learn to skip. | [PROVENANCE.md](./docs/PROVENANCE.md) |
 | **Governance** | The linter asks "will this run?"; a policy asks "is this *allowed* here?". Rules are type-checked when saved, so one reading a misspelled field is refused rather than reporting every workflow compliant forever. | [POLICIES.md](./docs/POLICIES.md) |
 
-Everything above is covered by tests: **140 server suites (1915 tests)**, 61
-client files (539), 180 CLI tests, and 84 pytest tests for the AI service — lint
+Everything above is covered by tests: **141 server suites (1931 tests)**, 61
+client files (546), 180 CLI tests, and 84 pytest tests for the AI service — lint
 and all four run on every push.
 
 ---
@@ -960,6 +960,26 @@ status completed
   is depth-bounded so a run that reliably kills its worker stops being retried,
   and a worker that comes back and finishes properly still wins the race. See
   [docs/DURABILITY.md](./docs/DURABILITY.md).
+- **Step idempotency keys** — crash recovery above stops for a person when a
+  lost step *may* already have charged a card, which is right and is also the
+  wrong answer for most endpoints a workflow calls: Stripe, GitHub, Shopify and
+  most payment and provisioning APIs deduplicate on an `Idempotency-Key`.
+  FlowForge can't make a third party idempotent, but it can send the header one
+  is waiting for — so an HTTP node can declare it, and `safe` recovery then
+  blocks on a step whose **repeat** is unsafe rather than on anything that
+  reaches outside. The design is entirely in what the key is derived from: it
+  must be identical across every attempt at one logical step and different for a
+  genuinely new request, which rules out the execution id (two nodes collide),
+  the attempt number (a retry becomes a new request — the one thing this
+  prevents), a timestamp, and a digest of the resolved config (a rotated secret
+  would change it mid-retry). What's left is `(logical run, node)` — and
+  *logical* is the point: a resume or a recovery points back at the run it
+  continues, so the key comes from the **root** of that chain and a recovered run
+  presents the key its predecessor did. A fresh webhook delivery gets a different
+  one, because it *is* a different request. Hashed rather than sent raw, since an
+  internal execution id isn't something to hand a third party; read from the
+  **raw** config so upstream data can't switch it on; and the linter flags it on
+  a node that can't send the header, because recovery *acts* on the claim.
 - **Graceful shutdown** — on SIGTERM the process drains instead of dying
   mid-run: new work stops, in-flight runs settle, the readiness probe flips
   to `503 draining` so the orchestrator routes around it, and a hard deadline
