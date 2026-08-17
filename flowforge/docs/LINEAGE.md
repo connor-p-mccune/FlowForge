@@ -120,7 +120,7 @@ path **is** the credential.
 
 ## The findings
 
-Both are warnings, never errors, and both appear in the Issues panel,
+All three are warnings, never errors, and all appear in the Issues panel,
 `flowforge lint`, and `flowforge lineage`.
 
 ### `tainted-sink`
@@ -134,6 +134,46 @@ can recognise their own design in one read:
 
 A warning because it is frequently deliberate — a webhook that carries its own
 reply-to URL is a real and correct pattern.
+
+### `prompt-injection`
+
+The same shape as `tainted-sink` with a model in the middle. An AI node
+classifies a webhook body — text written by whoever holds the trigger URL — and
+text can read as instructions, so that party can steer the model. If the model's
+answer then decides where a request goes or which branch runs, they have steered
+the workflow.
+
+> **Fraud check**: this node's text is built from the webhook payload (written by
+> whoever holds the trigger URL), and it chooses which of this node's labels is
+> returned — and that decides which branch **Low risk?** takes. Via
+> `{{hook.body}}`.
+
+**The finding is a composition, and that is the whole point.** Untrusted data
+reaching a prompt is what an AI node *is for*; reporting that would fire on every
+one of them. So it is reported only when the answer *also* influences a
+high-sensitivity sink or a routing node. An answer that lands in a log line is a
+smaller problem and stays silent.
+
+Three narrowings keep it precise:
+
+- **Only `untrusted` counts, not `external`.** An HTTP response feeding a prompt
+  is a third party's text, not an adversary's *choice* of text. Counting it would
+  mark most graphs that use AI at all.
+- **The message names what an injection can reach**, because the three cases are
+  different exposures: free text from an `ai-prompt`, one of the **declared
+  labels** from `ai-classify` (the AI service refuses anything else), the
+  extracted values from `ai-extract`.
+- **A routing node counts through graph successors as well as reads.** A
+  condition in expression mode reads `label` off its merged input and names no
+  `{{…}}` reference, so the read graph is blind to that edge. Bounded to
+  *immediate* successors, because the engine merges only immediate predecessors —
+  anything further away had to reference the value, which the read closure
+  already covers.
+
+The corresponding containments live at the boundary rather than here — a per-call
+random fence around untrusted text, and a classification confined to the declared
+labels — so every AI node gets them without its author opting in. See
+[SECURITY.md](../SECURITY.md) (T19).
 
 ### `unread-output`
 

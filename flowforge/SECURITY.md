@@ -35,6 +35,8 @@ Bull worker. The notable trust boundaries and the threats against them:
 | T16 | **Compensations as an attack surface** | Compensating actions fire *automatically* when a run fails, are irreversible (refunds, deletions), and run outside the DAG — so a graph edit that adds one is a way to make a side effect happen by simply breaking a workflow. The mirror risk is a compensation firing against work it does not own. | **Mitigated** — a compensation runs only for a step that **succeeded in this run**, which excludes `cached`/`reused` steps whose effects belong to an earlier execution (enforced by the same column that records completion order, so the rule cannot drift from the data). Its config is templated from the run's *persisted, redacted* outputs, so a secret an API echoed back cannot reach it. The manual endpoint requires a non-viewer with the `trigger` scope, refuses a run that is not settled, never re-runs a compensation that already succeeded, and is written to the tamper-evident audit log (`execution.rolled_back`). `rollback_policy: "off"` is an operator kill switch, and a partial unwind is announced in the workspace feed rather than left silent. |
 | T17 | **Caller-controlled request destinations (SSRF by graph)** | T7 blocks private/reserved IPs at egress, but a workflow whose HTTP URL, email recipient, Slack webhook or sub-workflow target is built from `{{trigger.*}}` lets whoever POSTs the webhook choose where the server sends data — invisible on a canvas. | **Mitigated (detective)** — `services/lineage.js` traces every value to its origin and reports untrusted data reaching a high-sensitivity sink as a lint finding, in the Issues panel, `flowforge lint`, and `flowforge lineage --strict` as a CI gate. Detection, not prevention: the egress guard (T7) is the control, and a [workspace policy](docs/POLICIES.md) over approved hosts is what *refuses* the deploy. Deliberately precise — a pinned authority (`https://api.acme.com/{{trigger.id}}`) is not reported, because a check that fires on correct code is one people turn off. |
 | T18 | **Merge as a definition-tampering vector** | `POST /api/v1/workflows/:id/merge` rewrites a workflow definition from outside the app, and a merge that silently resolved conflicts could slip a change past code review. | **Mitigated** — requires the `manage` scope *and* a non-viewer role; previews unless `apply` is set; a conflicted merge writes **nothing at all**, so a change can never be silently chosen; taking a side (`ours`/`theirs`) is explicit per request; the merged graph is linted before it lands; and every applied merge is appended to the audit log (`workflow.merged`) with its base version, strategy and summary. Merging updates the canvas only — going live still requires a deploy, which is where the policy gate runs. |
+| T19 | **Prompt injection — the model as a confused deputy** | An AI node classifies or extracts from data an outsider wrote (a webhook body). Text in that data can read as instructions, so whoever POSTs the webhook can steer the model — and if the answer decides where a request goes or which branch runs, they have steered the workflow. | **Mitigated (detective + containment)** — `services/lineage.js` reports the *composition* that is actually dangerous: an untrusted origin reaching a prompt **and** the answer influencing a high-sensitivity sink or a routing node. Untrusted data in a prompt alone is not reported, because that is what an AI node is for. At the boundary, the AI service applies two containments to every AI node: untrusted text is fenced with a **per-call random delimiter** and declared to be data (a fixed `"""` fence is one a payload can close), and a classification resolves to one of the **declared labels or fails** — so an injection is confined to a choice the author already enumerated instead of emitting a value no condition was written for. Extraction is projected onto the declared fields for the same reason. Not prevention: an injection can still pick a different declared label, which is why the finding exists too. |
+| T20 | **Definition tampering between review and import** | The promotion path is `export → git → review → CI → import`. A `manage` token can import **any** document, so a leaked token — or a commit pushed to the release branch after approval — lands a definition nobody reviewed. | **Mitigated** — a document may carry a detached **Ed25519 signature** over the graph's *semantics* (`services/artifactSigning.js`), and a workspace keeps the keys it trusts (`services/trustStore.js`, owner-only, revoked rather than deleted). An import records its verdict, the signing key's fingerprint and the graph's digest in the tamper-evident audit log. A signature that fails to verify is refused **regardless of configuration** — enforcement governs only whether *unsigned* imports are accepted. Signing is offline (`flowforge keygen` / `flowforge sign`) so a signing key never touches a server. Residual: a signature is transferable — it proves who approved a definition, not that they intended this import; the import still lands a draft, so deploying remains a separate act. |
 
 ---
 
@@ -476,6 +478,104 @@ It also reports **secret reach** (which nodes can read each secret), which turns
 
 Tested in `server/src/__tests__/lineage.test.js`; see
 [docs/LINEAGE.md](docs/LINEAGE.md).
+
+---
+
+### Prompt injection — the model as a confused deputy (T19)
+
+An AI node in a real workflow classifies a webhook body: text written by whoever
+holds the trigger URL. Text can read as instructions, so that party can steer the
+model — and if the model's answer decides where a request goes or which branch
+runs, they have steered the workflow. It is T17's shape with the model in the
+middle.
+
+**The finding is a composition, not a sink.** Untrusted data reaching a prompt is
+what an AI node *is for*, and reporting it would fire on every one of them. So
+`lineage.js` reports it only when the answer also influences a high-sensitivity
+sink or a routing node — the same precision argument T17 rests on, applied one
+step further along.
+
+Three narrowings do the work:
+
+- Only `untrusted` origins count. An HTTP response feeding a prompt is a third
+  party's text, not an adversary's *choice* of text.
+- The message names what an injection can actually reach, because the three cases
+  differ: free text from a prompt node, one of the **declared labels** from a
+  classifier, the extracted values from an extract node.
+- A routing node counts through graph successors as well as `{{…}}` reads: a
+  condition in expression mode reads `label` off its merged input and names
+  nothing, so the read graph cannot see that edge. Bounded to *immediate*
+  successors, because the engine merges only immediate predecessors.
+
+**Containment at the boundary** (`ai-service/services/nodes.py`) applies to every
+AI node without its author opting in:
+
+| | |
+|---|---|
+| **Spotlighting** | untrusted text is fenced with a delimiter that is *random per call* and declared to be data whose apparent instructions must never be followed. The previous `"""` fence is one an injected payload can simply close; an unguessable one cannot be closed by text that cannot predict it. Per call rather than per process, so text that learned one fence cannot close another. |
+| **A bounded answer** | classification resolves to one of the declared labels **or fails**. It previously fell through to the raw model text, so an injection could emit a value no condition was written for — and `label != "high_risk"` would read as safe. One bounded repair first (an unbounded repair loop is an unbounded bill), then a failure, which the node's own on-error policy can route. |
+| **A bounded shape** | extraction is projected onto the declared fields, so the type the server infers for an extract node is a fact rather than a hope, and an invented key is not smuggled into the graph. |
+
+Deliberately **not** presented as prevention: an injection can still choose a
+*different declared label*, which is exactly why the finding exists as well.
+Label matching is whole-word — substring containment would resolve the answer
+"APPROVED" against a label set of `['a','b']`, and the bound would have bounded
+nothing.
+
+Tested in `ai-service/tests/test_nodes.py` (the prompt string *is* the
+mitigation, so the tests assert on it) and
+`server/src/__tests__/lineage.test.js`.
+
+---
+
+### Signed workflow artifacts — provenance for promotions (T20)
+
+Every other control here protects a definition that is already inside FlowForge.
+This one is about the gap on the way in: `export → git → review → CI → import`
+passes the document through a repository, a runner, an artifact store and an HTTP
+call, and a `manage` token can import any document at all.
+
+A document may carry a detached **Ed25519** signature; a workspace keeps the
+public keys it trusts. What the signature covers is the design decision — the
+graph's **semantics**, canonicalised with the rules the semantic diff uses
+(positions excluded, config keys sorted, edges keyed by
+`(source, target, sourceHandle)`, declared guarantees included) — so a re-export
+after somebody tidies the canvas still verifies while any change to behaviour
+does not.
+
+The admission rule keeps the important line sharp:
+
+```
+trusted     always allowed
+unsigned    allowed unless the workspace requires signatures
+untrusted   refused, always
+invalid     refused, always
+```
+
+Enforcement governs only the **unsigned** case. There is no configuration under
+which the right response to a broken signature is to import it anyway, and
+conflating the two is what makes signing decorative.
+
+The trust store is owner-only (a list any member could append to is a
+formality), keys are parsed before they are stored, and revocation keeps the row
+— the question after an incident is what a key signed *while* it was trusted.
+Every change is audited by **fingerprint, never key material**, and every import
+records its verdict, the signing fingerprint and the digest of the graph that
+landed.
+
+Signing is **offline**: `flowforge keygen` and `flowforge sign` talk to no
+server, because a key that has been near one is a key somebody has to reason
+about, and an approval minted by the server it is presented to proves nothing.
+
+**Residual, stated rather than glossed:** a signature is transferable. It proves
+who approved a definition, not that they intended *this* import at *this* moment
+into *this* workspace — the same limit the audit log's hash chain has. The
+import still lands a draft, so deploying remains a separate act, and
+`flowforge diff` still answers whether what is running is what git says.
+
+Tested in `server/src/__tests__/artifactSigning.test.js`,
+`trustStore.test.js`, and `cli/test/signing.test.js`; see
+[docs/PROVENANCE.md](docs/PROVENANCE.md).
 
 ---
 

@@ -1408,6 +1408,24 @@ a finding that fires everywhere is worse than no finding:
   *references* is still being used. Only a node with no outgoing edge and no
   reader provably computed something for nobody.
 
+A fourth decision arrived with the AI nodes, and it is the same argument one step
+further along. Untrusted data reaching an LLM prompt is **not** a finding — it is
+what an AI node in a workflow is *for*, and reporting it would fire on every one
+of them. What is reported is the composition: an outsider writes the instructions
+*and* the model's answer influences a high-sensitivity sink or a routing node.
+That is the confused-deputy shape, and it is the only version of the question
+that names a real problem rather than a design. Only `untrusted` origins count
+(an HTTP response feeding a prompt is a third party's text, not an adversary's
+choice of text), and a routing node counts through graph successors as well as
+`{{…}}` reads — a condition in expression mode reads `label` off its merged input
+and names nothing, so the read graph cannot see that edge. Bounded to *immediate*
+successors, because that is exactly how far the engine's merge carries a value.
+
+The containments that bound it live at the boundary rather than in the analysis —
+a per-call random fence around untrusted text, and a classification confined to
+the labels the author declared — so every AI node gets them without opting in.
+See [SECURITY.md](../SECURITY.md) T19.
+
 Impact analysis deliberately **does** cross the boundary taint stops at, and the
 asymmetry is the point: taint asks who controls a value's content, impact asks
 what a value participates in deciding. Changing a webhook field doesn't make the
