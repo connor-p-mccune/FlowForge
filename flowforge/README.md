@@ -32,6 +32,7 @@ problem sounds familiar.
 | **Reviewing a change** | Every deploy gate here is static — well-formed, typed, permitted, invariant-preserving, reachable. None says what the change *does*. So replay last week's runs against the candidate graph, with every step that reaches outside settled from that run's own recording — a routing difference is then attributable to the edit rather than to test mode inventing a response. | [PREVIEW.md](./docs/PREVIEW.md) |
 | **Deciding a release** | A canary is a small sample, and a threshold on a small sample is a coin flip with a UI. Two-proportion z-test on failures, Mann-Whitney U on durations, Wilson intervals so "0 failures in 12" isn't reported as certainty. | [RELEASES.md](./docs/RELEASES.md) |
 | **Merging two graphs** | Drift detection tells you git and production diverged, then makes you pick a side to throw away. A two-way diff *can't* do better — telling "added here" from "deleted there" needs a common ancestor. So: a real three-way merge, per config field, that produces **no graph at all** on conflict. | [MERGE.md](./docs/MERGE.md) |
+| **Promotion provenance** | `export → git → review → CI → import` passes a definition through four systems that can change it, and a `manage` token imports anything. So a document carries an Ed25519 signature — over the graph's *semantics*, not its bytes, because a signature that breaks when somebody drags a node is one people learn to skip. | [PROVENANCE.md](./docs/PROVENANCE.md) |
 | **Governance** | The linter asks "will this run?"; a policy asks "is this *allowed* here?". Rules are type-checked when saved, so one reading a misspelled field is refused rather than reporting every workflow compliant forever. | [POLICIES.md](./docs/POLICIES.md) |
 
 Everything above is covered by tests: **136 server suites (1850 tests)**, 59
@@ -651,6 +652,41 @@ status completed
   is **counted but not priced** unless you tell FlowForge your rate, and an
   unpriced model shows as a visible gap rather than a confident zero. Stored as
   integer micro-USD, so summing the same rows two ways always agrees.
+- **Signed workflow artifacts** — the GitOps loop above is `export → git →
+  review → CI → import`, and between the approval and the import the document
+  passes through a repository, a CI runner, an artifact store and an HTTP call.
+  Drift detection tells you git and production diverged; the merge reconciles
+  them; lint, verify and preview vet what the file *says* and *does*. None of
+  them answers **is the graph that arrived the graph that was reviewed?** — and a
+  `manage` token can import any document at all, so a leaked token or a commit
+  pushed after review lands a definition nobody looked at. So a document can
+  carry a detached **Ed25519 signature** (Node's own `crypto`, no dependency) and
+  a workspace keeps the keys it trusts. **What the signature covers is the whole
+  design, and it is not the bytes**: a signature over the serialised file would
+  break whenever anything reserialised it — a key order, a re-export, a formatter
+  — and one that breaks for cosmetic reasons is one people learn to skip. It
+  covers the graph's *semantics*, canonicalised with exactly the rules the
+  three-way merge already uses: positions excluded (dragging a node is not a
+  change to what a workflow does), config keys sorted, edges keyed by
+  `(source, target, sourceHandle)` so a redrawn connection still verifies, and
+  the declared guarantees covered because they were the reason a reviewer
+  approved it. So a re-export after somebody tidies the canvas still verifies,
+  while a changed URL, a rewired handle or a dropped invariant does not.
+  Verification has **three** negative answers because they need different
+  responses — *unsigned* (no claim), *untrusted* (a real signature by a key you
+  don't hold, which is what a rotated key looks like), *invalid* (tampering) —
+  and the admission rule keeps the important line sharp: **enforcement governs
+  only the unsigned case**, because there is no setting under which the right
+  response to a broken signature is to import it anyway. Keys are
+  owner-managed, parsed before they're stored, and **revoked rather than
+  deleted** — the question after an incident is what a key signed *while* it was
+  trusted. Signing happens where the review happens: `flowforge keygen` and
+  `flowforge sign` talk to no server, because a key that has been near one is a
+  key somebody has to reason about, and `sign --check` lets a reviewer verify a
+  file with no server, no token and no trust in whatever handed it over. The
+  limit is stated rather than oversold — a signature is transferable, so it
+  proves *who approved this definition*, not that they intended this import. See
+  [docs/PROVENANCE.md](./docs/PROVENANCE.md).
 - **Tamper-evident audit log** — the activity feed tells your team what
   happened; this tells an auditor what changed and proves the record wasn't
   edited. Every governed action (secrets, variables, membership, API tokens,
@@ -1196,7 +1232,7 @@ flowforge/
 ├── cli/           Zero-dependency terminal client for the public API
 ├── docs/          API reference, architecture deep dive, and one design record per hard part
 │                 (FXL, types, guarantees, paths, lineage, policies, merge, releases,
-│                  preview, rollback, durability, insights)
+│                  preview, provenance, rollback, durability, insights)
 ├── docker-compose.yml
 ├── .env.example
 ├── .env.production.example

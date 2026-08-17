@@ -12,6 +12,7 @@ lineage and taint), [GUARANTEES.md](./GUARANTEES.md) (path invariants),
 [PATHS.md](./PATHS.md) (path feasibility and generated tests),
 [DURABILITY.md](./DURABILITY.md) (leases and crash recovery),
 [PREVIEW.md](./PREVIEW.md) (replaying a change against past runs),
+[PROVENANCE.md](./PROVENANCE.md) (signed workflow artifacts),
 [MERGE.md](./MERGE.md) (three-way merge),
 [RELEASES.md](./RELEASES.md) (progressive delivery),
 [ROLLBACK.md](./ROLLBACK.md) (compensating transactions),
@@ -2162,6 +2163,74 @@ is interesting per kind of work, and a per-resource label would let ids explode
 the series space, the same cardinality rule the HTTP metrics follow.
 Per-workspace spend is a database question, answered by
 `GET /workspaces/:id/costs`.
+
+## Signed workflow artifacts
+
+`services/artifactSigning.js` (pure) and `services/trustStore.js` (the database
+half) answer a question the workflows-as-code loop leaves open. Drift detection
+says git and production diverged, the three-way merge reconciles them, and
+lint / verify / preview vet what a document says and does. None of them asks
+whether the graph that arrived is the graph that was **reviewed** — and between
+the approval and the import the document passes through a repository, a CI
+runner, an artifact store and an HTTP call, with a `manage` token able to import
+any document at all.
+
+The user-facing reference is [PROVENANCE.md](./PROVENANCE.md); the decisions:
+
+- **Ed25519, because Node's own `crypto` implements it.** No dependency, small
+  keys, nothing to choose badly — the same argument behind the hand-rolled
+  metrics registry and cron engine.
+
+- **The signature covers the graph's *semantics*, not its bytes**, and this is
+  the whole design. A signature over the serialised document would break whenever
+  anything reserialised it — a key order, a re-export, a formatter — and one that
+  breaks for cosmetic reasons is one people learn to skip. So the canonical
+  payload uses exactly the rules [the semantic diff](./MERGE.md) uses to decide
+  what "changed" means: positions excluded, nodes sorted by id with config keys
+  sorted, edges keyed by `(source, target, sourceHandle)` so a redrawn connection
+  still verifies, and the declared guarantees covered because they are the
+  assertions that were the reason a reviewer approved it. The consequence is
+  stated rather than discovered: a signature proves what the workflow *means*,
+  not what the file *looks like*.
+
+- **Three negative verdicts, kept apart because they call for different
+  responses.** `unsigned` is no claim; `untrusted` is a well-formed signature by
+  a key this workspace does not hold, which is what a rotated key looks like and
+  is not tampering; `invalid` is a payload that does not match a signature made
+  by a key we do trust, which is.
+
+- **Enforcement governs only the unsigned case.** Whether an unsigned import is
+  acceptable is a policy each workspace answers for itself. Whether a *broken*
+  one is, is not — there is no configuration under which the right response to
+  evidence of tampering is to import it anyway, and conflating the two is the
+  mistake that makes signing decorative. Arming enforcement with no trusted keys
+  is refused, because it would lock a workspace out of its own promotions.
+
+- **The trust store mirrors controls that already exist.** Owner-managed like
+  secrets and status-page tokens (a list any member could append to is a
+  formality); keys parsed before they are stored, so a paste-o is a 400 rather
+  than a key that silently never matches; revoked rather than deleted like an API
+  token, because the question after an incident is what a key signed *while* it
+  was trusted. Every change is audited by **fingerprint, never key material**,
+  and every import records its verdict, the signing fingerprint and the digest of
+  the graph — including unsigned imports, since "which graph is this" is useful
+  either way.
+
+- **Signing happens where the review happens.** `flowforge keygen` and
+  `flowforge sign` talk to no server: a key that has been near one is a key
+  somebody has to reason about, and an approval minted by the server it is later
+  presented to proves nothing. The cost is a second implementation of the
+  canonicalisation in the dependency-free CLI, which is the node-cron /
+  `cronExpression.js` trade again — and it carries the same obligation, so the
+  CLI suite requires both modules and asserts identical digests and cross-verified
+  signatures. A divergence there would not fail loudly; it would produce a
+  signature that verifies nowhere.
+
+The limit is stated rather than oversold, exactly as the audit log's is. A
+signature is **transferable**: it proves who approved a definition, not that they
+intended this import, at this moment, into this workspace. The mitigations are
+the same shape — the fingerprint is recorded, revocation is immediate, and the
+import still lands a draft.
 
 ## The tamper-evident audit log
 
