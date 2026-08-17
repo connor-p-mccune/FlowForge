@@ -783,6 +783,40 @@ describe('lintGraph — type analysis', () => {
     expect(lintGraph(graph)).toEqual([])
   })
 
+  describe('idempotency declarations', () => {
+    const withNode = (n) => ({ nodes: [node('t1', 'trigger-manual'), n], edges: [edge('t1', n.id)] })
+
+    it('accepts it on a non-safe HTTP method', () => {
+      const graph = withNode(
+        node('h1', 'action-http', {
+          method: 'POST',
+          url: 'https://api.example.com/charge',
+          headers: '{}',
+          idempotent: true,
+        })
+      )
+      expect(codes(lintGraph(graph))).not.toContain('invalid-config')
+    })
+
+    it('flags it on a node that cannot send the header', () => {
+      // Worse than untidy: the recovery policy *acts* on this declaration, so it
+      // would let a lost run re-execute a step on the strength of a header that
+      // was never sent.
+      const found = lintGraph(withNode(node('e1', 'action-email', {
+        to: 'a@b.c', subject: 's', body: 'b', idempotent: true,
+      }))).find((i) => i.message.includes('idempotency'))
+      expect(found).toMatchObject({ severity: 'warning', nodeId: 'e1' })
+      expect(found.message).toMatch(/only HTTP nodes send an idempotency key/)
+    })
+
+    it('nudges when the request was already safe to repeat', () => {
+      const found = lintGraph(withNode(node('h1', 'action-http', {
+        method: 'GET', url: 'https://api.example.com/x', headers: '{}', idempotent: true,
+      }))).find((i) => i.message.includes('already safe to repeat'))
+      expect(found).toMatchObject({ severity: 'warning', nodeId: 'h1' })
+    })
+  })
+
   // Path feasibility (services/pathConstraints.js) — the pass that reasons
   // about the data rather than the graph. Its own suite covers the analysis;
   // what matters here is that the linter runs it and that a graph it has

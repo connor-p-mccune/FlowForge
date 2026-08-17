@@ -27,6 +27,7 @@ const tracing = require('./tracing')
 const canary = require('./canary')
 const debuggerService = require('./debugger')
 const executionLease = require('./executionLease')
+const stepIdempotency = require('./stepIdempotency')
 
 const runners = {
   'action-http': require('./nodeRunners/httpRequest'),
@@ -942,6 +943,15 @@ async function runLeasedExecution(
           // the other side records its work as a child of this exact step rather
           // than of the run as a whole.
           traceparent: tracing.formatTraceparent(traceId, spanIdByNode[nodeId], true),
+          // The `Idempotency-Key` for this step, when its author declared the
+          // endpoint deduplicates. Computed here rather than in the runner for
+          // the same reason `onError` and the cache policy are read here: the
+          // decision comes from the node's **raw** config, so upstream data can
+          // never switch it on or off. Null on every node that did not ask.
+          idempotencyKey: stepIdempotency.headerFor(node, {
+            parentExecutionId: executionId,
+            parentNodeId: nodeId,
+          }),
         }
         // A previewed node settles from the value the caller supplied rather
         // than running, expressed as a synthetic `stub` fault so it travels the

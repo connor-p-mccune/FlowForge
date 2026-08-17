@@ -34,6 +34,14 @@
 //           author is the only party who can know.
 //   manual  never. Record the loss; a person decides.
 //
+// `safe` has one escape hatch, and it is the honest one: a node that declared
+// `idempotent` sends an `Idempotency-Key` that is stable across the recovery
+// (services/stepIdempotency.js), so the far side recognises the repeat and the
+// step *can* be re-run. That turns the policy from a blunt "anything
+// externally-effectful blocks the recovery" into "anything whose repeat is not
+// safe blocks it" — which is the distinction that actually matters, and the one
+// a per-node declaration is the only way to know.
+//
 // ## What it deliberately does not do
 //
 // - **It does not recover a run with no lease.** A `running` row with no
@@ -54,6 +62,7 @@ const { v4: uuidv4 } = require('uuid')
 const db = require('../config/database')
 const { expiredLeases } = require('./executionLease')
 const { recordExecutionRecovered } = require('./metrics')
+const stepIdempotency = require('./stepIdempotency')
 
 // Node types whose work reaches outside FlowForge. An indeterminate step of one
 // of these is the case `safe` refuses to resolve on its own: nobody can tell
@@ -119,6 +128,29 @@ function settleSteps(executionId, now) {
   return indeterminate
 }
 
+// Which of a workflow's nodes declared that their endpoint deduplicates
+// (services/stepIdempotency.js). A step of one of those may be re-run even
+// though nobody recorded its outcome: the request carries a key that is stable
+// across the recovery, so the far side recognises the repeat rather than
+// performing the work twice.
+//
+// This is the answer to the limitation the `safe` policy otherwise has to live
+// with. It is the workflow author's claim about their endpoint rather than
+// something FlowForge can verify — which is exactly why it is a per-node
+// declaration and not an inference.
+function idempotentNodeIds(workflow) {
+  try {
+    const graph = JSON.parse(workflow.graph_json)
+    return new Set(
+      (graph.nodes || []).filter((n) => stepIdempotency.isEnabled(n)).map((n) => n.id)
+    )
+  } catch {
+    // An unparseable graph means nothing can be claimed idempotent, which is the
+    // conservative reading.
+    return new Set()
+  }
+}
+
 // May this run be continued without a person looking at it first?
 function decide(workflow, execution, indeterminate) {
   const policy = recoveryPolicy(workflow)
@@ -134,7 +166,10 @@ function decide(workflow, execution, indeterminate) {
   }
   if (policy === 'resume') return { resume: true, reason: null }
 
-  const risky = indeterminate.filter((s) => EFFECTFUL_TYPES.has(s.node_type))
+  const idempotent = idempotentNodeIds(workflow)
+  const risky = indeterminate.filter(
+    (s) => EFFECTFUL_TYPES.has(s.node_type) && !idempotent.has(s.node_id)
+  )
   if (risky.length > 0) {
     return {
       resume: false,
@@ -355,6 +390,7 @@ module.exports = {
   EFFECTFUL_TYPES,
   POLICIES,
   recoveryPolicy,
+  idempotentNodeIds,
   maxRecoveries,
   settleSteps,
   decide,

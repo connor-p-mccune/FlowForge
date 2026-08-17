@@ -322,3 +322,38 @@ describe('NodeConfigPanel interactions', () => {
     })
   })
 })
+
+describe('idempotency declaration', () => {
+  const label = /This endpoint deduplicates/
+
+  it('is offered on an HTTP node and nowhere else', () => {
+    setup(mk('action-http'))
+    expect(screen.getByText(label)).toBeInTheDocument()
+  })
+
+  it('is not offered where the header would never be sent', () => {
+    setup(mk('action-email'))
+    expect(screen.queryByText(label)).not.toBeInTheDocument()
+  })
+
+  it('records the declaration on the node', () => {
+    const { onChange } = setup(mk('action-http', { config: { method: 'POST' } }))
+    fireEvent.click(screen.getByRole('checkbox', { name: label }))
+    expect(onChange).toHaveBeenCalledWith('n1', {
+      config: expect.objectContaining({ idempotent: true }),
+    })
+  })
+
+  it('explains the consequence, not the mechanism', () => {
+    setup(mk('action-http', { config: { method: 'POST', idempotent: true } }))
+    // The reason this is a checkbox rather than an inference: the claim is
+    // unverifiable and crash recovery acts on it.
+    expect(screen.getByText(/recovered after a\s+worker died/)).toBeInTheDocument()
+    expect(screen.getByText(/nothing here can check that/)).toBeInTheDocument()
+  })
+
+  it('says a GET gains nothing from it', () => {
+    setup(mk('action-http', { config: { method: 'GET', idempotent: true } }))
+    expect(screen.getByText(/already safe to repeat/)).toBeInTheDocument()
+  })
+})

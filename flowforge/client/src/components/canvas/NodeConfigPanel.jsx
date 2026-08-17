@@ -415,6 +415,46 @@ function CacheField({ config, setConfig, nodeType }) {
   )
 }
 
+// Idempotency: a declaration that this endpoint deduplicates on an
+// `Idempotency-Key` header, which most payment and provisioning APIs do.
+//
+// The reason it earns a checkbox rather than being inferred: FlowForge cannot
+// verify it. Only the author knows whether their endpoint honours the header,
+// and the consequences of the claim are real — crash recovery reads it to decide
+// whether a request whose outcome nobody recorded may be sent again. So the copy
+// states the consequence rather than the mechanism.
+function IdempotencyField({ config, setConfig }) {
+  const enabled = config.idempotent === true || config.idempotent === 'true'
+  const method = String(config.method || 'GET').toUpperCase()
+  const safeMethod = method === 'GET' || method === 'HEAD'
+  return (
+    <>
+      <label className="config-panel__checkbox">
+        <input
+          type="checkbox"
+          checked={enabled}
+          onChange={(e) => setConfig('idempotent', e.target.checked)}
+        />
+        <span>This endpoint deduplicates on <code>Idempotency-Key</code></span>
+      </label>
+      {enabled && (
+        <p className="config-panel__hint">
+          Every attempt at this step — a retry, a resume, a run recovered after a
+          worker died — sends the <strong>same</strong> key, so the far side
+          recognises the repeat instead of doing the work twice. That is what
+          lets a lost run continue through this node rather than stopping for a
+          person.
+          {safeMethod
+            ? ' A GET is already safe to repeat, so this changes nothing here.'
+            : ''}{' '}
+          Only tick it if the API you are calling actually honours the header —
+          nothing here can check that.
+        </p>
+      )}
+    </>
+  )
+}
+
 // Shared help for FXL-powered fields (condition expression, filter predicate).
 // FXL reads live values from the node's data rather than substituting {{...}}
 // templates — a distinction worth calling out where the two styles meet.
@@ -1160,6 +1200,11 @@ export default function NodeConfigPanel({
         {renderFields()}
         {CACHEABLE_NODE_TYPES.has(node.type) && (
           <CacheField config={config} setConfig={setConfig} nodeType={node.type} />
+        )}
+        {/* Only the HTTP node sends the header, and the linter says so if the
+            declaration lands anywhere else. */}
+        {node.type === 'action-http' && (
+          <IdempotencyField config={config} setConfig={setConfig} />
         )}
         {CATCHABLE_TYPES.has(node.type) && <OnErrorField config={config} setConfig={setConfig} />}
         {COMPENSATION_TYPES.has(node.type) && (

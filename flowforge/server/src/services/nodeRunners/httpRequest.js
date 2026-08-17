@@ -23,8 +23,24 @@ module.exports = async function runHttpRequest(config, _input, isDryRun, ctx) {
     throw new Error('HTTP node: headers must be valid JSON')
   }
 
-  if (ctx?.traceparent && !Object.keys(parsedHeaders).some((h) => h.toLowerCase() === 'traceparent')) {
+  const hasHeader = (name) =>
+    Object.keys(parsedHeaders).some((h) => h.toLowerCase() === name.toLowerCase())
+
+  if (ctx?.traceparent && !hasHeader('traceparent')) {
     parsedHeaders.traceparent = ctx.traceparent
+  }
+
+  // The step's idempotency key, when the node declared this endpoint
+  // deduplicates (services/stepIdempotency.js). Stable across retries, resumes
+  // and crash recoveries of the same logical step, so the far side recognises
+  // the repeat — which is the whole reason a workflow can safely re-run a
+  // request whose outcome nobody recorded.
+  //
+  // An explicitly configured header always wins, exactly as it does for
+  // `traceparent`: an author setting their own key is doing so deliberately, and
+  // overwriting it would break the case they went out of their way to build.
+  if (ctx?.idempotencyKey && !hasHeader(ctx.idempotencyKey.name)) {
+    parsedHeaders[ctx.idempotencyKey.name] = ctx.idempotencyKey.value
   }
 
   const options = { method, headers: parsedHeaders }

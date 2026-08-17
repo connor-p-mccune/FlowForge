@@ -18,6 +18,7 @@ const { buildAdjacency, topoSort } = require('./dagParser')
 const { analyze } = require('./expression')
 const { inferGraphTypes, checkReferences } = require('./typeInference')
 const { CACHEABLE_TYPES, DEFAULT_TTL_SECONDS } = require('./stepCache')
+const { isEnabled: isIdempotent } = require('./stepIdempotency')
 const { compensationPlan } = require('./compensation')
 const { analyzeLineage } = require('./lineage')
 const { guaranteeIssues } = require('./guarantees')
@@ -663,6 +664,41 @@ function lintGraph({ nodes: rawNodes = [], edges: rawEdges = [] } = {}, { secret
           'warning',
           'unwired-branch',
           `${label(node)}: on-error takes the error branch, but it isn't connected — a caught failure ends the flow there`,
+          node.id
+        )
+      )
+    }
+  }
+
+  // Step idempotency. Only the HTTP node sends the header, so declaring it
+  // anywhere else is a claim nothing acts on — and, worse, a claim the recovery
+  // policy *does* act on: it would let a lost run re-execute a step on the
+  // strength of a header that was never sent. Reported for that reason rather
+  // than for tidiness.
+  //
+  // A GET is flagged separately and softly: it is already safe to repeat, so the
+  // declaration is redundant rather than wrong, and the nudge is aimed at
+  // somebody who ticked it on the wrong node.
+  for (const node of nodes) {
+    if (!isIdempotent(node)) continue
+    if (node.type !== 'action-http') {
+      issues.push(
+        issue(
+          'warning',
+          'invalid-config',
+          `${label(node)}: only HTTP nodes send an idempotency key — declaring one on a ${node.type} node claims a safety the run cannot provide`,
+          node.id
+        )
+      )
+      continue
+    }
+    const method = String(node.data?.config?.method || 'GET').toUpperCase()
+    if (method === 'GET' || method === 'HEAD') {
+      issues.push(
+        issue(
+          'warning',
+          'invalid-config',
+          `${label(node)}: a ${method} is already safe to repeat — an idempotency key changes nothing here`,
           node.id
         )
       )
