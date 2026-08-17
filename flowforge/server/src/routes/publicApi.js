@@ -23,6 +23,16 @@ const { verifyGuarantees, parseGuarantees } = require('../services/guarantees')
 const { analyzePaths } = require('../services/pathConstraints')
 const { analyzeRegressions } = require('../services/regressions')
 const { previewDeploy } = require('../services/backtest')
+const { verifyImport } = require('../services/trustStore')
+
+// The provenance verdict as a caller sees it — the same shape the session import
+// returns, so a promotion script reads one field whichever door it came through.
+const presentProvenance = (verdict) => ({
+  status: verdict.status,
+  signedBy: verdict.key,
+  required: verdict.required,
+  digest: verdict.digest,
+})
 const { parseDebugRequest, resumeBreak, listBreaks } = require('../services/debugger')
 const { mergeDocument, applyMerge } = require('../services/workflowMerge')
 const { recordAudit } = require('../services/auditLog')
@@ -235,6 +245,24 @@ router.post('/workspaces/:id/workflows/import', tokenAuth('manage'), (req, res) 
       return res.status(413).json({ error: 'Workflow graph is too large (max 500KB)' })
     }
 
+    // Provenance (services/trustStore.js). This is the path a promotion
+    // pipeline actually takes, so it is the path where "is the graph that
+    // arrived the graph that was reviewed?" matters most: a `manage` token can
+    // import any document at all, and between the approval and this request the
+    // file passed through a repository, a runner and an artifact store.
+    //
+    // A broken signature is refused regardless of configuration — it means the
+    // document changed after it was signed — while whether an *unsigned* import
+    // is acceptable is the workspace's own policy.
+    const workspace = db.prepare('SELECT * FROM workspaces WHERE id = ?').get(req.params.id)
+    const provenance = verifyImport(workspace, req.body)
+    if (!provenance.allowed) {
+      return res.status(403).json({
+        error: provenance.reason,
+        provenance: presentProvenance(provenance),
+      })
+    }
+
     const guarantees = parseGuarantees(req.body.guarantees)
 
     const id = uuidv4()
@@ -242,6 +270,19 @@ router.post('/workspaces/:id/workflows/import', tokenAuth('manage'), (req, res) 
     db.prepare(
       "INSERT INTO workflows (id, workspace_id, name, description, graph_json, guarantees_json, status, created_by, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, 'draft', ?, ?, ?)"
     ).run(id, req.params.id, name.trim(), null, graphJson, guarantees.length ? JSON.stringify(guarantees) : null, req.user.id, now, now)
+
+    recordAudit(req.params.id, req.user.id, 'workflow.imported', {
+      type: 'workflow',
+      id,
+      name: name.trim(),
+      metadata: {
+        nodes: graphData.nodes.length,
+        signature: provenance.status,
+        signedBy: provenance.key?.fingerprint ?? null,
+        digest: provenance.digest,
+        via: 'api',
+      },
+    })
 
     const workflow = db.prepare(
       'SELECT id, name, description, status, workspace_id, updated_at, graph_json FROM workflows WHERE id = ?'
@@ -258,6 +299,7 @@ router.post('/workspaces/:id/workflows/import', tokenAuth('manage'), (req, res) 
       workflow: summary,
       policyViolations: policy.violations,
       policyBlocked: policy.blocked,
+      provenance: presentProvenance(provenance),
     })
   } catch (err) {
     console.error(err)

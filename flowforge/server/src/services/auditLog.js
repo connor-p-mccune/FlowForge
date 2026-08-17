@@ -100,6 +100,15 @@ const ACTIONS = new Set([
   // automatic rollback there is a person who decided to run them. That decision
   // belongs in the record beside the deploys and the pauses.
   'execution.rolled_back',
+  // The trust store (services/trustStore.js). Adding a key is granting
+  // something the authority to say "this definition was reviewed", which is a
+  // change to who can put code into production — the same class of act as
+  // inviting a member or minting a token. Revocation matters even more: the
+  // question after an incident is what a key signed *while it was trusted*, and
+  // that needs a date at both ends.
+  'signing_key.added',
+  'signing_key.revoked',
+  'signing_key.enforcement_changed',
   // Surfaces that publish workspace state to people without accounts.
   'status_page.enabled',
   'status_page.rotated',

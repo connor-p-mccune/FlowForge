@@ -20,6 +20,18 @@ const { describeLineage, analyzeLineage, traceProvenance, traceImpact } = requir
 const { verifyGuarantees, parseGuarantees } = require('../services/guarantees')
 const { analyzePaths } = require('../services/pathConstraints')
 const { previewDeploy } = require('../services/backtest')
+const { verifyImport } = require('../services/trustStore')
+
+// The provenance verdict as a caller sees it. `digest` is the identity of the
+// graph that landed — printable, comparable, and the same value the signer saw
+// — and it is reported for an unsigned import too, because "which graph is this"
+// is useful whether or not anybody vouched for it.
+const presentProvenance = (verdict) => ({
+  status: verdict.status,
+  signedBy: verdict.key,
+  required: verdict.required,
+  digest: verdict.digest,
+})
 const collabSession = require('../services/collabSession')
 const { mergeDocument, applyMerge } = require('../services/workflowMerge')
 const { forbidViewer } = require('../services/workspaceRoles')
@@ -160,6 +172,21 @@ router.post('/workspaces/:wsId/workflows/import', auth, validate(importRule), (r
       return res.status(413).json({ error: 'Workflow graph is too large (max 500KB)' })
     }
 
+    // Provenance (services/trustStore.js). An import is where a definition
+    // crosses an environment boundary, and between the review and this call the
+    // document passed through a repository, a runner and an HTTP request. A
+    // trusted signature is what makes "the graph that arrived is the graph that
+    // was reviewed" a fact rather than an assumption.
+    //
+    // A *broken* signature is refused whether or not this workspace requires
+    // signing, because it means the document changed after it was signed. Only
+    // the unsigned case is a matter of configuration.
+    const workspace = db.prepare('SELECT * FROM workspaces WHERE id = ?').get(req.params.wsId)
+    const provenance = verifyImport(workspace, req.body)
+    if (!provenance.allowed) {
+      return res.status(403).json({ error: provenance.reason, provenance: presentProvenance(provenance) })
+    }
+
     // Invariants declared in the source workspace come across with the graph.
     // Parsed rather than trusted: an import is an outside document, and one
     // naming nodes this graph doesn't have would be stored as a guarantee that
@@ -178,14 +205,28 @@ router.post('/workspaces/:wsId/workflows/import', auth, validate(importRule), (r
     // what a review asks, so it belongs in the audited record.
     recordAudit(req.params.wsId, req.user.id, 'workflow.imported', {
       type: 'workflow', id, name: workflow.name,
-      metadata: { nodes: graph_data.nodes.length },
+      // The provenance rides into the audit entry, because "who approved the
+      // definition running in production" is the question this exists to answer
+      // and the answer has to survive in the record rather than in a response
+      // body nobody kept. The digest is included even for an unsigned import:
+      // it identifies exactly which graph landed.
+      metadata: {
+        nodes: graph_data.nodes.length,
+        signature: provenance.status,
+        signedBy: provenance.key?.fingerprint ?? null,
+        digest: provenance.digest,
+      },
     })
     // Policy violations are *reported*, not enforced, on import. An import
     // lands as a draft — nothing the organisation runs yet — and refusing to
     // let a definition in would prevent bringing it here to fix it. The deploy
     // gate is where "may this be live?" is answered; this is so a promotion
     // pipeline finds out at the import step rather than one command later.
-    res.status(201).json({ workflow, policyViolations: checkWorkflow(workflow).violations })
+    res.status(201).json({
+      workflow,
+      policyViolations: checkWorkflow(workflow).violations,
+      provenance: presentProvenance(provenance),
+    })
   } catch (err) {
     console.error(err)
     res.status(500).json({ error: 'Internal server error' })

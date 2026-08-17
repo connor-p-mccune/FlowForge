@@ -384,6 +384,43 @@ db.exec(`
 // arrived without its invariants would be the interesting half missing.
 ensureColumn('workflows', 'guarantees_json', 'TEXT')
 
+// The workspace trust store (services/trustStore.js): the Ed25519 public keys
+// this workspace will accept a workflow definition from.
+//
+// The workflows-as-code loop runs export → git → review → CI → import, and
+// between the approval and the import the document passes through a repository,
+// a CI runner, an artifact store and an HTTP call. Nothing in that chain proved
+// the graph that arrived was the graph that was reviewed; a signature and a list
+// of keys is what does.
+//
+// A revoked key keeps its row with `revoked_at` set, exactly as api_tokens do,
+// because the question an incident review asks is *what did this key sign while
+// it was trusted* — and a deleted row answers that with silence. UNIQUE on
+// (workspace_id, fingerprint) so one key cannot be trusted twice under two
+// names, which would make revoking it a game of find-them-all.
+db.exec(`
+  CREATE TABLE IF NOT EXISTS workspace_signing_keys (
+    id TEXT PRIMARY KEY,
+    workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+    name TEXT NOT NULL,
+    public_key TEXT NOT NULL,
+    fingerprint TEXT NOT NULL,
+    added_by TEXT REFERENCES users(id),
+    created_at TEXT NOT NULL,
+    revoked_at TEXT,
+    UNIQUE (workspace_id, fingerprint)
+  );
+  CREATE INDEX IF NOT EXISTS idx_workspace_signing_keys_workspace
+    ON workspace_signing_keys (workspace_id, revoked_at);
+`)
+
+// Whether this workspace refuses an *unsigned* import. Deliberately only about
+// the unsigned case: a signature that fails to verify is refused whether or not
+// this is set, because a broken signature is evidence of tampering and there is
+// no configuration under which shrugging at it is right. Conflating the two is
+// what makes signing decorative.
+ensureColumn('workspaces', 'require_signed_imports', 'INTEGER NOT NULL DEFAULT 0')
+
 // Execution leases (services/executionLease.js): which worker believes it is
 // running this execution, a fencing token proving it still is, and when that
 // belief stops being credible. Everything else in the reliability story assumes

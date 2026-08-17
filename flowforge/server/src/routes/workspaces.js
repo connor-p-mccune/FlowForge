@@ -7,6 +7,7 @@ const { createNotification } = require('../services/notificationService')
 const activityService = require('../services/activityService')
 const { forbidViewer } = require('../services/workspaceRoles')
 const { recordAudit } = require('../services/auditLog')
+const trustStore = require('../services/trustStore')
 
 const router = express.Router()
 
@@ -80,6 +81,130 @@ router.put('/workspaces/:id', auth, validate(nameRule), (req, res) => {
 
     const workspace = db.prepare('SELECT * FROM workspaces WHERE id = ?').get(req.params.id)
     res.json({ workspace })
+  } catch (err) {
+    console.error(err)
+    res.status(500).json({ error: 'Internal server error' })
+  }
+})
+
+// ---------------------------------------------------------------------------
+// The trust store (services/trustStore.js)
+// ---------------------------------------------------------------------------
+
+// Which Ed25519 keys this workspace will accept a workflow definition from.
+//
+// Owner-only throughout, matching secrets and status-page tokens: a trust store
+// any member could append to is not a trust store, it is a formality. Reads are
+// owner-only too — the list of keys that can put code into production is
+// exactly what somebody with a member session would like to enumerate.
+function ownerOnly(req, res) {
+  const owner = db.prepare(
+    "SELECT 1 FROM workspace_members WHERE workspace_id = ? AND user_id = ? AND role = 'owner'"
+  ).get(req.params.id, req.user.id)
+  if (owner) return true
+  // 404 rather than 403 when they are not a member at all, so the endpoint does
+  // not confirm a workspace id; 403 when they are, because the operation is what
+  // is refused and pretending otherwise would be a confusing lie.
+  const member = db.prepare(
+    'SELECT 1 FROM workspace_members WHERE workspace_id = ? AND user_id = ?'
+  ).get(req.params.id, req.user.id)
+  res.status(member ? 403 : 404).json({
+    error: member ? 'Only workspace owners can manage signing keys' : 'Workspace not found',
+  })
+  return false
+}
+
+router.get('/workspaces/:id/signing-keys', auth, (req, res) => {
+  try {
+    if (!ownerOnly(req, res)) return
+    const workspace = db.prepare('SELECT * FROM workspaces WHERE id = ?').get(req.params.id)
+    res.json({
+      keys: trustStore.listKeys(req.params.id),
+      requireSignedImports: trustStore.requiresSignature(workspace),
+    })
+  } catch (err) {
+    console.error(err)
+    res.status(500).json({ error: 'Internal server error' })
+  }
+})
+
+// POST — trust a key. The key is parsed before it is stored, so a paste-o is a
+// 400 rather than a key that silently never matches anything; the same reason a
+// policy rule is type-checked when saved instead of when it first fails to fire.
+router.post('/workspaces/:id/signing-keys', auth, (req, res) => {
+  try {
+    if (!ownerOnly(req, res)) return
+    const result = trustStore.addKey(req.params.id, req.user.id, req.body || {})
+    if (result.error) return res.status(400).json({ error: result.error })
+
+    recordAudit(req.params.id, req.user.id, 'signing_key.added', {
+      type: 'signing_key',
+      id: result.key.id,
+      name: result.key.name,
+      // The fingerprint, not the key: the record needs to identify which key
+      // was trusted, and it is what a reviewer compares against their own copy.
+      metadata: { fingerprint: result.key.fingerprint, reinstated: result.reinstated },
+    })
+    res.status(201).json({ key: result.key, reinstated: result.reinstated })
+  } catch (err) {
+    console.error(err)
+    res.status(500).json({ error: 'Internal server error' })
+  }
+})
+
+// DELETE — revoke. The row survives with `revoked_at` set, exactly as a revoked
+// API token does: the question after an incident is what this key signed *while
+// it was trusted*, and a deleted row answers that with silence.
+router.delete('/workspaces/:id/signing-keys/:keyId', auth, (req, res) => {
+  try {
+    if (!ownerOnly(req, res)) return
+    const result = trustStore.revokeKey(req.params.id, req.params.keyId)
+    if (result.notFound) return res.status(404).json({ error: 'Signing key not found' })
+
+    recordAudit(req.params.id, req.user.id, 'signing_key.revoked', {
+      type: 'signing_key',
+      id: result.key.id,
+      name: result.key.name,
+      metadata: { fingerprint: result.key.fingerprint },
+    })
+    res.json({ key: result.key })
+  } catch (err) {
+    console.error(err)
+    res.status(500).json({ error: 'Internal server error' })
+  }
+})
+
+// PUT — whether an *unsigned* import is refused.
+//
+// Deliberately only about the unsigned case. A signature that fails to verify is
+// refused whether or not this is set, because a broken signature is evidence of
+// tampering and there is no configuration under which shrugging at it is right.
+// Turning enforcement on with no trusted keys would lock the workspace out of
+// its own promotions, so it is refused with that in the message.
+router.put('/workspaces/:id/signing-keys/enforcement', auth, (req, res) => {
+  try {
+    if (!ownerOnly(req, res)) return
+    const required = req.body?.requireSignedImports
+    if (typeof required !== 'boolean') {
+      return res.status(400).json({ error: 'requireSignedImports must be a boolean' })
+    }
+    if (required && trustStore.trustedKeys(req.params.id).length === 0) {
+      return res.status(400).json({
+        error: 'Trust at least one signing key before requiring signed imports',
+      })
+    }
+
+    db.prepare('UPDATE workspaces SET require_signed_imports = ?, updated_at = ? WHERE id = ?')
+      .run(required ? 1 : 0, new Date().toISOString(), req.params.id)
+
+    const workspace = db.prepare('SELECT * FROM workspaces WHERE id = ?').get(req.params.id)
+    recordAudit(req.params.id, req.user.id, 'signing_key.enforcement_changed', {
+      type: 'workspace',
+      id: req.params.id,
+      name: workspace.name,
+      metadata: { requireSignedImports: required },
+    })
+    res.json({ requireSignedImports: trustStore.requiresSignature(workspace) })
   } catch (err) {
     console.error(err)
     res.status(500).json({ error: 'Internal server error' })
