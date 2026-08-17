@@ -207,6 +207,33 @@ Deliberately, and often. There is **no** finding when:
 This is the property that makes the checker usable. A finding here is a bug you
 have; if it were a bug you *might* have, you'd stop reading them.
 
+### And it is tested as a property
+
+"Never cries wolf" is a claim about **every** expression, not about the eleven
+in a test file, so it is generated rather than enumerated
+(`__tests__/expressionProperties.test.js`). A seeded random walk over the type
+lattice builds well-typed programs by construction, each evaluated against a
+scope that inhabits the environment it was checked against, and asserts both
+directions:
+
+- **precision** — an expression that evaluates was not reported;
+- **soundness, modulo one boundary** — a type-clean expression fails only at the
+  string→number coercion the language deliberately permits, because
+  `number("abc")` has to type-check for `number("42")` to work. Naming exactly
+  where the checker is permissive is more useful than pretending it is total.
+
+A second, deliberately ill-typed corpus checks the other direction over tens of
+thousands of nonsense programs: nothing crashes, and no type-clean expression
+fails outside a named guard list.
+
+Writing it surfaced one thing worth stating here, because it is the same
+`undefined` this document is largely about. FXL member access **returns
+undefined rather than throwing**, so an expression the checker correctly rejects
+still "evaluates" — and a coercion further out launders that undefined into a
+real value (`len(!((true)[1]))` is `0`). Precision is therefore a property of
+well-typed programs, not of programs that happen to produce an answer, which is
+exactly why the generator builds by *type* and not by shape.
+
 ---
 
 ## The API

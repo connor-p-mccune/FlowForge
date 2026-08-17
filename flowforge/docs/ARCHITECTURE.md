@@ -2451,6 +2451,22 @@ Every feature lands with tests; the suites run in CI on every push
 - **Contract pinning:** the OpenAPI document has a test asserting its path
   list matches the mounted routes, so the spec cannot silently drift from
   the API.
+- **Properties, where the claim is a property.** Two features assert something
+  universal rather than exemplary, and are tested that way. The [collaboration
+  CRDT](#real-time-collaboration) applies *every* permutation of an operation
+  set and asserts one document comes out. The [type
+  checker](#the-type-system) claims it never cries wolf, which is a statement
+  about every expression rather than about the eleven somebody thought of — so
+  a seeded random walk over the type lattice generates well-typed programs by
+  construction, evaluates each against a scope inhabiting the environment it was
+  checked against, and asserts precision (an expression that evaluates was not
+  reported) and soundness modulo the one documented coercion (`number("abc")`
+  type-checks because `number("42")` has to). A second, deliberately ill-typed
+  corpus checks the other direction: over tens of thousands of nonsense
+  programs, nothing crashes and no type-clean expression fails outside a named
+  guard list. Both seed a reproducible PRNG rather than `Math.random`, for the
+  reason the [chaos profile](#deliberate-fault-injection) does — a generative
+  failure has to be reproducible to be a regression test.
 - **CLI (node:test):** commands run against a stub HTTP server, so the
   suite exercises the real wire format — auth headers, request bodies,
   status handling — rather than mocks of the CLI's own client. Zero
