@@ -28,6 +28,7 @@ problem sounds familiar.
 | **Types over a canvas** | A visual builder normally discovers its data doesn't line up by running. A real type lattice — unions, per-field optionality, structural join — mirrors the engine instead of approximating it, and `any` vs `unknown` are kept as *different facts*. | [TYPES.md](./docs/TYPES.md) |
 | **Taint analysis** | Untrusted data deciding where a request goes is SSRF with a drag-and-drop interface. Precision is the whole design: taint stops at external boundaries, and a pinned host is not a finding — a checker nobody reads is worse than none. | [LINEAGE.md](./docs/LINEAGE.md) |
 | **Surviving the worker** | Every reliability control here bounds a *running* system; all of them assume the process lives. A `kill -9` leaves a row saying `running` forever, and the queue's redelivery would re-run the whole graph — re-charging the card. A lease renewed by a timer (not by progress, or an approval gate would look like a crash), fenced by a token, and a recovery that records an in-flight step as **indeterminate** rather than guessing which lie to tell. | [DURABILITY.md](./docs/DURABILITY.md) |
+| **Prompt injection** | An AI node classifies a webhook body — text an outsider wrote — and text reads as instructions. The finding isn't "untrusted data in a prompt" (that is every AI node); it is the *composition*: they write the instructions **and** the answer decides where a request goes. Bounded at the boundary by a per-call random fence and a classification confined to the declared labels. | [SECURITY.md](./SECURITY.md) |
 | **Undoing side effects** | Every other control bounds *whether* something runs; none undoes what already ran. Compensations unwind in **reverse completion order** (the DAG doesn't know what finished first), and a step that did no work this run is never compensated. | [ROLLBACK.md](./docs/ROLLBACK.md) |
 | **Reviewing a change** | Every deploy gate here is static — well-formed, typed, permitted, invariant-preserving, reachable. None says what the change *does*. So replay last week's runs against the candidate graph, with every step that reaches outside settled from that run's own recording — a routing difference is then attributable to the edit rather than to test mode inventing a response. | [PREVIEW.md](./docs/PREVIEW.md) |
 | **Deciding a release** | A canary is a small sample, and a threshold on a small sample is a coin flip with a UI. Two-proportion z-test on failures, Mann-Whitney U on durations, Wilson intervals so "0 failures in 12" isn't reported as certainty. | [RELEASES.md](./docs/RELEASES.md) |
@@ -868,6 +869,31 @@ status completed
   [docs/API.md](./docs/API.md#receiving-events-outbound-webhooks).
 - **AI suggestions** — ask the assistant for sensible next nodes based on the
   current graph.
+- **Prompt-injection analysis & containment** — an AI node in a real workflow
+  classifies a **webhook body**: text written by whoever holds the trigger URL.
+  Text reads as instructions, so that party can steer the model — and if the
+  answer decides where a request goes or which branch runs, they have steered the
+  workflow. It is the SSRF story with a model in the middle. The finding is
+  deliberately *not* "untrusted data reaches a prompt", because that is what an
+  AI node is **for** and reporting it would fire on every one of them; it is the
+  **composition** — an outsider writes the instructions *and* the answer
+  influences a high-sensitivity sink or a routing node. Three narrowings keep it
+  precise: only `untrusted` origins count (an HTTP response feeding a prompt is a
+  third party's text, not an adversary's *choice* of text), the message names
+  what an injection can actually reach (free text, or one of your declared
+  labels, or the extracted values — three different exposures), and a routing
+  node counts through graph successors as well as `{{…}}` reads, because a
+  condition in expression mode reads its merged input and names nothing. Then it
+  is **bounded at the boundary**, for every AI node, without its author opting
+  in: untrusted text is fenced with a delimiter that is **random per call** and
+  declared to be data (a fixed fence is one an injected payload can simply
+  close), and a classification resolves to one of the **declared labels or
+  fails** — it used to fall through to raw model text, so an injection could emit
+  a value no condition was written for and a downstream `label != "high_risk"`
+  would read as safe. Extraction is projected onto the declared fields for the
+  same reason, which is what makes the type the checker infers for it a fact
+  rather than a hope. Confinement is not prevention — an injection can still pick
+  a *different* declared label — which is exactly why the finding exists too.
 - **Workspaces & auth** — JWT auth, per-user workspaces, and workflow CRUD,
   with **three membership roles**: owners manage the workspace (members,
   secrets, variables, deletion), members build and run workflows, and
