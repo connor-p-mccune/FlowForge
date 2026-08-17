@@ -248,6 +248,148 @@ describe('taint findings', () => {
   })
 })
 
+// The model as a confused deputy.
+//
+// The precision bar here is higher than anywhere else in this module, because
+// untrusted data reaching a prompt is *what an AI node in a workflow is for*.
+// Reporting that would fire on every one of them, so the finding is the
+// composition — an outsider writes the instructions **and** the answer decides
+// something — and most of these tests are about the cases that must stay silent.
+describe('prompt injection', () => {
+  const findingFor = (graph) =>
+    analyzeLineage(graph).findings.find((f) => f.code === 'prompt-injection')
+
+  // hook → classify(risk) → condition → charge
+  const gatedByClassifier = (extra = {}) => ({
+    nodes: [
+      node('hook', 'trigger-webhook', {}, 'Order webhook'),
+      node('risk', 'ai-classify', { text: '{{hook.body}}', labels: 'high,low' }, 'Fraud check'),
+      node('gate', 'condition', { operator: 'expression', expression: 'label == "low"' }, 'Low risk?'),
+      http('charge', { url: 'https://api.acme.com/charge', method: 'POST' }),
+      ...(extra.nodes || []),
+    ],
+    edges: [
+      edge('hook', 'risk'),
+      edge('risk', 'gate'),
+      edge('gate', 'charge'),
+      ...(extra.edges || []),
+    ],
+  })
+
+  it('flags a classifier fed by the caller whose answer routes the run', () => {
+    const found = findingFor(gatedByClassifier())
+    expect(found).toBeTruthy()
+    expect(found.severity).toBe('warning')
+    expect(found.nodeId).toBe('risk')
+    expect(found.message).toMatch(/Fraud check: this node’s text is built from the webhook payload/)
+    // The exposure is named for what it actually is on a classify node: a choice
+    // between the labels the author declared, not arbitrary text.
+    expect(found.message).toMatch(/chooses which of this node’s labels is returned/)
+    expect(found.message).toMatch(/decides which branch Low risk\? takes/)
+    expect(found.message).toMatch(/\{\{hook\.body\}\}/)
+  })
+
+  it('flags a free-form prompt whose reply chooses a request’s destination', () => {
+    const found = findingFor({
+      nodes: [
+        node('hook', 'trigger-webhook'),
+        node('ask', 'ai-prompt', { prompt: 'Pick a host for {{hook.tenant}}' }, 'Pick host'),
+        http('call', { url: 'https://{{ask.text}}/notify' }),
+      ],
+      edges: [edge('hook', 'ask'), edge('ask', 'call')],
+    })
+    expect(found.nodeId).toBe('ask')
+    expect(found.message).toMatch(/its reply is free text/)
+    expect(found.message).toMatch(/decides call: the address this request is sent to/)
+  })
+
+  it('flags an extract node whose values choose an email recipient', () => {
+    const found = findingFor({
+      nodes: [
+        node('hook', 'trigger-webhook'),
+        node('pull', 'ai-extract', { text: '{{hook.body}}', fields: 'email' }, 'Pull contact'),
+        node('mail', 'action-email', { to: '{{pull.data.email}}', subject: 'hi', body: 'hi' }),
+      ],
+      edges: [edge('hook', 'pull'), edge('mail', 'mail')].slice(0, 1).concat([edge('pull', 'mail')]),
+    })
+    expect(found.nodeId).toBe('pull')
+    expect(found.message).toMatch(/steers the values this node extracts/)
+    expect(found.message).toMatch(/who this email is sent to/)
+  })
+
+  it('says nothing when the model’s answer decides nothing', () => {
+    // The common, harmless shape: classify a webhook body and log the label.
+    // Reporting this would make the finding fire on most AI nodes in existence.
+    const graph = {
+      nodes: [
+        node('hook', 'trigger-webhook'),
+        node('risk', 'ai-classify', { text: '{{hook.body}}', labels: 'high,low' }),
+        node('log', 'output-log', { message: 'risk={{risk.label}}' }),
+      ],
+      edges: [edge('hook', 'risk'), edge('risk', 'log')],
+    }
+    expect(codes(graph)).not.toContain('prompt-injection')
+  })
+
+  it('says nothing when the prompt is not caller-controlled', () => {
+    const graph = gatedByClassifier()
+    graph.nodes[1].data.config.text = 'Review this order: {{vars.TEMPLATE}}'
+    expect(codes(graph)).not.toContain('prompt-injection')
+  })
+
+  it('says nothing when the prompt is only third-party text, not chosen text', () => {
+    // An HTTP response is `external`: a third party wrote it, but nobody picked
+    // the words to steer the model. Counting it would mark most graphs.
+    const graph = {
+      nodes: [
+        node('cron', 'trigger-schedule'),
+        http('fetch'),
+        node('sum', 'ai-prompt', { prompt: 'Summarise {{fetch.body}}' }),
+        http('post', { url: 'https://{{sum.text}}/x' }),
+      ],
+      edges: [edge('cron', 'fetch'), edge('fetch', 'sum'), edge('sum', 'post')],
+    }
+    expect(codes(graph)).not.toContain('prompt-injection')
+  })
+
+  it('says nothing when the answer only reaches a low-sensitivity sink', () => {
+    const graph = {
+      nodes: [
+        node('hook', 'trigger-webhook'),
+        node('ask', 'ai-prompt', { prompt: 'Draft a reply to {{hook.body}}' }),
+        node('mail', 'action-email', { to: 'ops@acme.com', subject: 's', body: '{{ask.text}}' }),
+      ],
+      edges: [edge('hook', 'ask'), edge('ask', 'mail')],
+    }
+    // The body of an email is a medium sink — worth recording in the lineage,
+    // not worth a finding here.
+    expect(codes(graph)).not.toContain('prompt-injection')
+  })
+
+  it('follows the influence through an intermediate node', async () => {
+    const found = findingFor({
+      nodes: [
+        node('hook', 'trigger-webhook'),
+        node('risk', 'ai-classify', { text: '{{hook.body}}', labels: 'high,low' }),
+        node('shape', 'transform', { template: '{"host": "{{risk.label}}.acme.com"}' }),
+        http('call', { url: 'https://{{shape.host}}/notify' }),
+      ],
+      edges: [edge('hook', 'risk'), edge('risk', 'shape'), edge('shape', 'call')],
+    })
+    expect(found.nodeId).toBe('risk')
+    expect(found.message).toMatch(/the address this request is sent to/)
+  })
+
+  it('reports the AI node, not the sink — the prompt is where the fix is', () => {
+    const findings = analyzeLineage(gatedByClassifier()).findings
+    const codesFound = findings.map((f) => f.code)
+    // The tainted-sink check is a different question about a different node and
+    // must not fire here: the charge URL is authored config.
+    expect(codesFound).toContain('prompt-injection')
+    expect(codesFound).not.toContain('tainted-sink')
+  })
+})
+
 describe('dead computation', () => {
   it('flags a leaf whose output nothing reads', () => {
     const graph = {

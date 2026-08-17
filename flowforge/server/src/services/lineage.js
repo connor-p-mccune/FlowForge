@@ -149,6 +149,42 @@ const SINKS = {
   ],
 }
 
+// — where instructions come from ————————————————————————————————————————
+//
+// Config fields that end up inside an LLM's prompt. Not listed as sinks, and the
+// distinction is the point: a sink is where data *leaves*, and the risk there is
+// that a caller chooses the destination. Here the data stays, and the risk is
+// that a caller chooses the *instructions* — the model becomes a confused deputy
+// acting on text an outsider wrote.
+//
+// `control` says what an injection can reach if it succeeds, which is what makes
+// the three cases worth telling apart rather than reporting as one:
+//
+//   arbitrary  free text, which then flows onward as data
+//   bounded    one of the labels the author declared (the AI service refuses
+//              anything else), so an injection can only pick a different one
+//   shape      the values of the fields the author declared
+const PROMPT_FIELDS = {
+  'ai-prompt': [
+    { key: 'prompt', control: 'arbitrary' },
+    { key: 'system', control: 'arbitrary' },
+  ],
+  'ai-classify': [{ key: 'text', control: 'bounded' }],
+  'ai-extract': [{ key: 'text', control: 'shape' }],
+}
+
+const CONTROL_TEXT = {
+  arbitrary: 'and its reply is free text',
+  bounded: 'and it chooses which of this node’s labels is returned',
+  shape: 'and it steers the values this node extracts',
+}
+
+// Node types whose whole purpose is to route a run. A model answer reaching one
+// of these decides which branch executes, which is the second half of the
+// confused-deputy problem — the first half being that an outsider wrote the
+// prompt.
+const ROUTING_TYPES = new Set(['condition', 'switch', 'validate'])
+
 // Node types that exist to compute a value for something else to use. A node
 // here whose output is never referenced did work nobody consumes — which is
 // worth saying, and is a bill rather than a curiosity on an AI node. Deliberately
@@ -223,9 +259,15 @@ function analyzeLineage({ nodes: rawNodes = [], edges: rawEdges = [] } = {}) {
 
   const byId = new Map(notelessNodes.map((n) => [n.id, n]))
   const incoming = new Map(flowNodes.map((n) => [n.id, []]))
+  // Immediate graph successors. Needed for exactly one thing — see the
+  // confused-deputy finding — because a routing node reads its *merged input*
+  // rather than naming a `{{…}}` reference, so the read graph cannot see the
+  // edge that carries a model's answer into a condition.
+  const successors = new Map(flowNodes.map((n) => [n.id, []]))
   const outDegree = new Map(flowNodes.map((n) => [n.id, 0]))
   for (const e of edges) {
     if (incoming.has(e.target)) incoming.get(e.target).push(e.source)
+    if (successors.has(e.source)) successors.get(e.source).push(e.target)
     if (outDegree.has(e.source)) outDegree.set(e.source, outDegree.get(e.source) + 1)
   }
 
@@ -310,7 +352,7 @@ function analyzeLineage({ nodes: rawNodes = [], edges: rawEdges = [] } = {}) {
     nodes: info,
     readBy,
     sinks: collectSinks(byId, info),
-    findings: findings(byId, info, readBy),
+    findings: findings(byId, info, readBy, successors),
     secrets: secretReach(byId, info),
   }
 }
@@ -381,6 +423,56 @@ function collectSinks(byId, info) {
   return out
 }
 
+// AI nodes whose prompt is built from data somebody outside the workspace wrote.
+//
+// Only `untrusted` counts here, not `external`, and that is a deliberate
+// narrowing rather than an oversight: an HTTP response feeding a prompt is a
+// third party's text, not an adversary's *choice* of text, and counting it would
+// mark most graphs that use an AI node at all. The confused-deputy story needs
+// somebody who picks the words.
+function collectPromptReads(byId, info) {
+  const out = []
+  for (const [nodeId, node] of byId) {
+    for (const spec of PROMPT_FIELDS[node.type] || []) {
+      const carried = (info[nodeId]?.reads || []).filter((r) => r.where === spec.key)
+      if (carried.length === 0) continue
+      const untrusted = new Set()
+      for (const read of carried) {
+        for (const o of info[read.nodeId]?.origins || []) {
+          if (ORIGIN_KINDS[o]?.trust === 'untrusted') untrusted.add(o)
+        }
+      }
+      if (untrusted.size === 0) continue
+      out.push({
+        nodeId,
+        label: label(node),
+        nodeType: node.type,
+        key: spec.key,
+        control: spec.control,
+        via: carried.map((r) => r.raw),
+        origins: [...untrusted],
+      })
+    }
+  }
+  return out
+}
+
+// Everything downstream that reads this node's output, transitively. The same
+// closure `traceImpact` walks — a value's influence, not its taint — because the
+// question here is what the model's answer gets to decide.
+function influenceOf(nodeId, readBy) {
+  const seen = new Set()
+  const frontier = [nodeId]
+  while (frontier.length > 0) {
+    for (const readerId of readBy.get(frontier.shift()) || []) {
+      if (seen.has(readerId)) continue
+      seen.add(readerId)
+      frontier.push(readerId)
+    }
+  }
+  return seen
+}
+
 // Which nodes can see which secret. Not a finding — a fact worth surfacing,
 // because "who can read STRIPE_KEY?" is a question every workspace eventually
 // asks and the answer is otherwise a manual grep of every node's config.
@@ -399,7 +491,7 @@ function issue(severity, code, message, nodeId = null) {
   return { severity, code, message, nodeId }
 }
 
-function findings(byId, info, readBy) {
+function findings(byId, info, readBy, successors = new Map()) {
   const out = []
 
   // Taint: something outside the workspace controls a value that decides where
@@ -425,6 +517,66 @@ function findings(byId, info, readBy) {
           (spec.detail ? ` (${spec.detail})` : '') +
           ` — via ${sink.via.map((v) => `{{${v}}}`).join(', ')}`,
         sink.nodeId
+      )
+    )
+  }
+
+  // The model as a confused deputy. Untrusted data reaching a prompt is not the
+  // finding — it is what an AI node in a workflow is *for*, and reporting it
+  // would fire on every one of them. The finding is the **composition**: an
+  // outsider writes the instructions, *and* the model's answer decides something
+  // the workflow then acts on.
+  //
+  // "Decides something" is read from the forward influence closure — the same one
+  // impact analysis walks — and means either a high-sensitivity sink (the address
+  // a request goes to, who an email reaches, which workflow runs) or a routing
+  // node, whose whole job is to pick a branch. A model answer that only lands in
+  // a log line or an email body is a different and much smaller problem, so it is
+  // not reported.
+  //
+  // A warning, like every other finding here: the pattern is legitimate with the
+  // containments the AI service applies, and the message's job is to let an
+  // author recognise their own design and decide.
+  const sinksBySource = new Map()
+  for (const sink of collectSinks(byId, info)) {
+    if (sink.sensitivity !== 'high') continue
+    if (!sinksBySource.has(sink.nodeId)) sinksBySource.set(sink.nodeId, [])
+    sinksBySource.get(sink.nodeId).push(sink)
+  }
+  for (const prompt of collectPromptReads(byId, info)) {
+    const influenced = influenceOf(prompt.nodeId, readBy)
+    const reachedSinks = [...influenced].flatMap((id) => sinksBySource.get(id) || [])
+    // A routing node counts two ways, and the second is why this needs the
+    // graph and not just the read edges. A condition that names
+    // `{{risk.label}}` is an ordinary read. A condition in *expression* mode
+    // reads `label` off its merged input and names nothing, so the read graph is
+    // blind to it — and the engine merges only **immediate** predecessors, so an
+    // immediate successor is exactly the set where the model's answer is still in
+    // scope. Anything further away had to reference it, which the closure above
+    // already covers.
+    const routers = [
+      ...new Set([
+        ...[...influenced].filter((id) => ROUTING_TYPES.has(byId.get(id)?.type)),
+        ...(successors.get(prompt.nodeId) || []).filter((id) =>
+          ROUTING_TYPES.has(byId.get(id)?.type)
+        ),
+      ]),
+    ]
+    if (reachedSinks.length === 0 && routers.length === 0) continue
+
+    const decides = reachedSinks.length > 0
+      ? `${reachedSinks[0].label}: ${reachedSinks[0].what}`
+      : `which branch ${label(byId.get(routers[0]))} takes`
+    const spec = ORIGIN_KINDS[prompt.origins[0]]
+    out.push(
+      issue(
+        'warning',
+        'prompt-injection',
+        `${prompt.label}: this node’s ${prompt.key} is built from ${spec.label}` +
+          (spec.detail ? ` (${spec.detail})` : '') +
+          `, ${CONTROL_TEXT[prompt.control]} — and that decides ${decides}. ` +
+          `Via ${prompt.via.map((v) => `{{${v}}}`).join(', ')}.`,
+        prompt.nodeId
       )
     )
   }
@@ -598,6 +750,8 @@ module.exports = {
   ORIGIN_KINDS,
   INTRINSIC_ORIGINS,
   SINKS,
+  PROMPT_FIELDS,
+  ROUTING_TYPES,
   COMPUTING_TYPES,
   collectRefs,
   configRefs,
