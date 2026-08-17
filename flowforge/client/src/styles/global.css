@@ -7830,6 +7830,108 @@ html, body, #root {
   margin-top: 10px;
 }
 
+/* ── Signing keys ────────────────────────────────────────────────────────
+   A revoked key keeps its row, greyed rather than removed: the question after
+   an incident is what it signed *while* it was trusted, and hiding it would
+   answer that with silence. The fingerprint is monospaced because it is meant
+   to be compared character by character against the one printed by keygen. */
+.signing-keys {
+  margin-top: 32px;
+  padding-top: 20px;
+  border-top: 1px solid #e5e7eb;
+}
+
+.signing-keys__title {
+  font-size: 15px;
+  font-weight: 600;
+  margin: 0 0 6px;
+}
+
+.signing-keys__enforce {
+  display: flex;
+  gap: 9px;
+  align-items: flex-start;
+  margin: 14px 0;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  font-size: 13px;
+}
+
+.signing-keys__enforce input { margin-top: 3px; }
+.signing-keys__enforce > span { display: flex; flex-direction: column; gap: 3px; }
+
+.signing-keys__list {
+  list-style: none;
+  margin: 12px 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.signing-keys__item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+}
+
+.signing-keys__item--revoked {
+  opacity: 0.6;
+  background: #f9fafb;
+}
+
+.signing-keys__meta {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+  flex: 1;
+}
+
+.signing-keys__name { font-weight: 600; font-size: 13px; }
+
+.signing-keys__badge {
+  align-self: flex-start;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 1px 7px;
+  border-radius: 9px;
+  background: #fee2e2;
+  color: #b91c1c;
+}
+
+.signing-keys__print {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  color: #475569;
+  word-break: break-all;
+}
+
+.signing-keys__add {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.signing-keys__pem {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  padding: 8px;
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+  resize: vertical;
+}
+
+.signing-keys__actions { display: flex; gap: 8px; }
+
 /* ── Deploy preview ──────────────────────────────────────────────────────
    The headline carries the answer and the list carries the detail, so a
    reviewer who reads one line has read the important one. Each differing run is

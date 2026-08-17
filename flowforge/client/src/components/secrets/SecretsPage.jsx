@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { apiFetch } from '../../services/api'
 import { useToast } from '../../hooks/useToast'
 import { SkeletonRows } from '../Skeleton'
+import SigningKeysSection from './SigningKeysSection'
 
 // Workspace secrets manager. Secrets are write-only: the API returns names and
 // metadata, never values, so the UI can add, rotate, and delete but never read
@@ -302,6 +303,12 @@ export default function SecretsPage({ workspaceId }) {
           ))}
         </ul>
       )}
+
+      {/* The other key material an owner manages here, and the one nobody
+          reaches for until a promotion needs vouching for. Renders nothing at
+          all for a non-owner — its own fetch is refused, like the key ring
+          above. */}
+      <SigningKeysSection workspaceId={workspaceId} />
     </div>
   )
 }

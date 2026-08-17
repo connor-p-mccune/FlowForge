@@ -117,7 +117,16 @@ describe('SecretsPage', () => {
   })
 
   it('surfaces a load failure', async () => {
-    apiFetch.mockRejectedValueOnce(new Error('Workspace not found'))
+    // Keyed on the URL rather than on call order: the page renders child
+    // sections (the key ring, the signing keys) whose own fetches run *before*
+    // the parent's effect, so a `…Once` rejection would land on whichever of
+    // them happened to go first.
+    apiFetch.mockImplementation((url, options = {}) => {
+      if (!options.method && url === '/api/workspaces/ws1/secrets') {
+        return Promise.reject(new Error('Workspace not found'))
+      }
+      return Promise.reject(new Error('refused'))
+    })
     render(<SecretsPage workspaceId="ws1" />)
     expect(await screen.findByText('Workspace not found')).toBeInTheDocument()
   })
