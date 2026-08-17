@@ -17,6 +17,8 @@ const COMMANDS = {
   search: require('../src/commands/search'),
   export: require('../src/commands/export'),
   import: require('../src/commands/import'),
+  keygen: require('../src/commands/keygen'),
+  sign: require('../src/commands/sign'),
   diff: require('../src/commands/diff'),
   merge: require('../src/commands/merge'),
   lint: require('../src/commands/lint'),
@@ -49,6 +51,8 @@ const COMMANDS = {
   reject: require('../src/commands/respond').reject,
 }
 
+const OFFLINE = new Set(['login', 'keygen', 'sign'])
+
 const USAGE = `flowforge — FlowForge from the terminal
 
 Usage:
@@ -59,6 +63,8 @@ Usage:
   flowforge search <query> [--limit N]             Find workflows by name or by what's inside them
   flowforge export <workflow-id>                   Print the portable workflow JSON (pipe to a file)
   flowforge import <workspace-id> <file> [--name]  Create a draft workflow from an exported file
+  flowforge keygen [--out <prefix>]                Mint an Ed25519 signing key pair (offline; never touches a server)
+  flowforge sign <file> --key <private.key>        Sign an exported definition — or --check <public.pub> to verify one
   flowforge diff <workflow-id> <file>              Compare the live workflow against an exported file (exits non-zero on drift)
   flowforge merge <workflow-id> <file> [--yes]     Three-way merge a file into the live workflow (exits 2 on conflicts)
   flowforge lint <workflow-id> [file] [--strict]   Lint the live workflow — or an exported file against its workspace (exits non-zero on errors)
@@ -128,9 +134,12 @@ async function main() {
   }
 
   const ctx = { log: (line) => console.log(line) }
-  // login builds its own client from the flags; everything else needs
-  // credentials up front.
-  if (command !== 'login') {
+  // Commands that talk to no server. `login` builds its own client from the
+  // flags; `keygen` and `sign` are offline on purpose — a signing key that has
+  // been near a server is a signing key somebody has to reason about, and the
+  // approval has to happen where the review happens. Requiring credentials for
+  // them would be a lie about what they do.
+  if (!OFFLINE.has(command)) {
     ctx.api = createClient(resolveConfig())
   }
   return handler({ positionals, flags }, ctx)

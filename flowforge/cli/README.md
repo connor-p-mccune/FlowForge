@@ -45,6 +45,8 @@ export FLOWFORGE_TOKEN=ffp_…
 | `flowforge export <id>` | Print the workflow's portable JSON to stdout — `flowforge export <id> > workflows/sync.json` checks it into git |
 | `flowforge workspaces` | List workspaces visible to the token (the ID column is what `import` takes) |
 | `flowforge import <ws-id> <file> [--name "…"]` | Create a draft workflow from an exported file — promote definitions between environments (needs the `manage` scope) |
+| `flowforge keygen [--out <prefix>]` | Mint an Ed25519 signing key pair. **Offline** — it talks to no server ([docs](../docs/PROVENANCE.md)) |
+| `flowforge sign <file> --key <k>` | Sign an exported definition where the review happens; `--check <pub>` verifies one with no server, token, or trust in the pipeline |
 | `flowforge diff <id> <file>` | Compare the **live** workflow against an exported file — exits non-zero on drift, so CI catches the promotion someone forgot (or the hand-edit someone made) |
 | `flowforge merge <id> <file> [--yes] [--ours\|--theirs] [--base <v>]` | Three-way merge a file into the live workflow, per config field — keeps both sides' work instead of picking one to lose. Previews unless `--yes`; exits **2** on conflicts ([docs](../docs/MERGE.md)) |
 | `flowforge lint <id> [file] [--strict]` | Run the app's linter as a CI gate — over the live workflow, or over an exported file against its target workspace (real secret/variable names, sub-workflow targets); exits non-zero on errors, `--strict` fails warnings too |
@@ -182,6 +184,50 @@ A dead branch always fails. `--cover` additionally fails when a *live* branch
 has no payload that can drive it in test mode — deliberately opt-in, because a
 workflow with an approval gate can never satisfy it: the rejected side is real
 and untestable in dry-run mode, which the output says rather than hides.
+
+## Prove the definition that landed is the one that was reviewed
+
+`export → git → review → CI → import` passes the document through a repository,
+a runner, an artifact store and an HTTP call, and a `manage` token can import
+anything. A signature is what turns "the graph that arrived is the graph that
+was reviewed" from an assumption into a fact:
+
+```console
+$ flowforge keygen --out ~/.flowforge-signing
+✓ Key pair generated.
+  private /home/ada/.flowforge-signing.key (keep this; never commit it)
+  public  /home/ada/.flowforge-signing.pub
+  print   ded9fc50:64e8f727:0ccd86dc:9a9762fa:36be2c6a:91016241:d309087e:c72efc23
+
+$ flowforge export 6f0c… > workflows/sync.json
+$ flowforge sign workflows/sync.json --key ~/.flowforge-signing.key
+✓ Signed workflows/sync.json
+  digest d946f84c66a58302c4ae36ea1a57113f5d6a0e159873d93a05db33eb551da20a
+  key    ded9fc50:64e8f727:…
+```
+
+Trust the public half in the target workspace (Settings → Signing keys) and the
+import reports who vouched for what:
+
+```console
+$ flowforge import $PROD_WS workflows/sync.json
+Imported Order sync as a draft.
+✓ signed by release key (ded9fc50:64e8f727:…)
+digest: d946f84c66a58302c4ae36ea1a57113f5d6a0e159873d93a05db33eb551da20a
+```
+
+Both `keygen` and `sign` are **offline** on purpose: a signing key that has been
+near a server is one somebody has to reason about, and an approval minted by the
+server it is presented to proves nothing. `sign --check <public.pub>` is the
+reviewer's half — verify the file in front of you with no server, no token, and
+no trust in whatever handed it over; it exits non-zero when it does not verify,
+so a pre-merge hook can use it.
+
+The signature covers **what the workflow does** — node config, wiring, declared
+guarantees — and not the file's layout, so a re-export after somebody dragged a
+node still verifies while any change to behaviour breaks it. Renaming with
+`--name` on import breaks it too, and says so, because the name is part of what
+was approved.
 
 ## Review a promotion by what it does, not by what it says
 
