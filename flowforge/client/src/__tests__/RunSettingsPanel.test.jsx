@@ -462,6 +462,36 @@ describe('RunSettingsPanel', () => {
     )
   })
 
+  it('saves declared redactions as a list of paths', async () => {
+    setup()
+    await screen.findByLabelText(/max concurrent runs/i)
+
+    fireEvent.change(screen.getByLabelText(/^Fields$/i), {
+      target: { value: 'email\n  customer.address  \n\n' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: /save settings/i }))
+    await waitFor(() =>
+      expect(apiFetch).toHaveBeenCalledWith(
+        '/api/workflows/wf1',
+        expect.objectContaining({
+          method: 'PUT',
+          // Blank lines dropped and each path trimmed: somebody pasting field
+          // names out of a payload should not have to tidy up after themselves.
+          body: expect.objectContaining({ redact: ['email', 'customer.address'] }),
+        })
+      )
+    )
+  })
+
+  it('says what redaction does and does not do', async () => {
+    setup()
+    await screen.findByLabelText(/max concurrent runs/i)
+    // Reading this as "declaring a field stops it leaving" would be a dangerous
+    // misunderstanding, so the panel says otherwise in as many words.
+    expect(screen.getByText(/still sends it/)).toBeInTheDocument()
+    expect(screen.getByText(/read from the trigger payload at run start/i)).toBeInTheDocument()
+  })
+
   it('surfaces a server error and stays open', async () => {
     apiFetch.mockImplementation((path, opts) => {
       if (path === '/api/workflows/wf1' && !opts) return Promise.resolve({ workflow: WORKFLOW })

@@ -49,6 +49,7 @@ export default function RunSettingsPanel({ workflowId, open, onClose }) {
   // effects it already caused. 'failure' (default) | 'failure-or-cancel' | 'off'.
   const [rollbackPolicy, setRollbackPolicy] = useState('failure')
   const [recoveryPolicy, setRecoveryPolicy] = useState('safe')
+  const [redact, setRedact] = useState('')
   // Cross-workflow dependencies (read-only impact analysis). null while
   // loading; a fetch failure just hides the section — it's informational.
   const [deps, setDeps] = useState(null)
@@ -95,6 +96,14 @@ export default function RunSettingsPanel({ workflowId, open, onClose }) {
         setPriority(wf.default_priority || 'normal')
         setRollbackPolicy(wf.rollback_policy || 'failure')
         setRecoveryPolicy(wf.recovery_policy || 'safe')
+        // Stored as a JSON array; edited as one path per line, which is what
+        // somebody pasting field names out of a payload actually wants.
+        try {
+          const parsed = wf.redact_json ? JSON.parse(wf.redact_json) : []
+          setRedact(Array.isArray(parsed) ? parsed.join('\n') : '')
+        } catch {
+          setRedact('')
+        }
         // Stored in ms / as a 0..1 fraction; shown in the friendlier seconds / %.
         setSlaDurationInput(wf.sla_max_duration_ms ? String(wf.sla_max_duration_ms / 1000) : '')
         setSlaSuccessInput(
@@ -236,6 +245,7 @@ export default function RunSettingsPanel({ workflowId, open, onClose }) {
           default_priority: priority,
           rollback_policy: rollbackPolicy,
           recovery_policy: recoveryPolicy,
+          redact: redact.split('\n').map((line) => line.trim()).filter(Boolean),
         },
       })
       toast.success('Run settings saved')
@@ -496,6 +506,32 @@ export default function RunSettingsPanel({ workflowId, open, onClose }) {
                   report you’d rather keep.
                 </p>
               )}
+
+              <div className="run-settings__section">Redacted fields</div>
+              <p className="webhook-panel__hint">
+                Trigger fields that carry personal data. Their <em>values</em> are
+                masked out of everything this workflow stores or shows — the
+                trigger’s own step, a request body that interpolated them, a
+                response that echoed them back — so declaring an email once
+                covers all of it. One path per line: <code>email</code>,{' '}
+                <code>customer.address</code>.
+              </p>
+              <label className="run-settings__field">
+                <span className="run-settings__label">Fields</span>
+                <textarea
+                  rows={3}
+                  value={redact}
+                  placeholder={'email\ncustomer.address'}
+                  onChange={(e) => setRedact(e.target.value)}
+                />
+              </label>
+              <p className="webhook-panel__hint">
+                This governs what FlowForge <strong>keeps</strong>, not where data
+                goes: a node that sends the field to an API still sends it. Values
+                are read from the trigger payload at run start, so a field that
+                first appears in an API response can’t be declared here — 🔗
+                Lineage shows where trigger data travels.
+              </p>
 
               <div className="run-settings__section">Crash recovery</div>
               <p className="webhook-panel__hint">

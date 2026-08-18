@@ -907,6 +907,9 @@ router.post('/workflows/:id/lint', tokenAuth('read'), (req, res) => {
         // against are the ones live there — which is what catches a promotion
         // that would route around a gate production still declares.
         guarantees: workflow.guarantees_json,
+        // Declared redactions, so a rule that could never match is reported
+        // while it is still an edit rather than after a run stored the value.
+        redact: workflow.redact_json,
       }),
       // Policy findings ride the same report, so `flowforge lint` is one gate
       // for "will it run?" and "is it allowed here?" rather than two commands.

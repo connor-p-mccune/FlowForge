@@ -21,6 +21,7 @@ const { verifyGuarantees, parseGuarantees } = require('../services/guarantees')
 const { analyzePaths } = require('../services/pathConstraints')
 const { previewDeploy } = require('../services/backtest')
 const { verifyImport } = require('../services/trustStore')
+const { parseRedactions } = require('../services/redaction')
 
 // The provenance verdict as a caller sees it. `digest` is the identity of the
 // graph that landed — printable, comparable, and the same value the signer saw
@@ -538,6 +539,12 @@ router.put('/workflows/:id', auth, validate(workflowRule), (req, res) => {
       'rollback_policy' in req.body ? req.body.rollback_policy : workflow.rollback_policy
     const recoveryPolicyValue =
       'recovery_policy' in req.body ? req.body.recovery_policy : workflow.recovery_policy
+    // Parsed rather than rejected, like guarantees: a malformed entry is dropped
+    // and the stored list echoed back, so a caller sees exactly what was kept
+    // instead of assuming. An empty list stores NULL rather than "[]" — the two
+    // mean the same thing and one of them is a value somebody has to explain.
+    const redactions =
+      'redact' in req.body ? parseRedactions(req.body.redact) : parseRedactions(workflow.redact_json)
 
     const now = new Date().toISOString()
     db.prepare(
@@ -547,8 +554,8 @@ router.put('/workflows/:id', auth, validate(workflowRule), (req, res) => {
          sla_max_duration_ms = ?, sla_min_success_rate = ?, heartbeat_interval_minutes = ?, heartbeat_alerted_at = ?,
          slo_target = ?, slo_window_days = ?,
          error_workflow_id = ?, default_priority = ?, rollback_policy = ?, recovery_policy = ?,
-         updated_at = ? WHERE id = ?`
-    ).run(name, description ?? workflow.description, maxConcurrent, policy, rateMax, rateWindow, maintenanceCron, maintenanceDuration, maintenanceTimezone, slaMaxDuration, slaMinSuccess, heartbeatInterval, heartbeatAlertedAt, sloTarget, sloWindowDays, errorWorkflowId, defaultPriority, rollbackPolicyValue, recoveryPolicyValue, now, req.params.id)
+         redact_json = ?, updated_at = ? WHERE id = ?`
+    ).run(name, description ?? workflow.description, maxConcurrent, policy, rateMax, rateWindow, maintenanceCron, maintenanceDuration, maintenanceTimezone, slaMaxDuration, slaMinSuccess, heartbeatInterval, heartbeatAlertedAt, sloTarget, sloWindowDays, errorWorkflowId, defaultPriority, rollbackPolicyValue, recoveryPolicyValue, redactions.length ? JSON.stringify(redactions) : null, now, req.params.id)
 
     // Clearing (or removing) the window while it still holds a maintenance
     // pause would strand the workflow paused — the sweep no longer sees it to
@@ -796,6 +803,9 @@ router.post('/workflows/:id/lint', auth, (req, res) => {
         // Declared path invariants, checked against the graph on screen — the
         // edit that breaks one should be reported while it is still an edit.
         guarantees: workflow.guarantees_json,
+        // Declared redactions, so a rule that could never match is reported
+        // while it is still an edit rather than after a run stored the value.
+        redact: workflow.redact_json,
       }),
       ...policyIssues(workflow, { graphJson: JSON.stringify(graph) }),
     ]

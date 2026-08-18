@@ -384,6 +384,21 @@ db.exec(`
 // arrived without its invariants would be the interesting half missing.
 ensureColumn('workflows', 'guarantees_json', 'TEXT')
 
+// Declared field redaction (services/redaction.js): a JSON array of trigger
+// field paths whose values must be scrubbed from everything this workflow
+// persists or publishes — `["email", "customer.address"]`, or the `hook.email`
+// spelling the data picker produces.
+//
+// The values join the same redactor the decrypted secrets build, so an email
+// declared once is masked in the trigger's own step row, in the request body a
+// later node interpolated it into, and in the response a third party echoed it
+// back in. Masking by *location* rather than by value would scrub one of those.
+//
+// One column rather than a table for the same reason `guarantees_json` is one:
+// per-workflow config with no independent lifetime, no query of its own, and it
+// travels with the graph it describes.
+ensureColumn('workflows', 'redact_json', 'TEXT')
+
 // The workspace trust store (services/trustStore.js): the Ed25519 public keys
 // this workspace will accept a workflow definition from.
 //

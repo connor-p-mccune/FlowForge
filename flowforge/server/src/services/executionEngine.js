@@ -28,6 +28,7 @@ const canary = require('./canary')
 const debuggerService = require('./debugger')
 const executionLease = require('./executionLease')
 const stepIdempotency = require('./stepIdempotency')
+const redaction = require('./redaction')
 
 const runners = {
   'action-http': require('./nodeRunners/httpRequest'),
@@ -379,7 +380,6 @@ async function runLeasedExecution(
   // Workspace variables ride the same template scope ({{vars.NAME}}) but are
   // plain config: no redaction, and they may appear in persisted steps.
   const vars = loadWorkspaceVariables(workflow.workspace_id)
-  const redact = buildRedactor(Object.values(secrets))
 
   // Progressive delivery. While a canary is running, this run executes either
   // the live canvas (the edits under test) or the pinned baseline version — and
@@ -406,6 +406,24 @@ async function runLeasedExecution(
   const graph = preview?.graphOverride
     ? { nodes: preview.graphOverride.nodes || [], edges: preview.graphOverride.edges || [] }
     : JSON.parse(release.graphJson)
+
+  // Declared field redaction (services/redaction.js). A workflow can name the
+  // trigger fields that carry personal data, and their values join the same
+  // scrubber the secrets use — so an email is masked in the trigger's own step,
+  // in the request body that interpolated it, and in the response that echoed it
+  // back. Masking the declared *location* would scrub one of those and leave the
+  // rest, which is the version of this that looks like it works.
+  //
+  // Built here rather than beside the secrets because it needs the graph: a
+  // declaration may be written as `hook.email`, and only the graph says whether
+  // `hook` is a trigger. Nothing between the two points uses the redactor.
+  const triggerNodeIds = new Set(
+    (graph.nodes || []).filter((n) => String(n.type || '').startsWith('trigger-')).map((n) => n.id)
+  )
+  const redact = buildRedactor([
+    ...Object.values(secrets),
+    ...redaction.valuesFor(workflow.redact_json, { triggerPayload, triggerNodeIds }),
+  ])
 
   // Chaos profile, if this workflow has an armed one. Loading it here (rather
   // than per node) means one parse per run and one decision about scope: a

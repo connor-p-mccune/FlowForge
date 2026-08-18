@@ -19,6 +19,7 @@ const { analyze } = require('./expression')
 const { inferGraphTypes, checkReferences } = require('./typeInference')
 const { CACHEABLE_TYPES, DEFAULT_TTL_SECONDS } = require('./stepCache')
 const { isEnabled: isIdempotent } = require('./stepIdempotency')
+const { unresolvablePaths } = require('./redaction')
 const { compensationPlan } = require('./compensation')
 const { analyzeLineage } = require('./lineage')
 const { guaranteeIssues } = require('./guarantees')
@@ -466,7 +467,7 @@ function buildAncestors(order, incomingByNode) {
 //                     (services/graphLookup.js builds one)
 //   guarantees      — the workflow's declared path invariants (raw JSON or a
 //                     parsed array), verified against the graph on screen
-function lintGraph({ nodes: rawNodes = [], edges: rawEdges = [] } = {}, { secretNames, variableNames, workflowTargets, resolveWorkflow, rollbackPolicy, guarantees } = {}) {
+function lintGraph({ nodes: rawNodes = [], edges: rawEdges = [] } = {}, { secretNames, variableNames, workflowTargets, resolveWorkflow, rollbackPolicy, guarantees, redact } = {}) {
   const issues = []
 
   // Sticky notes are annotations: the engine drops them (and any edge touching
@@ -665,6 +666,31 @@ function lintGraph({ nodes: rawNodes = [], edges: rawEdges = [] } = {}, { secret
           'unwired-branch',
           `${label(node)}: on-error takes the error branch, but it isn't connected — a caught failure ends the flow there`,
           node.id
+        )
+      )
+    }
+  }
+
+  // Declared field redaction (services/redaction.js). The values are read off
+  // the *trigger payload* at run start, so a declaration whose head names a
+  // node that is not a trigger can never resolve — and a redaction rule that
+  // silently matches nothing is the worst possible failure here, because the
+  // author believes the field is being scrubbed. An error rather than a
+  // warning for exactly that reason.
+  //
+  // Deliberately silent about a path that simply is not in today's payload: an
+  // optional field is absent on the runs that do not carry it, and reporting
+  // that would make every such workflow noisy about working correctly.
+  {
+    const triggerIds = new Set(
+      nodes.filter((n) => String(n.type || '').startsWith('trigger-')).map((n) => n.id)
+    )
+    for (const path of unresolvablePaths(redact, { nodeIds, triggerNodeIds: triggerIds })) {
+      issues.push(
+        issue(
+          'error',
+          'invalid-config',
+          `Redaction "${path}" names a node's output, not a trigger field — it is resolved before the run and would never match`
         )
       )
     }
