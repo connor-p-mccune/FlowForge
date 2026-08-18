@@ -36,7 +36,7 @@ problem sounds familiar.
 | **Promotion provenance** | `export → git → review → CI → import` passes a definition through four systems that can change it, and a `manage` token imports anything. So a document carries an Ed25519 signature — over the graph's *semantics*, not its bytes, because a signature that breaks when somebody drags a node is one people learn to skip. | [PROVENANCE.md](./docs/PROVENANCE.md) |
 | **Governance** | The linter asks "will this run?"; a policy asks "is this *allowed* here?". Rules are type-checked when saved, so one reading a misspelled field is refused rather than reporting every workflow compliant forever. | [POLICIES.md](./docs/POLICIES.md) |
 
-Everything above is covered by tests: **141 server suites (1931 tests)**, 61
+Everything above is covered by tests: **142 server suites (1944 tests)**, 61
 client files (546), 180 CLI tests, and 84 pytest tests for the AI service — lint
 and all four run on every push.
 
@@ -301,6 +301,25 @@ status completed
   tamper-evident audit log, because "when did we last rotate, and who?" is a
   compliance question and nothing else would record it, since no value
   changed.
+- **Declared field redaction** — secrets are scrubbed from everything a run
+  stores; a webhook body's **email address, customer name and postal address**
+  are not, because none of them is a credential. So they land verbatim in the
+  step rows, in the run panel, in the live event every watching collaborator
+  receives, and in that database's backups — for as long as history is kept, in
+  a place nobody chose to put them. Declare which trigger fields are personal
+  and their values join the same scrubber the secrets build. **By value, not by
+  path**, which is the whole reason it works: an email declared once is masked in
+  the trigger's own step, in the request body a later node interpolated it into,
+  in the response a third party echoed it back in, and in the error message that
+  quoted it — masking the declared *location* would scrub one of those and look
+  correct in a demo. Declaring an object covers every string inside it, because
+  the alternative is a declaration per leaf and that is how a field gets missed.
+  Values resolve from the trigger payload at run start, so a declaration naming a
+  *node's output* is a lint **error** — a redaction rule that silently matches
+  nothing is worse than none, since the author believes the field is being
+  scrubbed. And it is deliberately **not** a boundary control: the value still
+  flows through the engine and a node that sends it to an API still sends it.
+  This governs what FlowForge *keeps and shows*.
 - **Workspace variables** — the plain-config counterpart to secrets: store
   environment base URLs, channel names, and thresholds once per workspace and
   reference them as `{{vars.NAME}}` in any node config. Values are **readable

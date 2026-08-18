@@ -37,6 +37,7 @@ Bull worker. The notable trust boundaries and the threats against them:
 | T18 | **Merge as a definition-tampering vector** | `POST /api/v1/workflows/:id/merge` rewrites a workflow definition from outside the app, and a merge that silently resolved conflicts could slip a change past code review. | **Mitigated** — requires the `manage` scope *and* a non-viewer role; previews unless `apply` is set; a conflicted merge writes **nothing at all**, so a change can never be silently chosen; taking a side (`ours`/`theirs`) is explicit per request; the merged graph is linted before it lands; and every applied merge is appended to the audit log (`workflow.merged`) with its base version, strategy and summary. Merging updates the canvas only — going live still requires a deploy, which is where the policy gate runs. |
 | T19 | **Prompt injection — the model as a confused deputy** | An AI node classifies or extracts from data an outsider wrote (a webhook body). Text in that data can read as instructions, so whoever POSTs the webhook can steer the model — and if the answer decides where a request goes or which branch runs, they have steered the workflow. | **Mitigated (detective + containment)** — `services/lineage.js` reports the *composition* that is actually dangerous: an untrusted origin reaching a prompt **and** the answer influencing a high-sensitivity sink or a routing node. Untrusted data in a prompt alone is not reported, because that is what an AI node is for. At the boundary, the AI service applies two containments to every AI node: untrusted text is fenced with a **per-call random delimiter** and declared to be data (a fixed `"""` fence is one a payload can close), and a classification resolves to one of the **declared labels or fails** — so an injection is confined to a choice the author already enumerated instead of emitting a value no condition was written for. Extraction is projected onto the declared fields for the same reason. Not prevention: an injection can still pick a different declared label, which is why the finding exists too. |
 | T20 | **Definition tampering between review and import** | The promotion path is `export → git → review → CI → import`. A `manage` token can import **any** document, so a leaked token — or a commit pushed to the release branch after approval — lands a definition nobody reviewed. | **Mitigated** — a document may carry a detached **Ed25519 signature** over the graph's *semantics* (`services/artifactSigning.js`), and a workspace keeps the keys it trusts (`services/trustStore.js`, owner-only, revoked rather than deleted). An import records its verdict, the signing key's fingerprint and the graph's digest in the tamper-evident audit log. A signature that fails to verify is refused **regardless of configuration** — enforcement governs only whether *unsigned* imports are accepted. Signing is offline (`flowforge keygen` / `flowforge sign`) so a signing key never touches a server. Residual: a signature is transferable — it proves who approved a definition, not that they intended this import; the import still lands a draft, so deploying remains a separate act. |
+| T21 | **Personal data accumulating in run history** | A webhook body carries an email, a name, an address. None of it is a credential, so none of it is encrypted — and all of it lands verbatim in `execution_steps`, in the run detail panel, in the `exec-update` every watching collaborator receives, and in that database's backups, for as long as history is kept. Nobody chose to store it there; it is a side effect of recording runs. | **Mitigated (opt-in)** — a workflow declares which trigger fields are personal (`services/redaction.js`) and their **values** join the same scrubber the decrypted secrets build, so a declared email is masked in the trigger's own step, in a request body that interpolated it, and in a response that echoed it back. Masking by *location* would scrub one of those. Values resolve from the trigger payload at run start; a declaration naming a node's output is a lint **error**, because a redaction rule that silently matches nothing is worse than none. Explicitly **not** a boundary control: the value still flows through the engine and a node that sends it to an API still sends it — this governs what FlowForge keeps and shows, and the panel says so. Retention (`EXECUTION_RETENTION_DAYS`) is the complementary control for what is already stored. |
 
 ---
 
@@ -525,6 +526,46 @@ nothing.
 Tested in `ai-service/tests/test_nodes.py` (the prompt string *is* the
 mitigation, so the tests assert on it) and
 `server/src/__tests__/lineage.test.js`.
+
+---
+
+### Declared field redaction — personal data (T21)
+
+Secret redaction (T9) already scrubs a decrypted credential out of everything the
+engine persists or publishes. The mechanism is right for a second class of data
+it was never pointed at: a webhook body's email address, customer name, or postal
+address is not a credential, so nothing encrypts it, and it lands verbatim in
+`execution_steps`, in the run panel, in the `exec-update` every watching
+collaborator receives, and in that database's backups.
+
+A workflow declares which trigger fields are personal
+(`workflows.redact_json`), and those **values** join the run's redactor.
+
+**By value, not by path**, and that is the whole reason it works. A declared
+email is masked in the trigger's own step, in the request body a later node
+interpolated it into, in the response a third party echoed it back in, and in an
+error message that quoted it. Masking the declared *location* would scrub one of
+those and leave the rest — the version of this feature that looks correct in a
+demo.
+
+Values resolve from the **trigger payload at run start**, because that is where
+personal data enters and the only point its values are known before anything
+executes. A declaration naming a *node's output* can therefore never resolve, and
+is a lint **error**: a redaction rule that silently matches nothing is worse than
+no rule, because the author believes the field is being scrubbed. A path today's
+payload simply does not carry is *not* reported — an optional field is absent on
+the runs that do not have it.
+
+**Explicitly not a boundary control.** The value still flows through the engine
+in memory, and a node that sends it to an API still sends it — that is what the
+workflow is for. This governs what FlowForge *keeps and shows*, and the UI says
+so, because the other reading is dangerous. `EXECUTION_RETENTION_DAYS` is the
+complementary control for data already stored, and [lineage](docs/LINEAGE.md)
+answers where a trigger field actually travels.
+
+Tested in `server/src/__tests__/redaction.test.js` — including the case a
+path-based implementation would fail: a Transform copying the declared value
+into a field of another name.
 
 ---
 
