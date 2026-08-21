@@ -31,6 +31,7 @@ const stepIdempotency = require('./stepIdempotency')
 const redaction = require('./redaction')
 const nodePriority = require('./nodePriority')
 const stepTimings = require('./stepTimings')
+const scheduleSim = require('./scheduleSim')
 
 const runners = {
   'action-http': require('./nodeRunners/httpRequest'),
@@ -86,11 +87,10 @@ const BASE_BACKOFF_MS = parseInt(process.env.EXEC_RETRY_BASE_MS || '500')
 
 // How many nodes of one run may execute at the same time. Independent branches
 // (e.g. the two sides of a diamond) run concurrently up to this cap; 1 restores
-// strictly sequential execution. Read per-run so tests can vary it.
-function maxParallel() {
-  const n = parseInt(process.env.EXEC_MAX_PARALLEL || '4', 10)
-  return Number.isFinite(n) && n >= 1 ? n : 4
-}
+// strictly sequential execution. Read per-run so tests can vary it, and read
+// through scheduleSim so the scheduler and every analysis that models it can
+// never disagree about what the cap is.
+const maxParallel = scheduleSim.configuredCap
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms))

@@ -14,8 +14,68 @@ const { isPaused, PAUSED_ERROR } = require('../services/workflowPause')
 const { rollbackExecution } = require('../services/executionEngine')
 const { recordAudit } = require('../services/auditLog')
 const { parseDebugRequest, resumeBreak, listBreaks } = require('../services/debugger')
+const runSchedule = require('../services/runSchedule')
+const scheduleSim = require('../services/scheduleSim')
+const nodePriority = require('../services/nodePriority')
 
 const router = express.Router()
+
+// How far the counterfactual sweep goes when reporting what a run would have
+// taken under a different cap. Bounded so a read endpoint stays a read endpoint.
+const SCHEDULE_MAX_CAP = 12
+
+// Where a finished run's time went: the measured split between work and waiting
+// for an execution slot, plus what other caps would have produced. Shared by the
+// session route and the public API. `null` when the run has nothing to analyse.
+function scheduleAnalysisFor(execution, workflow) {
+  let graph
+  try {
+    graph = JSON.parse(workflow.graph_json)
+  } catch {
+    return null
+  }
+  const steps = db.prepare(
+    'SELECT node_id, status, started_at, finished_at FROM execution_steps WHERE execution_id = ?'
+  ).all(execution.id)
+
+  const cap = scheduleSim.configuredCap()
+  const observed = runSchedule.analyzeRun(graph, steps, { cap })
+  if (!observed.available) return null
+
+  // The counterfactuals run over the *executed* subgraph, as the critical path
+  // does: a dead branch was skipped, and simulating it as though it had run
+  // would answer a question about a different execution.
+  const durations = runSchedule.observedDurations(observed)
+  const ran = new Set(Object.keys(durations))
+  const subgraph = {
+    nodes: [...ran].map((id) => ({ id })),
+    edges: (graph.edges || []).filter((e) => ran.has(e.source) && ran.has(e.target)),
+  }
+  const durationOf = (id) => durations[id] ?? 0
+  const { rankOf } = nodePriority.plan(subgraph, durations)
+  const idealMs = scheduleSim.unboundedMakespan(subgraph, durationOf)
+  const curve = scheduleSim.speedupCurve(subgraph, {
+    durationOf,
+    rankOf,
+    maxCap: Math.min(SCHEDULE_MAX_CAP, Math.max(cap + 2, 4)),
+  })
+
+  return {
+    cap,
+    observed: {
+      makespanMs: Math.round(observed.makespanMs),
+      workMs: Math.round(observed.workMs),
+      queuedMs: Math.round(observed.queuedMs),
+      utilisation: observed.utilisation == null ? null : Number(observed.utilisation.toFixed(3)),
+      chain: observed.chain,
+    },
+    // The floor this run could not have gone below at any capacity — so the gap
+    // between it and the observed makespan is exactly what the cap cost.
+    idealMakespanMs: idealMs == null ? null : Math.round(idealMs),
+    atCap: curve ? curve.map((p) => ({ cap: p.cap, makespanMs: Math.round(p.makespanMs) })) : [],
+    perNode: observed.perNode,
+  }
+}
 
 function getWorkflowForMember(workflowId, userId) {
   const workflow = db.prepare('SELECT * FROM workflows WHERE id = ?').get(workflowId)
@@ -203,6 +263,30 @@ router.get('/executions/:id', auth, (req, res) => {
     ).all(execution.id)
 
     res.json({ execution, steps, childExecutions, approvals, criticalPath, compensations })
+  } catch (err) {
+    console.error(err)
+    res.status(500).json({ error: 'Internal server error' })
+  }
+})
+
+// GET /api/executions/:id/schedule — work versus waiting.
+//
+// The critical path already says which chain of steps set the run's duration.
+// It cannot say why a node that was ready at 1.2s started at 4.0s, because the
+// answer is not in the graph: the node was waiting for a slot, and whoever was
+// holding it may be on an unrelated branch. That is measured here from the
+// recorded timestamps rather than modelled, and paired with what the same run
+// would have taken at a different cap.
+router.get('/executions/:id/schedule', auth, (req, res) => {
+  try {
+    const execution = db.prepare('SELECT * FROM executions WHERE id = ?').get(req.params.id)
+    if (!execution) return res.status(404).json({ error: 'Execution not found' })
+    const workflow = getWorkflowForMember(execution.workflow_id, req.user.id)
+    if (!workflow) return res.status(404).json({ error: 'Execution not found' })
+
+    const analysis = scheduleAnalysisFor(execution, workflow)
+    if (!analysis) return res.json({ executionId: execution.id, available: false })
+    res.json({ executionId: execution.id, available: true, ...analysis })
   } catch (err) {
     console.error(err)
     res.status(500).json({ error: 'Internal server error' })
@@ -578,3 +662,6 @@ router.post('/executions/:id/resume', auth, async (req, res) => {
 })
 
 module.exports = router
+// Exported for the public API, which needs the same analysis behind a token
+// rather than a session.
+module.exports.scheduleAnalysisFor = scheduleAnalysisFor

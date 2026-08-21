@@ -9,12 +9,10 @@ const express = require('express')
 const { computeSlo } = require('../services/sloBudget')
 const db = require('../config/database')
 const auth = require('../middleware/auth')
-const { summarizeDurations, classifyRuns, mannKendall, percentile } = require('../services/runStats')
+const { summarizeDurations, classifyRuns, mannKendall } = require('../services/runStats')
 const { computeForecast } = require('../services/runForecast')
 const { analyzeRegressions } = require('../services/regressions')
-
-// How many recent completed runs' steps feed the forecast's per-node timing.
-const FORECAST_RUN_WINDOW = 200
+const stepTimings = require('../services/stepTimings')
 
 // Minimum completed runs before a duration trend is reported. The Mann-Kendall
 // normal approximation is unreliable on a handful of points, and "getting
@@ -228,11 +226,13 @@ function computeInsights(workflowId, limit) {
   }
 }
 
-// Estimate a workflow's next-run duration from its recorded step timing. Pulls
-// each node's successful step durations over the recent run window, turns them
-// into p50/p95 per node, and runs the forward critical-path forecast against the
-// workflow's *current* graph. Exported for reuse by the public API.
-function forecastFor(workflowId) {
+// Estimate a workflow's next-run duration from its recorded step timing. The
+// per-node p50/p95 sample comes from services/stepTimings.js — the same one the
+// engine weights its launch order by, which is what lets the forecast simulate
+// the order the run will actually take rather than a plausible one. Exported for
+// reuse by the public API. `cap` overrides the process's EXEC_MAX_PARALLEL, so
+// "what if we ran six at a time?" is answerable without changing anything.
+function forecastFor(workflowId, options = {}) {
   const workflow = db.prepare('SELECT graph_json FROM workflows WHERE id = ?').get(workflowId)
   if (!workflow) return { available: false, reason: 'empty' }
   let graph
@@ -241,40 +241,14 @@ function forecastFor(workflowId) {
   } catch {
     return { available: false, reason: 'empty' }
   }
+  return computeForecast(graph, stepTimings.stepStats(workflowId), { cap: options.cap })
+}
 
-  // Successful step durations per node, restricted to the most recent completed
-  // runs so a long-dead layout doesn't dominate the estimate.
-  const rows = db.prepare(`
-    SELECT es.node_id AS node_id, es.node_type AS node_type, ${durationMs('es.')} AS ms
-    FROM execution_steps es
-    JOIN executions e ON e.id = es.execution_id
-    WHERE es.status = 'succeeded'
-      AND es.started_at IS NOT NULL AND es.finished_at IS NOT NULL
-      AND es.node_type IS NOT NULL
-      AND e.id IN (
-        SELECT id FROM executions
-        WHERE workflow_id = ? AND status = 'completed'
-          AND (trigger_type IS NULL OR trigger_type != 'dry-run')
-        ORDER BY created_at DESC LIMIT ${FORECAST_RUN_WINDOW}
-      )
-  `).all(workflowId)
-
-  const byNode = new Map()
-  for (const r of rows) {
-    if (typeof r.ms !== 'number') continue
-    if (!byNode.has(r.node_id)) byNode.set(r.node_id, { durations: [], nodeType: r.node_type })
-    byNode.get(r.node_id).durations.push(r.ms)
-  }
-  const statsByNode = {}
-  for (const [nodeId, { durations, nodeType }] of byNode) {
-    statsByNode[nodeId] = {
-      p50: percentile(durations, 50),
-      p95: percentile(durations, 95),
-      samples: durations.length,
-      nodeType,
-    }
-  }
-  return computeForecast(graph, statsByNode)
+// `?cap=N` → an integer in [1, 64], or undefined for the process default.
+function parseCap(value) {
+  const n = parseInt(value, 10)
+  if (!Number.isFinite(n) || n <= 0) return undefined
+  return Math.min(n, 64)
 }
 
 // GET /api/workflows/:id/forecast — a predictive duration estimate for the
@@ -283,7 +257,7 @@ router.get('/workflows/:id/forecast', auth, (req, res) => {
   try {
     const workflow = getVisibleWorkflow(req.params.id, req.user.id)
     if (!workflow) return res.status(404).json({ error: 'Workflow not found' })
-    res.json({ workflowId: workflow.id, ...forecastFor(workflow.id) })
+    res.json({ workflowId: workflow.id, ...forecastFor(workflow.id, { cap: parseCap(req.query.cap) }) })
   } catch (err) {
     console.error(err)
     res.status(500).json({ error: 'Internal server error' })

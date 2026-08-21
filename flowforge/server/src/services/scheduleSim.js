@@ -81,6 +81,17 @@ function buildOrder(nodes, edges) {
   return { order, adj, preds, indegree }
 }
 
+// The engine's own parallelism cap, from EXEC_MAX_PARALLEL. Defined here rather
+// than in the engine so the analyses that model the scheduler and the scheduler
+// itself cannot disagree about what the cap is — a forecast computed against a
+// different number than the run will use would be worse than no forecast.
+const DEFAULT_CAP = 4
+
+function configuredCap(env = process.env) {
+  const n = parseInt(env.EXEC_MAX_PARALLEL || String(DEFAULT_CAP), 10)
+  return Number.isFinite(n) && n > 0 ? n : DEFAULT_CAP
+}
+
 // Normalise a requested cap to a positive integer or Infinity. A cap of 0 or a
 // nonsense value means "no limit" rather than "never launch anything" — the
 // engine's own `maxParallel()` clamps to at least 1, and a simulation that
@@ -351,6 +362,8 @@ function speedupCurve(graph, options = {}) {
 }
 
 module.exports = {
+  configuredCap,
+  DEFAULT_CAP,
   simulate,
   unboundedMakespan,
   averageParallelism,
