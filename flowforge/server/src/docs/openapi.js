@@ -591,9 +591,25 @@ const spec = {
           'node’s historical step timing — typical (p50) and worst-case (p95) — ' +
           'plus the likely bottleneck node. `coverage` reports how much of the ' +
           'graph has history, so a thinly-exercised workflow’s estimate is ' +
-          'marked as the guess it is. Requires the `read` scope.',
+          'marked as the guess it is. `concurrency` reports what the engine’s ' +
+          'parallelism cap does to that estimate — the simulated makespan under ' +
+          'the cap, how much of it is queueing rather than work, the ceiling on ' +
+          'any speedup, and the cap past which more slots buy nothing. ' +
+          'Requires the `read` scope.',
         operationId: 'getWorkflowForecast',
-        parameters: [{ $ref: '#/components/parameters/WorkflowId' }],
+        parameters: [
+          { $ref: '#/components/parameters/WorkflowId' },
+          {
+            name: 'cap',
+            in: 'query',
+            required: false,
+            schema: { type: 'integer', minimum: 1, maximum: 64 },
+            description:
+              'Model a different parallelism cap than the server’s ' +
+              'EXEC_MAX_PARALLEL — "what would six slots buy?" without ' +
+              'changing anything.',
+          },
+        ],
         responses: {
           200: {
             description: 'The forecast (or `available: false` for an empty or cyclic graph).',
@@ -1904,6 +1920,40 @@ const spec = {
         },
       },
     },
+    '/executions/{executionId}/schedule': {
+      get: {
+        tags: ['executions'],
+        summary: 'Where a run’s time went — work versus waiting for a slot',
+        description:
+          'The engine runs at most `EXEC_MAX_PARALLEL` nodes at once, so part ' +
+          'of a run’s wall time can be nodes sitting *ready* with no free slot. ' +
+          'The critical path cannot report that — the node holding the slot is ' +
+          'often on an unrelated branch, with no edge to the node it delayed. ' +
+          'This measures it from the recorded step timestamps: `observed` ' +
+          'splits the run into `workMs` and `queuedMs` and names the blocker ' +
+          'for each wait, `idealMakespanMs` is the floor the same work could ' +
+          'not have gone below at any capacity, and `atCap` is what the run ' +
+          'would have taken at other caps. Requires the `read` scope.',
+        operationId: 'getExecutionSchedule',
+        parameters: [{ $ref: '#/components/parameters/ExecutionId' }],
+        responses: {
+          200: {
+            description:
+              'The schedule analysis, or `available: false` for a run with no ' +
+              'recorded steps.',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ScheduleAnalysis' },
+              },
+            },
+          },
+          401: { $ref: '#/components/responses/Unauthorized' },
+          403: { $ref: '#/components/responses/Forbidden' },
+          404: { $ref: '#/components/responses/NotFound' },
+          429: { $ref: '#/components/responses/RateLimited' },
+        },
+      },
+    },
     '/executions/{executionId}/rollback': {
       post: {
         tags: ['executions'],
@@ -2623,6 +2673,115 @@ const spec = {
               nodesWithHistory: { type: 'integer' },
               workNodes: { type: 'integer' },
               ratio: { type: 'number' },
+            },
+          },
+          concurrency: {
+            type: 'object',
+            nullable: true,
+            description:
+              'What the engine’s parallelism cap does to the estimate above, ' +
+              'which assumes a slot is always free.',
+            properties: {
+              cap: { type: 'integer', description: 'Slots modelled (EXEC_MAX_PARALLEL, or ?cap).' },
+              makespanMs: { type: 'integer', nullable: true, description: 'Simulated duration under the cap.' },
+              makespanP95Ms: { type: 'integer', nullable: true },
+              queuedMs: { type: 'integer', nullable: true, description: 'Of that, time spent waiting for a slot.' },
+              contention: {
+                type: 'number',
+                nullable: true,
+                description: 'makespanMs ÷ critical path. 1.0 means the cap costs nothing.',
+              },
+              averageParallelism: {
+                type: 'number',
+                nullable: true,
+                description:
+                  'Total work ÷ critical path — the ceiling on any speedup. 1.2 ' +
+                  'means the workflow is mostly a chain and capacity will not help it.',
+              },
+              knee: {
+                type: 'object',
+                nullable: true,
+                description: 'The smallest cap within 5% of the unbounded floor.',
+                properties: {
+                  cap: { type: 'integer' },
+                  makespanMs: { type: 'integer' },
+                  idealMakespanMs: { type: 'integer' },
+                },
+              },
+              curve: {
+                type: 'array',
+                description: 'Makespan at each cap, the shape behind the knee.',
+                items: {
+                  type: 'object',
+                  properties: { cap: { type: 'integer' }, makespanMs: { type: 'integer' } },
+                },
+              },
+              chain: {
+                type: 'array',
+                description:
+                  'The makespan-determining back-chain, source → sink, each link ' +
+                  'labelled with what the node was waiting for.',
+                items: { $ref: '#/components/schemas/ScheduleChainLink' },
+              },
+            },
+          },
+        },
+      },
+      ScheduleChainLink: {
+        type: 'object',
+        properties: {
+          nodeId: { type: 'string' },
+          waitedFor: {
+            type: 'string',
+            nullable: true,
+            enum: ['data', 'slot', null],
+            description:
+              '`data` — a predecessor had not finished. `slot` — it had, and the ' +
+              'node waited for capacity. Null for the node that started the run.',
+          },
+          blockedBy: { type: 'string', nullable: true, description: 'The node it waited on.' },
+          queuedMs: { type: 'integer' },
+          durationMs: { type: 'integer' },
+        },
+      },
+      ScheduleAnalysis: {
+        type: 'object',
+        properties: {
+          executionId: { type: 'string' },
+          available: { type: 'boolean', description: 'False for a run with no recorded steps.' },
+          cap: { type: 'integer', description: 'The parallelism cap in force.' },
+          observed: {
+            type: 'object',
+            description: 'Measured from the run’s own step timestamps.',
+            properties: {
+              makespanMs: { type: 'integer', description: 'First step starting to last finishing.' },
+              workMs: { type: 'integer', description: 'Time execution slots were occupied.' },
+              queuedMs: {
+                type: 'integer',
+                description: 'Time nodes sat ready with no free slot. Not in the graph anywhere.',
+              },
+              utilisation: {
+                type: 'number',
+                nullable: true,
+                description: 'workMs ÷ (makespanMs × cap).',
+              },
+              chain: {
+                type: 'array',
+                items: { $ref: '#/components/schemas/ScheduleChainLink' },
+              },
+            },
+          },
+          idealMakespanMs: {
+            type: 'integer',
+            nullable: true,
+            description: 'The same work with unlimited capacity — the floor the cap kept it from.',
+          },
+          atCap: {
+            type: 'array',
+            description: 'What this run would have taken at other caps.',
+            items: {
+              type: 'object',
+              properties: { cap: { type: 'integer' }, makespanMs: { type: 'integer' } },
             },
           },
         },

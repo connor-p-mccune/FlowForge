@@ -40,6 +40,7 @@ const { respondToApproval } = require('../services/approvals')
 const { admitRun } = require('../services/concurrencyGate')
 const { isValidPriority, resolvePriority, enqueueOpts } = require('../services/runPriority')
 const { computeInsights, forecastFor, parseLimit } = require('./insights')
+const { scheduleAnalysisFor } = require('./executions')
 const { scheduleConfigOf, previewFor, parseCount } = require('./schedule')
 const { runSuite } = require('../services/workflowTester')
 const { compareRuns } = require('../services/runComparison')
@@ -561,12 +562,21 @@ router.get('/workflows/:id/regressions', tokenAuth('read'), (req, res) => {
 
 // GET /api/v1/workflows/:id/forecast — a predictive estimate of the workflow's
 // next-run duration (typical + p95) and its likely bottleneck, computed as the
-// critical path over each node's historical step timing. Read-only; `read` scope.
+// critical path over each node's historical step timing, plus what the engine's
+// parallelism cap will do to it. Read-only; `read` scope. `?cap=N` overrides the
+// server's EXEC_MAX_PARALLEL, so "what would six slots buy?" is a query rather
+// than a config change.
 router.get('/workflows/:id/forecast', tokenAuth('read'), (req, res) => {
   try {
     const workflow = getWorkflowForMember(req.params.id, req.user.id)
     if (!workflow) return res.status(404).json({ error: 'Workflow not found' })
-    res.json({ workflowId: workflow.id, ...forecastFor(workflow.id) })
+    const cap = parseInt(req.query.cap, 10)
+    res.json({
+      workflowId: workflow.id,
+      ...forecastFor(workflow.id, {
+        cap: Number.isFinite(cap) && cap > 0 ? Math.min(cap, 64) : undefined,
+      }),
+    })
   } catch (err) {
     console.error(err)
     res.status(500).json({ error: 'Internal server error' })
@@ -1244,6 +1254,27 @@ router.get('/executions/:id', tokenAuth('read'), (req, res) => {
       steps,
       compensations,
     })
+  } catch (err) {
+    console.error(err)
+    res.status(500).json({ error: 'Internal server error' })
+  }
+})
+
+// GET /api/v1/executions/:id/schedule — where a finished run's time went: the
+// measured split between work and waiting for an execution slot, the floor the
+// cap kept it from, and what other caps would have produced. Read-only; `read`
+// scope. Lets a pipeline gate on contention ("this run spent more than half its
+// wall time queueing") rather than only on duration.
+router.get('/executions/:id/schedule', tokenAuth('read'), (req, res) => {
+  try {
+    const execution = db.prepare('SELECT * FROM executions WHERE id = ?').get(req.params.id)
+    if (!execution) return res.status(404).json({ error: 'Execution not found' })
+    const workflow = getWorkflowForMember(execution.workflow_id, req.user.id)
+    if (!workflow) return res.status(404).json({ error: 'Execution not found' })
+
+    const analysis = scheduleAnalysisFor(execution, workflow)
+    if (!analysis) return res.json({ executionId: execution.id, available: false })
+    res.json({ executionId: execution.id, available: true, ...analysis })
   } catch (err) {
     console.error(err)
     res.status(500).json({ error: 'Internal server error' })
