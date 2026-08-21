@@ -29,6 +29,8 @@ const debuggerService = require('./debugger')
 const executionLease = require('./executionLease')
 const stepIdempotency = require('./stepIdempotency')
 const redaction = require('./redaction')
+const nodePriority = require('./nodePriority')
+const stepTimings = require('./stepTimings')
 
 const runners = {
   'action-http': require('./nodeRunners/httpRequest'),
@@ -809,6 +811,34 @@ async function runLeasedExecution(
   // — so parallel siblings finish and record their results, but the run fails.
   const cap = maxParallel()
   const unscheduled = [...order] // not yet launched or skipped, topo order
+
+  // Which ready node to launch when there are more of them than free slots.
+  // Walking `unscheduled` and taking the first ones — what this did until now —
+  // launches in topological order, which is declaration order, which is the
+  // order somebody dropped nodes on a canvas. That is invisible until the ready
+  // set outgrows the capacity, and then it sets the run's duration: a fan-out to
+  // one 6s node and five 100ms ones finishes in 6.2s or 12s depending purely on
+  // where the slow one happened to be drawn.
+  //
+  // So order by upward rank — most remaining work downstream first — weighted by
+  // this workflow's own recorded step times. See services/nodePriority.js for
+  // the rule and services/scheduleSim.js for the simulation that measures it.
+  // The choice is semantically inert (same nodes, same active edges, same
+  // inputs) and deterministic, so a replay reproduces the original interleaving.
+  //
+  // A graph that cannot fill the cap can never face the choice, so it skips the
+  // timing query entirely; and any failure here degrades to the old order rather
+  // than failing the run, because this is an optimisation and must behave like
+  // one.
+  const launchPlan = (() => {
+    try {
+      const weights = nodes.length > cap ? stepTimings.expectedDurations(workflowId) : {}
+      return nodePriority.plan({ nodes, edges }, weights)
+    } catch (err) {
+      console.error(`Launch ordering unavailable for ${executionId}: ${err.message}`)
+      return nodePriority.plan({ nodes, edges }, {}, { ordering: nodePriority.TOPOLOGICAL })
+    }
+  })()
   const inFlight = new Map() // nodeId -> settling promise (never rejects)
   let failure = null // first { node, err }, wins the run's error message
 
@@ -1070,44 +1100,76 @@ async function runLeasedExecution(
     inFlight.set(nodeId, task)
   }
 
-  // One synchronous pass: settle every skippable ready node (looping because a
-  // skip can make a downstream node ready-and-skippable) and launch ready
-  // runnable nodes while capacity allows.
+  // A node is ready once every upstream node has settled — succeeded, failed or
+  // skipped. Whether it then *runs* is a separate question (a node all of whose
+  // active incoming edges are dark is skipped, not launched).
+  const isReady = (nodeId) =>
+    incomingByNode[nodeId].every((e) => nodeStatus[e.source] !== undefined)
+
+  // One scheduling round, in two phases.
+  //
+  // Splitting them is what makes the launch order mean anything. Settling and
+  // launching used to interleave in a single pass over the topological order, so
+  // the "ready set" a launch decision saw was whatever had been reached so far —
+  // and a node further down the list could be both ready and better to start,
+  // with nothing having looked at it yet. The ready set is only the real ready
+  // set once everything that settles for free has settled.
   function scheduleRound() {
     let progressed = true
     while (progressed && !failure) {
       progressed = false
-      for (let i = 0; i < unscheduled.length; ) {
-        const nodeId = unscheduled[i]
-        const ready = incomingByNode[nodeId].every((e) => nodeStatus[e.source] !== undefined)
-        if (!ready) {
-          i++
-          continue
+
+      // Phase 1 — synchronous settlements, to a fixed point. A dead branch is
+      // skipped and a resumed run's healthy prefix is reused without ever
+      // occupying an execution slot, and either can cascade into the next node,
+      // so this loops until nothing more settles.
+      let settled = true
+      while (settled && !failure) {
+        settled = false
+        for (let i = 0; i < unscheduled.length; ) {
+          const nodeId = unscheduled[i]
+          if (!isReady(nodeId)) {
+            i++
+            continue
+          }
+          const incoming = incomingByNode[nodeId]
+          if (incoming.length > 0 && activeIncomingFor(nodeId).length === 0) {
+            unscheduled.splice(i, 1)
+            skipNode(nodeId)
+            settled = true
+            progressed = true
+          } else if (canReuse(nodeId)) {
+            unscheduled.splice(i, 1)
+            reuseNode(nodeId)
+            settled = true
+            progressed = true
+          } else {
+            i++
+          }
         }
-        const incoming = incomingByNode[nodeId]
-        if (incoming.length > 0 && activeIncomingFor(nodeId).length === 0) {
-          unscheduled.splice(i, 1)
-          skipNode(nodeId)
-          progressed = true
-        } else if (canReuse(nodeId)) {
-          // Reuse settles synchronously, like a skip — it never occupies an
-          // execution slot, so a resumed run's healthy prefix replays in one
-          // pass regardless of the parallelism cap.
-          unscheduled.splice(i, 1)
-          reuseNode(nodeId)
-          progressed = true
-        } else if (inFlight.size < cap && openBreaks === 0) {
-          // `openBreaks === 0` is what makes a breakpoint stop the *run* rather
-          // than one branch of it. Without it a parallel sibling races ahead
-          // while somebody is reading the node they stopped at, and the state
-          // they are inspecting is already stale — which is precisely the thing
-          // a debugger exists to prevent.
-          unscheduled.splice(i, 1)
-          launchNode(nodeId)
-          progressed = true
-        } else {
-          i++
-        }
+      }
+      if (failure) break
+
+      // Phase 2 — launch, highest priority first, while capacity allows.
+      //
+      // `openBreaks === 0` is what makes a breakpoint stop the *run* rather than
+      // one branch of it. Without it a parallel sibling races ahead while
+      // somebody is reading the node they stopped at, and the state they are
+      // inspecting is already stale — which is precisely the thing a debugger
+      // exists to prevent.
+      if (openBreaks !== 0) break
+      const launchable = unscheduled.filter(isReady)
+      if (launchable.length === 0) break
+      launchable.sort(launchPlan.compare)
+      for (const nodeId of launchable) {
+        if (failure || openBreaks !== 0 || inFlight.size >= cap) break
+        unscheduled.splice(unscheduled.indexOf(nodeId), 1)
+        // Not necessarily asynchronous: a step-cache hit settles inside
+        // launchNode without occupying a slot, which can make a downstream node
+        // ready. `progressed` sends us round again so that node is considered in
+        // this same round rather than after the next await.
+        launchNode(nodeId)
+        progressed = true
       }
     }
   }
