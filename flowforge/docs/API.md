@@ -697,9 +697,30 @@ empty or cyclic graph.
   "estimatedMs": 1840,
   "estimatedP95Ms": 3120,
   "bottleneck": { "nodeId": "fetch", "nodeType": "action-http", "p50": 1200, "p95": 2400 },
-  "coverage": { "nodesWithHistory": 3, "workNodes": 3, "ratio": 1 }
+  "coverage": { "nodesWithHistory": 3, "workNodes": 3, "ratio": 1 },
+  "concurrency": {
+    "cap": 4,
+    "makespanMs": 3680,
+    "queuedMs": 5100,
+    "contention": 2.0,
+    "averageParallelism": 5.4,
+    "knee": { "cap": 6, "makespanMs": 1900, "idealMakespanMs": 1840 },
+    "curve": [{ "cap": 1, "makespanMs": 9200 }, { "cap": 4, "makespanMs": 3680 }],
+    "chain": [{ "nodeId": "enrich", "waitedFor": "slot", "queuedMs": 1200, "durationMs": 800 }]
+  }
 }
 ```
+
+`estimatedMs` is the critical path — the duration with an execution slot always
+free. The engine runs at most `EXEC_MAX_PARALLEL` nodes at once, so `concurrency`
+is what will actually happen: the simulated makespan under that cap, how much of
+it is nodes **queueing** rather than working, the ceiling on any speedup
+(`averageParallelism` — 1.2 means the workflow is mostly a chain and capacity
+cannot help it), and the `knee` past which more slots buy nothing.
+
+Add `?cap=N` to model a different cap. It changes nothing on the server — capacity
+planning used to be a deploy, and this makes it a query. See
+[docs/SCHEDULING.md](./SCHEDULING.md).
 
 Requires the `read` scope.
 
@@ -888,6 +909,57 @@ Response `200`:
 `execution.status` progresses `pending → running → completed | failed |
 cancelled`. Step inputs/outputs have workspace-secret values already redacted
 by the execution engine before persistence.
+
+Requires the `read` scope.
+
+### Where a run's time went
+
+```bash
+curl -s https://your-flowforge-host/api/v1/executions/e57a…/schedule \
+  -H "Authorization: Bearer $FLOWFORGE_TOKEN"
+```
+
+Response `200` — the measured split between work and **waiting for an execution
+slot**, plus what the same run would have taken at other caps. `available: false`
+for a run with no recorded steps.
+
+```json
+{
+  "executionId": "e57a…",
+  "available": true,
+  "cap": 4,
+  "observed": {
+    "makespanMs": 14200,
+    "workMs": 38000,
+    "queuedMs": 6100,
+    "utilisation": 0.669,
+    "chain": [
+      { "nodeId": "fetch", "waitedFor": null, "queuedMs": 0, "durationMs": 900 },
+      { "nodeId": "enrich", "waitedFor": "slot", "blockedBy": "score", "queuedMs": 2400, "durationMs": 3100 }
+    ]
+  },
+  "idealMakespanMs": 8100,
+  "atCap": [{ "cap": 1, "makespanMs": 38000 }, { "cap": 6, "makespanMs": 8600 }],
+  "perNode": {
+    "enrich": {
+      "startMs": 3300, "finishMs": 6400, "readyMs": 900, "queuedMs": 2400,
+      "durationMs": 3100, "occupiedSlot": true,
+      "cause": { "nodeId": "score", "kind": "slot" }
+    }
+  }
+}
+```
+
+The critical path already names the chain of steps that set a run's duration. It
+cannot explain a node that was ready at 0.9s and started at 3.3s, because the
+answer is not in the graph — the node was waiting for capacity, and the node
+holding it (`score` here) has no edge to it. Every wait is therefore labelled
+`data` (a predecessor had not finished) or `slot` (it had, and this is who was
+in the way).
+
+`idealMakespanMs` is the same work at unlimited capacity — the floor the cap kept
+the run from. A pipeline can gate on the ratio; `flowforge contention <id> --max
+1.5` does exactly that. See [docs/SCHEDULING.md](./SCHEDULING.md).
 
 Requires the `read` scope.
 

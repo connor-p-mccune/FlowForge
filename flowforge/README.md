@@ -23,6 +23,7 @@ problem sounds familiar.
 | **Path invariants** | Every static check asks about a *place* — this node's config, this value's shape. None could answer *"can this ever charge a card without the approval having run?"*, which is about a **path**. Turns out the engine's activation rule makes that question identical to graph dominance, so it's a solved compiler problem. Violations report the counterexample path. | [GUARANTEES.md](./docs/GUARANTEES.md) |
 | **Reaching a branch** | Every check here reasons about the *graph*, so a switch case sitting under a condition that already ruled it out is wired, typed, reachable and dead — and nothing says so. Asking whether an input exists is a solver question: difference logic, finite domains, DPLL(T). The solver returns a *model*, so the answer is also the payload that drives the branch — which is how the test suite gets generated. | [PATHS.md](./docs/PATHS.md) |
 | **Collaborative editing** | Last-write-wins on `Date.now()` meant whose laptop was fast decided whose edit survived, edits collided per *element* so two people editing different fields of one node lost half the work, and a dropped connection diverged **permanently**. Now a CRDT — commutative and idempotent, tested by applying every permutation of an operation set and asserting one document. | [ARCHITECTURE.md](./docs/ARCHITECTURE.md#real-time-collaboration) |
+| **Scheduling** | The engine runs branches in parallel up to a cap, and everything else treated that cap as though it didn't exist: every timing analysis assumed a slot was always free, and the scheduler launched whichever ready node came first — declaration order. Under contention that choice *is* the run's duration. Ordering by upward rank is a fifty-year-old result whose bound holds whatever the estimates turn out to be. And the node that delayed yours is often a sibling holding a slot — a dependency with no edge, which nothing over the DAG can name. | [SCHEDULING.md](./docs/SCHEDULING.md) |
 | **Breakpoints** | Every other debugging tool here is a *record*, and none helps with *"why is this node about to send **that**?"* So the run stops — after the config resolves, before the runner fires — and you can change what it runs with. A breakpoint lives on the **run**, never the workflow, so a schedule tick has nowhere to hit one. | [ARCHITECTURE.md](./docs/ARCHITECTURE.md#breakpoints) |
 | **A safe expression language** | Users need real logic in a config field. `eval` is not an option. Hand-written lexer → Pratt parser → tree-walking evaluator, statically type-checked against the shapes the graph proves it will have. | [EXPRESSIONS.md](./docs/EXPRESSIONS.md) |
 | **Types over a canvas** | A visual builder normally discovers its data doesn't line up by running. A real type lattice — unions, per-field optionality, structural join — mirrors the engine instead of approximating it, and `any` vs `unknown` are kept as *different facts*. | [TYPES.md](./docs/TYPES.md) |
@@ -164,6 +165,47 @@ status completed
   `EXEC_MAX_PARALLEL`), joins wait for every upstream branch, `{{node-id.field}}`
   templates resolve between steps, failures retry with backoff, and every step
   is recorded.
+- **Critical-path scheduling, and what the cap costs** — that parallelism bound
+  is four lines of code, and the rest of the system treated it as though it
+  didn't exist. Two consequences. **The engine chose arbitrarily**: when more
+  nodes were ready than there were free slots it launched whichever came first
+  in the topological order — declaration order, the order somebody dropped nodes
+  on a canvas. Invisible until the ready set outgrows the capacity, and then it
+  *is* the run's duration: a fan-out to five 100ms nodes and one 600ms node, at a
+  cap of two, finishes in 600ms if the slow one starts first and 800ms if it
+  starts last. Same nodes, same work, a third more wall time, twice a day, for a
+  year. So the ready set is ordered by **upward rank** — the longest weighted
+  path from a node to a sink, i.e. how much work is still downstream of it —
+  which is HLFET (1974), the rule HEFT builds on. Adopting it needs no leap of
+  faith, because **Graham's (2 − 1/m) bound** covers *any* list schedule: the
+  engine was already one, it just had a bad list, so reordering can only help
+  and cannot be pathological however wrong the estimates are. It's semantically
+  inert (same nodes, same active edges, same inputs — asserted by a test that
+  diffs every step under both orderings), deterministic so a replay reproduces
+  the original interleaving, and it degrades to graph *height* when nothing has
+  history. A node with no history takes the **median** weight rather than zero,
+  because zero would sort it last and an unmeasured node is disproportionately
+  likely to be the one somebody just added. And the claim is scoped honestly:
+  list scheduling has known anomalies, so the test asserts the rule wins across
+  a population of generated DAGs — not that it is never worse on any one of
+  them. The second consequence was that **every analysis was answering for a
+  different machine**: the critical path, the forecast and the Gantt timeline all
+  describe unbounded parallelism, so twelve independent 1s nodes at a cap of four
+  report a one-second estimate and take three. A discrete-event simulation of the
+  engine's own scheduler now sits behind the forecast (makespan under the real
+  cap, contention ratio, the **ceiling on any speedup**, and the **knee** where
+  more slots stop buying anything — reported, never applied, since the cap is
+  process-wide and that's an operator's call), and `?cap=N` makes capacity
+  planning a query rather than a deploy. For a run that already happened none of
+  it is simulated: a node's ready time is the last of its predecessors to finish,
+  the gap to its actual start is queueing, and both are already in the step rows.
+  Which surfaces the thing nothing else could — the node that delayed yours is
+  frequently **not one of your predecessors**, it's a sibling that was holding
+  the slot, and a dependency graph has no edge for *"these two competed"*. Every
+  wait is labelled `data` or `slot` with the blocker named; the timeline draws
+  the wait as a hollow segment before the bar, and `flowforge contention --max`
+  fails a build on it, so a pipeline can finally tell *the work got slower* from
+  *the box was busy*. See [docs/SCHEDULING.md](./docs/SCHEDULING.md).
 - **Run priority lanes** — every run enters the queue as **high**, **normal**,
   or **low**: a workflow sets its default lane in Run limits, any API trigger
   overrides it per run (`?priority=high`, `flowforge trigger --priority`),
@@ -1114,6 +1156,8 @@ Copy `.env.example` to `.env` before running. **Never commit `.env`.**
 | `SECRETS_KEY_RING` | no | Key ring for secret encryption — `id:material` entries, so the key can be rotated without an outage |
 | `SECRETS_ACTIVE_KEY` | no | Which ring key new secrets are written under (default: the last entry) |
 | `EXEC_MAX_PARALLEL` | no     | Max concurrently-executing nodes per run (default 4; 1 = sequential) |
+| `EXEC_SCHEDULER`  | no       | Which ready node launches when the cap binds — `critical-path` (default, longest remaining chain first) or `topological` (declaration order) |
+| `STEP_TIMING_CACHE_MS` | no  | How long a workflow's per-node step timings are memoised for the launch plan (default 30000) |
 | `COLLAB_PERSIST_MS` | no     | How long a collaboration session waits after the last edit before writing the graph (default 2000; 0 = only on the last collaborator leaving) |
 | `CONCURRENCY_RETRY_MS` | no  | How long a run parked at its workflow's concurrency cap waits before re-checking (default 1000) |
 | `COST_MODEL_PRICES` | no     | JSON override of the AI price table, e.g. `{"gpt-4o-mini":{"input":150000,"output":600000}}` (micro-USD per 1M tokens) |
@@ -1297,7 +1341,7 @@ flowforge/
 ├── cli/           Zero-dependency terminal client for the public API
 ├── docs/          API reference, architecture deep dive, and one design record per hard part
 │                 (FXL, types, guarantees, paths, lineage, policies, merge, releases,
-│                  preview, provenance, rollback, durability, insights)
+│                  preview, provenance, rollback, durability, insights, scheduling)
 ├── docker-compose.yml
 ├── .env.example
 ├── .env.production.example
