@@ -64,7 +64,8 @@ export FLOWFORGE_TOKEN=ffp_…
 | `flowforge deps <id>` | Cross-workflow impact analysis — what a workflow calls (sub-workflow/for-each nodes, error handler) and what calls it; exits non-zero on a stale reference cycle |
 | `flowforge insights <id> [--limit N]` | Duration percentiles, success rate, throughput, and anomalous runs ([docs](../docs/INSIGHTS.md)) |
 | `flowforge regressions <id> [--limit N]` | When the duration changed, which deploy landed in the gap, and which step moved; exits non-zero on a change **for the worse** ([docs](../docs/INSIGHTS.md#when-it-changed-and-what-changed-with-it)) |
-| `flowforge forecast <id>` | Predicted next-run duration and bottleneck ([docs](../docs/INSIGHTS.md#forecasting-the-next-run)) |
+| `flowforge forecast <id> [--cap N]` | Predicted next-run duration and bottleneck, **plus what the parallelism cap does to it** — the makespan under the cap, how much of it is queueing, and the cap past which more slots buy nothing; `--cap` models a different one ([docs](../docs/SCHEDULING.md)) |
+| `flowforge contention <exec-id> [--max <ratio>]` | Where a finished run's time went — work versus waiting for an execution slot, measured from its own step timestamps, with the node that held the slot named; `--max` exits non-zero over a contention budget, so a build can tell "the work got slower" from "the box was busy" ([docs](../docs/SCHEDULING.md)) |
 | `flowforge schedule <id> [--count N]` | Upcoming scheduled run times, computed from the workflow's cron (UTC) |
 | `flowforge check <id> [--min-success-rate PCT] [--max-p95 SECONDS] [--strict]` | Gate CI on workflow health — exits non-zero on an SLA breach or a degrading trend |
 | `flowforge test <id> [--junit <file>]` | Run the workflow's test scenarios (FXL assertions over a dry-run) — exits non-zero on any failure; `--junit` writes a report CI renders natively |

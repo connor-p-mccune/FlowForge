@@ -370,7 +370,10 @@ test('forecast prints the estimate, bottleneck, and coverage', async () => {
   await stub.close()
 
   assert.equal(code, 0)
-  assert.match(ctx.output(), /Estimated/)
+  // Labelled "Critical path" rather than "Estimated" since the concurrency
+  // block arrived: there are now two estimates, and which one is which is the
+  // whole point.
+  assert.match(ctx.output(), /Critical path/)
   assert.match(ctx.output(), /540ms typical/)
   assert.match(ctx.output(), /Bottleneck/)
   assert.match(ctx.output(), /slow/)

@@ -38,6 +38,7 @@ const COMMANDS = {
   insights: require('../src/commands/insights'),
   regressions: require('../src/commands/regressions'),
   forecast: require('../src/commands/forecast'),
+  contention: require('../src/commands/contention'),
   schedule: require('../src/commands/schedule'),
   check: require('../src/commands/check'),
   test: require('../src/commands/test'),
@@ -83,7 +84,8 @@ Usage:
   flowforge deps <workflow-id>                     What a workflow calls and what calls it (exits non-zero on a reference cycle)
   flowforge insights <workflow-id> [--limit N]     Duration percentiles, success rate, anomalies
   flowforge regressions <id> [--limit N]           When the duration changed, and which deploy did it (exits non-zero on a regression)
-  flowforge forecast <workflow-id>                 Predicted next-run duration and bottleneck
+  flowforge forecast <id> [--cap N]                Predicted next-run duration, bottleneck, and what the parallelism cap costs
+  flowforge contention <exec-id> [--max <ratio>]   Where a run's time went — work vs waiting for a slot (exits non-zero over the budget)
   flowforge schedule <workflow-id> [--count N]     Upcoming scheduled run times (UTC)
   flowforge check <workflow-id> [--strict]         Gate CI on workflow health (exits non-zero on a breach)
   flowforge test <workflow-id> [--junit <file>]    Run the workflow's test scenarios (exits non-zero on failure)
@@ -103,9 +105,10 @@ Configuration:
 Exit codes:
   0 success · 1 error, a watched run that failed/was cancelled, a
   'check' whose workflow breached its health thresholds, a 'diff'
-  that found drift, an 'audit' whose chain failed verification, or a
-  'rollback' that only partly unwound (the world is inconsistent in
-  a known way — a pipeline should stop)
+  that found drift, an 'audit' whose chain failed verification, a
+  'contention' over its --max budget, or a 'rollback' that only
+  partly unwound (the world is inconsistent in a known way — a
+  pipeline should stop)
   2 'release' — the canary has no verdict yet (keep waiting), and
     'merge' — the merge conflicts and needs a person. Distinct from 1
     on purpose: a pipeline that treats "not enough evidence" as
