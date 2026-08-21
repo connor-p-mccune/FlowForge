@@ -1793,6 +1793,59 @@ html, body, #root {
   font-weight: 600;
 }
 
+/* Time a node spent ready with no execution slot free. Drawn hollow and
+   hatched, immediately before the step's own bar: it is not work, and the
+   distinction is the whole point of showing it. */
+.exec-timeline__queued {
+  position: absolute;
+  top: 4px;
+  bottom: 4px;
+  border-radius: 3px;
+  border: 1px dashed #f59e0b;
+  background: repeating-linear-gradient(
+    45deg,
+    rgba(245, 158, 11, 0.16),
+    rgba(245, 158, 11, 0.16) 3px,
+    transparent 3px,
+    transparent 6px
+  );
+}
+
+.exec-timeline__queued-note {
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+  font-size: 12px;
+  line-height: 1.45;
+  color: #92400e;
+  background: #fffbeb;
+  border: 1px solid #fde68a;
+  border-radius: 6px;
+  padding: 7px 9px;
+  margin-bottom: 10px;
+}
+
+.exec-timeline__queued-swatch {
+  flex: 0 0 12px;
+  height: 12px;
+  margin-top: 2px;
+  border-radius: 3px;
+  border: 1px dashed #f59e0b;
+  background: repeating-linear-gradient(
+    45deg,
+    rgba(245, 158, 11, 0.25),
+    rgba(245, 158, 11, 0.25) 3px,
+    transparent 3px,
+    transparent 6px
+  );
+}
+
+.exec-timeline__waited {
+  margin-left: 5px;
+  font-size: 11px;
+  color: #b45309;
+}
+
 .exec-timeline__bar--critical {
   box-shadow: 0 0 0 2px #6366f1;
 }

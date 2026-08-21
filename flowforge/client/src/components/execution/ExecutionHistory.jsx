@@ -128,6 +128,7 @@ export default function ExecutionHistory({ workflowId, nodes, autoOpenId }) {
   const [workflowUpdatedAt, setWorkflowUpdatedAt] = useState(null)
   const [selected, setSelected] = useState(null) // { execution, steps }
   const [detailView, setDetailView] = useState('steps') // 'steps' | 'timeline'
+  const [schedule, setSchedule] = useState(null) // GET .../schedule, for the timeline's queueing overlay
   const [pendingReplay, setPendingReplay] = useState(null) // execution awaiting confirm
   const [pendingResume, setPendingResume] = useState(null) // execution awaiting confirm
   const [replaying, setReplaying] = useState(false)
@@ -175,6 +176,7 @@ export default function ExecutionHistory({ workflowId, nodes, autoOpenId }) {
     setPendingReplay(null)
     setPendingResume(null)
     setDetailView('steps')
+    setSchedule(null)
     try {
       const { execution, steps, childExecutions, criticalPath, compensations } = await apiFetch(
         `/api/executions/${executionId}`
@@ -195,6 +197,25 @@ export default function ExecutionHistory({ workflowId, nodes, autoOpenId }) {
   useEffect(() => {
     if (autoOpenId) openRun(autoOpenId)
   }, [autoOpenId, openRun])
+
+  // The timeline's queueing overlay needs a second analysis over the same
+  // steps, so it is fetched only when somebody actually opens the timeline —
+  // and never blocks it: a run with no analysis renders exactly as before.
+  const selectedId = selected?.execution?.id
+  useEffect(() => {
+    if (detailView !== 'timeline' || !selectedId) return undefined
+    let cancelled = false
+    apiFetch(`/api/executions/${selectedId}/schedule`)
+      .then((d) => {
+        if (!cancelled && d?.available) setSchedule(d)
+      })
+      .catch(() => {
+        /* the timeline is complete without it */
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [detailView, selectedId])
 
   async function handleReplay() {
     if (!pendingReplay) return
@@ -343,6 +364,7 @@ export default function ExecutionHistory({ workflowId, nodes, autoOpenId }) {
             steps={selected.steps}
             nodes={nodes}
             criticalPath={selected.criticalPath}
+            schedule={schedule}
           />
         ) : (
           <StepList

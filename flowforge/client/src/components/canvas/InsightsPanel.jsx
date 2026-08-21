@@ -65,6 +65,87 @@ function Sparkline({ runs }) {
   )
 }
 
+// Makespan against the number of execution slots, as a small line with the
+// current cap marked. The shape is the argument: a curve that has already
+// flattened says more capacity buys nothing, and one still falling at the
+// marker says it does.
+function CapCurve({ curve, cap }) {
+  if (!curve || curve.length < 2) return null
+  const W = 240
+  const H = 40
+  const pad = 5
+  const values = curve.map((p) => p.makespanMs)
+  const max = Math.max(...values)
+  const min = Math.min(...values)
+  const span = max - min || 1
+  const x = (i) => pad + (i * (W - 2 * pad)) / (curve.length - 1)
+  const y = (v) => H - pad - ((v - min) / span) * (H - 2 * pad)
+  const points = curve.map((p, i) => `${x(i).toFixed(1)},${y(p.makespanMs).toFixed(1)}`).join(' ')
+  const currentIndex = curve.findIndex((p) => p.cap === cap)
+  return (
+    <svg
+      className="insights__spark"
+      viewBox={`0 0 ${W} ${H}`}
+      width="100%"
+      height={H}
+      preserveAspectRatio="none"
+      role="img"
+      aria-label={`Run duration against execution slots, from ${curve[0].cap} to ${curve[curve.length - 1].cap}`}
+    >
+      <polyline fill="none" stroke="#4f46e5" strokeWidth="1.5" points={points} />
+      {currentIndex >= 0 && (
+        <circle cx={x(currentIndex)} cy={y(curve[currentIndex].makespanMs)} r="3" fill="#4f46e5" />
+      )}
+    </svg>
+  )
+}
+
+// What the engine's parallelism cap does to the forecast above.
+//
+// The forecast is a longest path, which is the duration with a slot always
+// free. The engine runs at most EXEC_MAX_PARALLEL nodes at once, so for a graph
+// wider than that the two disagree — and the gap is time the canvas cannot
+// explain, because the node holding the slot may be on an unrelated branch.
+//
+// Deliberately silent when the cap costs nothing: a section reading
+// “contention 1.0×” on every chain-shaped workflow is one people learn to skip.
+function Concurrency({ concurrency, labelFor }) {
+  if (!concurrency) return null
+  const { cap, makespanMs, queuedMs, contention, averageParallelism, knee, curve } = concurrency
+  const binds = contention != null && contention > 1.01
+  if (!binds) return null
+
+  const worstWait = (concurrency.chain || [])
+    .filter((l) => l.waitedFor === 'slot' && l.queuedMs > 0)
+    .sort((a, b) => b.queuedMs - a.queuedMs)[0]
+
+  return (
+    <>
+      <div className="insights__section">Concurrency · {cap} slots</div>
+      <div className="insights__forecast">
+        <span className="insights__forecast-est">{fmtMs(makespanMs)}</span>
+        <span className="insights__forecast-p95">{contention.toFixed(2)}× the critical path</span>
+      </div>
+      <ul className="insights__sla">
+        <SlaRow ok={queuedMs === 0}>{fmtMs(queuedMs)} spent waiting for a slot</SlaRow>
+        {averageParallelism != null && (
+          <SlaRow ok>
+            this graph can use {averageParallelism.toFixed(1)} slots at most
+          </SlaRow>
+        )}
+        {knee && <SlaRow ok={knee.cap <= cap}>{knee.cap} slots would reach {fmtMs(knee.idealMakespanMs)}</SlaRow>}
+      </ul>
+      <CapCurve curve={curve} cap={cap} />
+      {worstWait && (
+        <p className="webhook-panel__hint">
+          <strong>{labelFor(worstWait.nodeId)}</strong> waits {fmtMs(worstWait.queuedMs)} for
+          capacity, not for data — nothing on the canvas shows that.
+        </p>
+      )}
+    </>
+  )
+}
+
 function SlaRow({ ok, children }) {
   // ok === false is a breach; null/true both render as met (an unmet-but-unknown
   // target shouldn't shout).
@@ -255,6 +336,7 @@ export default function InsightsPanel({ workflowId, open, onClose, nodes = [] })
                     timing history — the estimate sharpens as the workflow runs.
                   </p>
                 )}
+                <Concurrency concurrency={forecast.concurrency} labelFor={labelFor} />
               </>
             )}
 

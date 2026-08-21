@@ -226,3 +226,80 @@ describe('InsightsPanel', () => {
     expect(await screen.findByText('Workflow not found')).toBeInTheDocument()
   })
 })
+
+// The forecast is a longest path — the duration with a slot always free. The
+// engine has EXEC_MAX_PARALLEL of them, so for a wide graph the two disagree,
+// and the difference is time the canvas cannot account for.
+describe('InsightsPanel — concurrency', () => {
+  const CONTENDED = {
+    ...FORECAST,
+    concurrency: {
+      cap: 2,
+      makespanMs: 4000,
+      makespanP95Ms: 6000,
+      queuedMs: 4000,
+      contention: 2,
+      averageParallelism: 4,
+      knee: { cap: 4, makespanMs: 2000, idealMakespanMs: 2000 },
+      curve: [
+        { cap: 1, makespanMs: 8000 },
+        { cap: 2, makespanMs: 4000 },
+        { cap: 4, makespanMs: 2000 },
+      ],
+      chain: [{ nodeId: 'http-1', waitedFor: 'slot', queuedMs: 2000, durationMs: 2000 }],
+    },
+  }
+
+  it('reports the makespan under the cap beside the critical path', async () => {
+    mockByPath({ forecast: CONTENDED })
+    setup()
+    expect(await screen.findByText(/Concurrency · 2 slots/)).toBeInTheDocument()
+    expect(screen.getByText('4.0s')).toBeInTheDocument()
+    expect(screen.getByText(/2\.00× the critical path/)).toBeInTheDocument()
+  })
+
+  it('names the queueing, the ceiling, and the knee', async () => {
+    mockByPath({ forecast: CONTENDED })
+    setup()
+    expect(await screen.findByText(/4\.0s spent waiting for a slot/)).toBeInTheDocument()
+    expect(screen.getByText(/can use 4\.0 slots at most/)).toBeInTheDocument()
+    expect(screen.getByText(/4 slots would reach 2\.0s/)).toBeInTheDocument()
+  })
+
+  it('names the node whose wait the graph does not explain, by label', async () => {
+    mockByPath({ forecast: CONTENDED })
+    setup()
+    await screen.findByText(/Concurrency · 2 slots/)
+    expect(screen.getByText(/waits 2\.0s for\s+capacity, not for data/)).toBeInTheDocument()
+    // Labelled, not identified by node id.
+    expect(screen.getAllByText('Fetch orders').length).toBeGreaterThan(0)
+  })
+
+  it('draws the curve with the current cap marked', async () => {
+    mockByPath({ forecast: CONTENDED })
+    const { container } = setup()
+    await screen.findByText(/Concurrency · 2 slots/)
+    const curve = container.querySelector('svg[aria-label*="execution slots"]')
+    expect(curve).toBeTruthy()
+    expect(curve.querySelectorAll('circle')).toHaveLength(1)
+  })
+
+  it('stays silent when the cap costs the workflow nothing', async () => {
+    mockByPath({
+      forecast: {
+        ...CONTENDED,
+        concurrency: { ...CONTENDED.concurrency, contention: 1, queuedMs: 0 },
+      },
+    })
+    setup()
+    await screen.findByText('93.1%')
+    expect(screen.queryByText(/Concurrency ·/)).not.toBeInTheDocument()
+  })
+
+  it('stays silent for a server that sends no concurrency block', async () => {
+    mockByPath({ forecast: FORECAST })
+    setup()
+    await screen.findByText('93.1%')
+    expect(screen.queryByText(/Concurrency ·/)).not.toBeInTheDocument()
+  })
+})

@@ -8,15 +8,25 @@
 // chain of steps — the ones that actually set the run's duration), those rows
 // are highlighted, so the answer to "what do I speed up?" is visible at a
 // glance: shortening anything off the path buys nothing.
+//
+// The bars used to leave one thing unexplained. The engine runs at most
+// EXEC_MAX_PARALLEL nodes at once, so on a wide graph the bars arrive in tidy
+// waves — and nothing said why, because the reason is not in the graph: a node
+// was ready and sat waiting for a slot somebody else was holding. Given the
+// schedule analysis (GET /api/executions/:id/schedule) each row grows a hollow
+// **queued** segment immediately before its bar, covering exactly the interval
+// between when the node could have started and when it did. Time that used to
+// be an unexplained gap becomes the widest thing on the row.
 
 function fmtMs(ms) {
   if (!Number.isFinite(ms)) return '—'
   return ms < 1000 ? `${ms}ms` : `${(ms / 1000).toFixed(1)}s`
 }
 
-export default function ExecutionTimeline({ steps, nodes, criticalPath }) {
+export default function ExecutionTimeline({ steps, nodes, criticalPath, schedule }) {
   const labelFor = (step) =>
     nodes?.find((n) => n.id === step.nodeId)?.data?.label || step.type || step.nodeId
+  const labelForId = (id) => nodes?.find((n) => n.id === id)?.data?.label || id
 
   const timed = (steps || []).filter((s) => s.startedAt && s.finishedAt)
   if (timed.length === 0) {
@@ -31,6 +41,10 @@ export default function ExecutionTimeline({ steps, nodes, criticalPath }) {
   const wall = end - start
   const critMs = criticalPath?.totalMs || 0
   const critPct = wall > 0 ? Math.round((critMs / wall) * 100) : 0
+
+  const perNode = schedule?.perNode || {}
+  const queuedMs = schedule?.observed?.queuedMs || 0
+  const idealMs = schedule?.idealMakespanMs
 
   return (
     <div className="exec-timeline">
@@ -47,6 +61,20 @@ export default function ExecutionTimeline({ steps, nodes, criticalPath }) {
           </span>
         </p>
       )}
+      {queuedMs > 0 && (
+        <p className="exec-timeline__queued-note">
+          <span className="exec-timeline__queued-swatch" aria-hidden="true" />
+          <span>
+            <strong>Waiting for a slot</strong> — {fmtMs(queuedMs)} across the run, at{' '}
+            {schedule.cap} concurrent {schedule.cap === 1 ? 'step' : 'steps'}. These nodes had
+            their data and nowhere to run
+            {Number.isFinite(idealMs) && idealMs < wall
+              ? `; with capacity for all of them the same work takes ${fmtMs(idealMs)}`
+              : ''}
+            .
+          </span>
+        </p>
+      )}
       <ol className="exec-timeline__rows">
         {steps.map((s) => {
           const hasBar = Boolean(s.startedAt && s.finishedAt)
@@ -56,6 +84,14 @@ export default function ExecutionTimeline({ steps, nodes, criticalPath }) {
           // Even instant steps get a sliver of bar so their timing reads.
           const width = hasBar ? Math.max(((to - from) / span) * 100, 0.8) : 0
           const isCritical = criticalIds.has(s.nodeId)
+
+          // The queued segment ends exactly where the bar begins and is as wide
+          // as the wait, so it is positioned from the bar rather than from the
+          // analysis's own origin — the two cannot drift apart.
+          const wait = perNode[s.nodeId]
+          const waited = wait?.cause?.kind === 'slot' ? wait.queuedMs || 0 : 0
+          const queueWidth = hasBar && waited > 0 ? Math.min((waited / span) * 100, left) : 0
+
           return (
             <li
               className={`exec-timeline__row${isCritical ? ' exec-timeline__row--critical' : ''}`}
@@ -65,6 +101,13 @@ export default function ExecutionTimeline({ steps, nodes, criticalPath }) {
                 {labelFor(s)}
               </span>
               <span className="exec-timeline__track">
+                {queueWidth > 0 && (
+                  <span
+                    className="exec-timeline__queued"
+                    style={{ left: `${left - queueWidth}%`, width: `${queueWidth}%` }}
+                    title={`${labelFor(s)}: ready, waiting ${fmtMs(waited)} for a slot held by ${labelForId(wait.cause.nodeId)}`}
+                  />
+                )}
                 {hasBar && (
                   <span
                     className={`exec-timeline__bar exec-timeline__bar--${s.status}${
@@ -79,6 +122,11 @@ export default function ExecutionTimeline({ steps, nodes, criticalPath }) {
               </span>
               <span className="exec-timeline__duration">
                 {hasBar ? fmtMs(to - from) : '—'}
+                {waited > 0 && (
+                  <span className="exec-timeline__waited" title="Time spent ready, waiting for a slot">
+                    +{fmtMs(waited)}
+                  </span>
+                )}
               </span>
             </li>
           )

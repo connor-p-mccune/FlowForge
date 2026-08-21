@@ -70,3 +70,76 @@ describe('ExecutionTimeline', () => {
     expect(screen.queryByText(/Critical path/)).not.toBeInTheDocument()
   })
 })
+
+// The engine runs at most EXEC_MAX_PARALLEL nodes at once, so on a wide graph
+// the bars arrive in waves and nothing on the canvas explains why — the node
+// holding the slot may be on an unrelated branch. The schedule analysis is what
+// turns that gap into a segment.
+describe('ExecutionTimeline — waiting for a slot', () => {
+  const schedule = {
+    available: true,
+    cap: 1,
+    observed: { makespanMs: 1500, workMs: 2000, queuedMs: 500, utilisation: 1, chain: [] },
+    idealMakespanMs: 1000,
+    perNode: {
+      a: { startMs: 0, finishMs: 1000, queuedMs: 0, durationMs: 1000, occupiedSlot: true, cause: null },
+      b: {
+        startMs: 500, finishMs: 1500, queuedMs: 500, durationMs: 1000,
+        occupiedSlot: true, cause: { nodeId: 'a', kind: 'slot' },
+      },
+    },
+  }
+
+  it('draws a queued segment ending where the bar begins', () => {
+    const { container } = render(
+      <ExecutionTimeline steps={steps} nodes={nodes} schedule={schedule} />
+    )
+    const queued = container.querySelectorAll('.exec-timeline__queued')
+    expect(queued).toHaveLength(1)
+    // b's bar starts a third of the way in; the 500ms wait is another third,
+    // so the segment runs from the origin up to the bar.
+    expect(queued[0].style.left).toBe('0%')
+    expect(queued[0].style.width).toContain('33.33')
+  })
+
+  it('names the node that was holding the slot', () => {
+    render(<ExecutionTimeline steps={steps} nodes={nodes} schedule={schedule} />)
+    expect(
+      screen.getByTitle(/Send digest: ready, waiting 500ms for a slot held by Fetch users/)
+    ).toBeInTheDocument()
+  })
+
+  it('summarises the wait and the floor the cap kept the run from', () => {
+    render(<ExecutionTimeline steps={steps} nodes={nodes} schedule={schedule} />)
+    expect(screen.getByText(/Waiting for a slot/)).toBeInTheDocument()
+    expect(screen.getByText(/500ms across the run/)).toBeInTheDocument()
+    expect(screen.getByText(/same work takes 1\.0s/)).toBeInTheDocument()
+  })
+
+  it('shows the wait alongside the duration', () => {
+    render(<ExecutionTimeline steps={steps} nodes={nodes} schedule={schedule} />)
+    expect(screen.getByText('+500ms')).toBeInTheDocument()
+  })
+
+  it('draws nothing extra for a node that waited on data, not on capacity', () => {
+    const dataWait = {
+      ...schedule,
+      observed: { ...schedule.observed, queuedMs: 0 },
+      perNode: {
+        ...schedule.perNode,
+        b: { ...schedule.perNode.b, queuedMs: 0, cause: { nodeId: 'a', kind: 'data' } },
+      },
+    }
+    const { container } = render(
+      <ExecutionTimeline steps={steps} nodes={nodes} schedule={dataWait} />
+    )
+    expect(container.querySelectorAll('.exec-timeline__queued')).toHaveLength(0)
+    expect(screen.queryByText(/Waiting for a slot/)).not.toBeInTheDocument()
+  })
+
+  it('renders exactly as before when no analysis is supplied', () => {
+    const { container } = render(<ExecutionTimeline steps={steps} nodes={nodes} />)
+    expect(container.querySelectorAll('.exec-timeline__queued')).toHaveLength(0)
+    expect(screen.getByText(/total wall time 1\.5s/i)).toBeInTheDocument()
+  })
+})
