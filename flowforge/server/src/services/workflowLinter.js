@@ -151,9 +151,87 @@ function lintCompensations(plan, compensationNodes, rawEdges, rollbackPolicy) {
   return issues
 }
 
+// A declared approval gate — quorum, required role, separation of duties —
+// against the workspace it will actually run in.
+//
+// The findings all have the same shape, and it is the shape a lint pass exists
+// for: a gate that **cannot be satisfied** does not fail, it *waits*, until the
+// timeout takes the rejected branch or fails the run. Nobody discovers a
+// four-approval gate in a three-person workspace until a production run is
+// stuck behind it at 3am, and by then the evidence is a timeout that looks like
+// nobody was paying attention.
+function lintApprovalGate(node, config, name, { approvers, hasUserTrigger }) {
+  const issues = []
+  const { parseGate } = require('./approvalQuorum')
+  const gate = parseGate(config)
+
+  const raw = config.quorum
+  if (!isBlank(raw) && (!Number.isFinite(Number(raw)) || Number(raw) < 1)) {
+    issues.push(
+      issue('warning', 'invalid-config', `${name}: quorum must be a whole number of approvals ≥ 1 — one applies`, node.id)
+    )
+  }
+  if (!isBlank(config.approverRole) && !['any', 'owner'].includes(config.approverRole)) {
+    issues.push(
+      issue('warning', 'invalid-config', `${name}: approver role must be "any" or "owner" — any member applies`, node.id)
+    )
+  }
+
+  // The counts are only available when the linter is run against a real
+  // workspace (the canvas and the deploy gate); an exported file linted without
+  // one gets the config checks and nothing that would need to guess.
+  if (approvers) {
+    const pool = gate.requiredRole === 'owner' ? approvers.owners : approvers.members
+    const who =
+      gate.requiredRole === 'owner'
+        ? `${pool} workspace owner${pool === 1 ? '' : 's'}`
+        : `${pool} member${pool === 1 ? '' : 's'} who can approve`
+    // Separation of duties removes one more person from the pool — but only on
+    // a run that had a triggering user, so this is the *worst* case rather than
+    // always true, which is why it is phrased as "could".
+    const eligible = gate.separationOfDuties && hasUserTrigger ? pool - 1 : pool
+
+    if (gate.quorum > pool) {
+      issues.push(
+        issue(
+          'error',
+          'unsatisfiable-approval',
+          `${name}: needs ${gate.quorum} approvals but this workspace has ${who} — the gate can never pass`,
+          node.id
+        )
+      )
+    } else if (gate.quorum > eligible) {
+      issues.push(
+        issue(
+          'error',
+          'unsatisfiable-approval',
+          `${name}: needs ${gate.quorum} approvals from ${who}, and separation of duties excludes whoever starts the run — a run they start can never be approved`,
+          node.id
+        )
+      )
+    }
+  }
+
+  // Nobody to exclude: a webhook delivery and a schedule tick carry no user, so
+  // the rule is inert on those runs. Reported rather than silently ignored,
+  // because an author who declared it believes it is protecting them.
+  if (gate.separationOfDuties && hasUserTrigger === false) {
+    issues.push(
+      issue(
+        'warning',
+        'inert-config',
+        `${name}: separation of duties has no effect here — this workflow has no manual trigger, and a webhook or schedule run has no user to exclude`,
+        node.id
+      )
+    )
+  }
+
+  return issues
+}
+
 // Per-type required-config checks. Only fields the runner will definitely
 // choke on are errors; softer omissions are warnings.
-function lintNodeConfig(node, { workflowTargets }) {
+function lintNodeConfig(node, { workflowTargets, approvers, hasUserTrigger }) {
   const issues = []
   const config = node.data?.config || {}
   const name = label(node)
@@ -365,6 +443,7 @@ function lintNodeConfig(node, { workflowTargets }) {
           )
         )
       }
+      issues.push(...lintApprovalGate(node, config, name, { approvers, hasUserTrigger }))
       break
     }
     case 'wait-callback': {
@@ -467,7 +546,7 @@ function buildAncestors(order, incomingByNode) {
 //                     (services/graphLookup.js builds one)
 //   guarantees      — the workflow's declared path invariants (raw JSON or a
 //                     parsed array), verified against the graph on screen
-function lintGraph({ nodes: rawNodes = [], edges: rawEdges = [] } = {}, { secretNames, variableNames, workflowTargets, resolveWorkflow, rollbackPolicy, guarantees, redact } = {}) {
+function lintGraph({ nodes: rawNodes = [], edges: rawEdges = [] } = {}, { secretNames, variableNames, workflowTargets, resolveWorkflow, rollbackPolicy, guarantees, redact, approvers } = {}) {
   const issues = []
 
   // Sticky notes are annotations: the engine drops them (and any edge touching
@@ -797,9 +876,16 @@ function lintGraph({ nodes: rawNodes = [], edges: rawEdges = [] } = {}, { secret
     'executionId', 'workflowId', 'failedNode', 'failedNodeLabel', 'error', 'reason',
   ])
 
+  // Can a run of this workflow have a triggering user at all? A manual trigger
+  // means yes; a graph with only webhook and schedule triggers means the runs it
+  // is *drawn* for do not, which is what makes a separation-of-duties
+  // declaration inert. (An API trigger does carry its token's owner, so this is
+  // a warning rather than a certainty — see lintApprovalGate.)
+  const hasUserTrigger = nodes.some((n) => n.type === 'trigger-manual')
+
   for (const node of [...nodes, ...compensationNodes]) {
     const isCompensation = plan.compensationIds.has(node.id)
-    issues.push(...lintNodeConfig(node, { workflowTargets }))
+    issues.push(...lintNodeConfig(node, { workflowTargets, approvers, hasUserTrigger }))
 
     for (const ref of collectRefs(node.data?.config)) {
       if (ref.head === 'rollback') {

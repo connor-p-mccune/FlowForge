@@ -10,7 +10,7 @@ const scheduler = require('../services/scheduler')
 const activityService = require('../services/activityService')
 const { lintGraph } = require('../services/workflowLinter')
 const { describeGraphTypes } = require('../services/typeInference')
-const { graphResolver } = require('../services/graphLookup')
+const { graphResolver, approverCounts } = require('../services/graphLookup')
 const { checkWorkflow, policyIssues } = require('../services/policyGate')
 const stepCache = require('../services/stepCache')
 const { isValidPriority } = require('../services/runPriority')
@@ -816,6 +816,10 @@ router.post('/workflows/:id/lint', auth, (req, res) => {
         // Declared redactions, so a rule that could never match is reported
         // while it is still an edit rather than after a run stored the value.
         redact: workflow.redact_json,
+        // Who could actually settle an approval gate here, so a quorum larger
+        // than the workspace is an error now rather than a run stuck behind an
+        // unsatisfiable gate at 3am.
+        approvers: approverCounts(workflow.workspace_id),
       }),
       ...policyIssues(workflow, { graphJson: JSON.stringify(graph) }),
     ]

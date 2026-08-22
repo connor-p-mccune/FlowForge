@@ -46,4 +46,28 @@ function graphResolver(workspaceId) {
   }
 }
 
-module.exports = { graphResolver }
+// How many people could actually settle an approval gate in this workspace:
+// `{ members, owners }`, counting only roles that may change state — a viewer
+// sees the inbox and cannot decide it, so counting them would make a quorum
+// look satisfiable when it is not.
+//
+// Lives here rather than in the linter for the same reason `graphResolver`
+// does: the linter is a pure function of a graph plus facts, and this is one of
+// the facts. Null when there is no workspace to count (an exported file linted
+// on its own), which the linter reads as "don't guess".
+function approverCounts(workspaceId) {
+  if (!workspaceId) return null
+  const rows = db
+    .prepare("SELECT role, COUNT(*) AS n FROM workspace_members WHERE workspace_id = ? GROUP BY role")
+    .all(workspaceId)
+  let members = 0
+  let owners = 0
+  for (const row of rows) {
+    if (row.role === 'viewer') continue
+    members += row.n
+    if (row.role === 'owner') owners += row.n
+  }
+  return { members, owners }
+}
+
+module.exports = { graphResolver, approverCounts }

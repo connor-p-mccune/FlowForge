@@ -855,3 +855,97 @@ describe('lintGraph — type analysis', () => {
     expect(lintGraph(graph)).toEqual([])
   })
 })
+
+// Approval gates: quorum, required role, separation of duties. Every finding
+// here has the same shape, and it is the shape a lint pass exists for — an
+// unsatisfiable gate does not fail, it *waits*, and nobody discovers a
+// four-approval gate in a three-person workspace until a production run is
+// stuck behind it at 3am.
+describe('approval gates', () => {
+  // Both handles wired, so the baseline for these fixtures is an empty report
+  // and every finding below is the one under test.
+  const gateWith = (triggerId, triggerType) => (config) => ({
+    nodes: [
+      node(triggerId, triggerType),
+      node('gate', 'approval', config, 'Refund gate'),
+      node('pay', 'output-log', { message: 'paid' }),
+      node('deny', 'output-log', { message: 'denied' }),
+    ],
+    edges: [
+      edge(triggerId, 'gate'),
+      edge('gate', 'pay', 'true'),
+      edge('gate', 'deny', 'false'),
+    ],
+  })
+  const gate = gateWith('t1', 'trigger-manual')
+  const webhookGate = gateWith('hook', 'trigger-webhook')
+  const codes = (graph, options) => lintGraph(graph, options).map((i) => i.code)
+  const find = (graph, options, code) => lintGraph(graph, options).find((i) => i.code === code)
+
+  const threePeople = { approvers: { members: 3, owners: 1 } }
+
+  it('says nothing about an ordinary approval', () => {
+    expect(codes(gate({ message: 'ok?' }), threePeople)).toEqual([])
+  })
+
+  it('accepts a quorum the workspace can satisfy', () => {
+    expect(codes(gate({ quorum: 3 }), threePeople)).toEqual([])
+  })
+
+  it('refuses a quorum larger than the workspace', () => {
+    const found = find(gate({ quorum: 4 }), threePeople, 'unsatisfiable-approval')
+    expect(found.severity).toBe('error')
+    expect(found.message).toMatch(/needs 4 approvals but this workspace has 3 members/)
+    expect(found.message).toMatch(/can never pass/)
+    expect(found.nodeId).toBe('gate')
+  })
+
+  it('counts owners, not members, for an owner-only gate', () => {
+    // Three people can approve; only one of them is an owner.
+    expect(codes(gate({ quorum: 2 }), threePeople)).toEqual([])
+    const found = find(gate({ quorum: 2, approverRole: 'owner' }), threePeople, 'unsatisfiable-approval')
+    expect(found.message).toMatch(/1 workspace owner/)
+  })
+
+  it('accounts for the person separation of duties will exclude', () => {
+    // Three members, quorum three, and one of them starts the run: two left.
+    const found = find(
+      gate({ quorum: 3, separationOfDuties: true }),
+      threePeople,
+      'unsatisfiable-approval'
+    )
+    expect(found.severity).toBe('error')
+    expect(found.message).toMatch(/a run they start can never be approved/)
+  })
+
+  it('does not deduct an excluded person on a workflow with no manual trigger', () => {
+    // Nobody to exclude, so the pool is not reduced — a spurious error here
+    // would send somebody to fix a correct graph.
+    expect(codes(webhookGate({ quorum: 3, separationOfDuties: true }), threePeople))
+      .toEqual(['inert-config'])
+  })
+
+  it('reports separation of duties that can never engage', () => {
+    const found = find(webhookGate({ separationOfDuties: true }), threePeople, 'inert-config')
+    expect(found.severity).toBe('warning')
+    expect(found.message).toMatch(/no manual trigger/)
+    expect(found.message).toMatch(/no user to exclude/)
+  })
+
+  it('stays silent about separation of duties on a manually-triggerable workflow', () => {
+    expect(codes(gate({ separationOfDuties: true }), threePeople)).toEqual([])
+  })
+
+  it('warns about a quorum value the runner will clamp', () => {
+    expect(find(gate({ quorum: 0 }), threePeople, 'invalid-config').message).toMatch(/whole number/)
+    expect(find(gate({ quorum: 'two' }), threePeople, 'invalid-config').message).toMatch(/whole number/)
+    expect(find(gate({ approverRole: 'admin' }), threePeople, 'invalid-config').message)
+      .toMatch(/"any" or "owner"/)
+  })
+
+  it('checks nothing that needs a workspace when it was not given one', () => {
+    // An exported file linted on its own gets the config checks and nothing
+    // that would have to guess how many people exist somewhere else.
+    expect(codes(gate({ quorum: 40 }))).toEqual([])
+  })
+})

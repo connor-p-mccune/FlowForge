@@ -49,7 +49,7 @@ const { searchWorkflows } = require('../services/workflowSearch')
 const { diffGraphs, presentDiff } = require('../services/graphDiff')
 const { lintGraph } = require('../services/workflowLinter')
 const { describeGraphTypes } = require('../services/typeInference')
-const { graphResolver } = require('../services/graphLookup')
+const { graphResolver, approverCounts } = require('../services/graphLookup')
 const { checkWorkflow, policyIssues } = require('../services/policyGate')
 const canary = require('../services/canary')
 const { snapshotVersion } = require('../services/canaryMonitor')
@@ -947,6 +947,10 @@ router.post('/workflows/:id/lint', tokenAuth('read'), (req, res) => {
         // Declared redactions, so a rule that could never match is reported
         // while it is still an edit rather than after a run stored the value.
         redact: workflow.redact_json,
+        // Counted in the *target* workspace for the same reason the guarantees
+        // are: a four-approval gate that is satisfiable where it was authored
+        // and not where it is being promoted is exactly what this catches.
+        approvers: approverCounts(workflow.workspace_id),
       }),
       // Policy findings ride the same report, so `flowforge lint` is one gate
       // for "will it run?" and "is it allowed here?" rather than two commands.
