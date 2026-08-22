@@ -885,6 +885,52 @@ converts that into a fast, honest failure.
   skipped under `NODE_ENV=test` unless a suite opts in, because the test
   suites deliberately hammer failing local servers.
 
+## The retry budget
+
+`services/retryBudget.js` sits beside the breaker and answers the case the
+breaker structurally cannot.
+
+The breaker triggers on *N consecutive failures*. The failure mode that
+actually takes services down never produces those. A host under strain fails
+**some** requests — every failure is retried, retries are extra load on
+something already struggling, more load means a higher failure rate, which
+means more retries. A service at 90% success and recoverable ends at 40% and
+not, and the circuit is closed for the entire descent, because the host kept
+answering. The retries were the outage.
+
+- **A ratio, over a window, per host.** Retries may be at most ~10% of the
+  requests going to a host in the last minute. That bounds how much of a
+  struggling dependency's load is FlowForge retrying it, which a count could
+  not: ten retries against a thousand requests is nothing and ten against
+  forty is a problem, and only the ratio distinguishes them — or stays
+  meaningful as traffic grows.
+- **One denominator, shared.** Requests are counted in `safeFetch`, the same
+  single egress path the breaker wraps, so an HTTP node's calls, a Slack
+  node's, and the webhook dispatcher's all land in one budget per host. The
+  host experiences one total load; a budget per caller would be three budgets
+  and no bound at all.
+- **It suppresses the retry, never the request.** The first attempt always
+  goes out — nothing is ever refused work it was asked to do. The run fails
+  with the *real* error, a little sooner, and the suppression note is
+  **appended** to that error rather than replacing it: "the API returned 503"
+  is the cause and "we did not try again" is only why it stopped there.
+- **A floor under the ratio.** 10% of three requests is 0.3 retries, i.e.
+  none, forever — a workflow that fires once an hour would never retry
+  anything. That is not a bound on cascading failure, it is a broken retry
+  policy, so a constant allowance keeps the budget engaged only where there is
+  enough traffic for a ratio to mean anything.
+- **Narrow scope, deliberately.** Only node types whose purpose is to call a
+  URL are budgeted. A Transform node's retry costs a millisecond of CPU and
+  cannot cascade; a cascading-failure control in front of it would be theatre.
+- **The dispatcher defers rather than discards.** A node retry has nowhere to
+  wait — the run is in flight, and the alternative to retrying now is failing.
+  A webhook delivery has a durable queue and an attempt budget of its own, so
+  over-budget means "not yet": the next attempt is pushed out a full window,
+  which costs the receiver nothing and loses no event.
+
+Suppressions land on `flowforge_retries_suppressed_total`, and the enforcement
+switch mirrors the breaker's for the same reason.
+
 ## Run insights & SLA monitoring
 
 `services/runStats.js` turns recorded run history into statistics, and

@@ -1039,6 +1039,31 @@ status completed
   outbound webhook deliveries are all covered — per host, so one dead API
   can't fast-fail a healthy one. Trips and open circuits are visible on
   `/metrics`.
+- **Retry budgets** — the breaker above handles a host that is *down*. It is no
+  help at all for the failure mode that actually takes services out, because
+  that one never produces N consecutive failures: a host under strain fails
+  *some* requests, every failure is retried, retries are additional load on the
+  thing already struggling, and a service that was at 90% success and
+  recoverable is at 40% and not — with the circuit closed the whole time,
+  because the host kept answering. The retries turned a brownout into an outage.
+  So retries are capped as a **fraction of the requests going to that host**
+  (10% by default — the SRE Book's control), which bounds how much of a
+  struggling dependency's load is FlowForge retrying it. Three things make it a
+  different control rather than a second breaker: it's a **ratio, not a count**
+  (ten retries against a thousand requests is nothing, ten against forty is a
+  problem, and only a ratio tells them apart or survives traffic growth); the
+  denominator is **shared across every caller**, counted in the one egress path
+  HTTP nodes, Slack nodes and the webhook dispatcher all pass through, because
+  the host experiences one total load and a budget each would be no bound at
+  all; and it suppresses the **retry, never the request** — the first attempt
+  always goes out, and the run fails with the real error, just sooner. The
+  budget has a floor, because 10% of three requests is 0.3 retries and a
+  workflow firing once an hour would otherwise never retry anything, which is a
+  broken retry policy rather than a bound on anything. Scope is narrow on
+  purpose: only nodes whose job is to call a URL are budgeted, since a Transform
+  node's retry cannot cascade. And the webhook dispatcher **defers rather than
+  discards** — a node retry has nowhere to wait, but a delivery has a durable
+  queue, so over budget there means "not yet", not "never".
 - **Crash recovery (execution leases)** — every control above bounds what a
   *running* system does, and every one of them assumes the process survives the
   run. It doesn't always: an OOM kill or a node evicted mid-deploy leaves the
@@ -1215,6 +1240,10 @@ Copy `.env.example` to `.env` before running. **Never commit `.env`.**
 | `WEBHOOK_MAX_ATTEMPTS` | no  | Delivery attempts per outbound webhook event (default 5) |
 | `CIRCUIT_BREAKER_THRESHOLD` | no | Consecutive failures to one host before its outbound circuit opens (default 5) |
 | `CIRCUIT_BREAKER_COOLDOWN_MS` | no | How long an open circuit fast-fails before probing the host again (default 30000) |
+| `RETRY_BUDGET_RATIO` | no | Fraction of a host's requests that may be retries (default 0.1) |
+| `RETRY_BUDGET_MIN` | no | Retries always allowed regardless of the ratio, so a low-traffic host can still retry (default 10) |
+| `RETRY_BUDGET_WINDOW_MS` | no | Rolling window the retry ratio is measured over (default 60000) |
+| `DISABLE_RETRY_BUDGET` | no | `true` turns the retry budget off entirely |
 | `WEBHOOK_DISPATCH_INTERVAL_MS` | no | Outbound webhook delivery-queue poll interval (default 5000) |
 | `EXECUTION_RETENTION_DAYS` | no | Prune terminal runs older than this many days (default: keep forever) |
 | `SLA_SUCCESS_RATE_WINDOW` | no | Runs in the rolling success-rate window for SLA monitoring (default 20) |
