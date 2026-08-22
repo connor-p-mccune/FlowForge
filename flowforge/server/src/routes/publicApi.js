@@ -41,6 +41,7 @@ const { admitRun } = require('../services/concurrencyGate')
 const { isValidPriority, resolvePriority, enqueueOpts } = require('../services/runPriority')
 const { computeInsights, forecastFor, parseLimit } = require('./insights')
 const { scheduleAnalysisFor } = require('./executions')
+const { analyzeWorkflowDrift } = require('../services/driftMonitor')
 const { scheduleConfigOf, previewFor, parseCount } = require('./schedule')
 const { runSuite } = require('../services/workflowTester')
 const { compareRuns } = require('../services/runComparison')
@@ -575,6 +576,32 @@ router.get('/workflows/:id/forecast', tokenAuth('read'), (req, res) => {
       workflowId: workflow.id,
       ...forecastFor(workflow.id, {
         cap: Number.isFinite(cap) && cap > 0 ? Math.min(cap, 64) : undefined,
+      }),
+    })
+  } catch (err) {
+    console.error(err)
+    res.status(500).json({ error: 'Internal server error' })
+  }
+})
+
+// GET /api/v1/workflows/:id/drift — has what this workflow's nodes *produce*
+// changed? Compares the last N runs' recorded step outputs against the N before
+// them, field by field. Read-only; `read` scope.
+//
+// A CI job can gate on it (`flowforge drift <id> --strict`), which is the point:
+// every other check a pipeline can run here is about the graph or the run, and
+// this is the only one that would notice an upstream API quietly changing what
+// it sends while every run still completes.
+router.get('/workflows/:id/drift', tokenAuth('read'), (req, res) => {
+  try {
+    const workflow = getWorkflowForMember(req.params.id, req.user.id)
+    if (!workflow) return res.status(404).json({ error: 'Workflow not found' })
+    res.json({
+      workflowId: workflow.id,
+      monitoring: Boolean(workflow.drift_monitoring),
+      ...analyzeWorkflowDrift(workflow.id, {
+        recentRuns: req.query.recent,
+        baselineRuns: req.query.baseline,
       }),
     })
   } catch (err) {

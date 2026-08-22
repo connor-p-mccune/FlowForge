@@ -545,6 +545,15 @@ router.put('/workflows/:id', auth, validate(workflowRule), (req, res) => {
     // mean the same thing and one of them is a value somebody has to explain.
     const redactions =
       'redact' in req.body ? parseRedactions(req.body.redact) : parseRedactions(workflow.redact_json)
+    // Output-drift alerting. Switching it off clears the outstanding alert and
+    // its fingerprint, so re-enabling later starts from a clean slate rather
+    // than staying silent about a drift the first alert already reported.
+    const driftMonitoring =
+      'drift_monitoring' in req.body
+        ? (req.body.drift_monitoring ? 1 : 0)
+        : (workflow.drift_monitoring ?? 0)
+    const driftAlertedAt = driftMonitoring ? workflow.drift_alerted_at : null
+    const driftFingerprint = driftMonitoring ? workflow.drift_fingerprint : null
 
     const now = new Date().toISOString()
     db.prepare(
@@ -554,8 +563,9 @@ router.put('/workflows/:id', auth, validate(workflowRule), (req, res) => {
          sla_max_duration_ms = ?, sla_min_success_rate = ?, heartbeat_interval_minutes = ?, heartbeat_alerted_at = ?,
          slo_target = ?, slo_window_days = ?,
          error_workflow_id = ?, default_priority = ?, rollback_policy = ?, recovery_policy = ?,
+         drift_monitoring = ?, drift_alerted_at = ?, drift_fingerprint = ?,
          redact_json = ?, updated_at = ? WHERE id = ?`
-    ).run(name, description ?? workflow.description, maxConcurrent, policy, rateMax, rateWindow, maintenanceCron, maintenanceDuration, maintenanceTimezone, slaMaxDuration, slaMinSuccess, heartbeatInterval, heartbeatAlertedAt, sloTarget, sloWindowDays, errorWorkflowId, defaultPriority, rollbackPolicyValue, recoveryPolicyValue, redactions.length ? JSON.stringify(redactions) : null, now, req.params.id)
+    ).run(name, description ?? workflow.description, maxConcurrent, policy, rateMax, rateWindow, maintenanceCron, maintenanceDuration, maintenanceTimezone, slaMaxDuration, slaMinSuccess, heartbeatInterval, heartbeatAlertedAt, sloTarget, sloWindowDays, errorWorkflowId, defaultPriority, rollbackPolicyValue, recoveryPolicyValue, driftMonitoring, driftAlertedAt, driftFingerprint, redactions.length ? JSON.stringify(redactions) : null, now, req.params.id)
 
     // Clearing (or removing) the window while it still holds a maintenance
     // pause would strand the workflow paused — the sweep no longer sees it to

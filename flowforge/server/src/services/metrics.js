@@ -200,6 +200,19 @@ const heartbeatsMissed = counter(
   'Workflows detected overdue on their expected-success heartbeat.'
 )
 
+// Output drift (services/driftMonitor.js). Each increment is a field whose
+// distribution moved far enough to alert on, by what changed about it —
+// 'null-rate', 'type-changed', 'field-missing', 'distribution', 'categories'.
+// Edge-triggered on the *set* of findings, so a persistent drift counts once
+// rather than once per sweep. A rising count here beside a flat error rate is
+// the shape this whole feature exists for: nothing is failing, and the data is
+// no longer what it was.
+const driftDetections = counter(
+  'flowforge_data_drift_detections_total',
+  'Node output fields detected as drifted, by kind.',
+  ['kind']
+)
+
 // Step-level result cache (services/stepCache.js). event: 'hit' (output
 // adopted, runner skipped) | 'miss' (key absent or expired) | 'store'
 // (fresh output memoised). hit/(hit+miss) is the cache's effectiveness — a
@@ -341,6 +354,11 @@ function recordSlaBreach(type) {
   slaBreaches.inc({ type })
 }
 
+// Called by the drift monitor for each major finding in a new alert.
+function recordDriftDetected(kind) {
+  driftDetections.inc({ kind })
+}
+
 // Called by the heartbeat monitor when a workflow first goes overdue.
 function recordHeartbeatMissed() {
   heartbeatsMissed.inc({})
@@ -406,6 +424,7 @@ module.exports = {
   recordWebhookDelivery,
   recordRunDeferred,
   recordSlaBreach,
+  recordDriftDetected,
   recordHeartbeatMissed,
   recordStepCache,
   recordPausedSkip,

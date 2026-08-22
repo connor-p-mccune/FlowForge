@@ -626,6 +626,59 @@ const spec = {
         },
       },
     },
+    '/workflows/{workflowId}/drift': {
+      get: {
+        tags: ['workflows'],
+        summary: 'Detect drift in what the workflow’s nodes produce',
+        description:
+          '**Output** drift, not definition drift — `/diff` answers whether the ' +
+          'graph still matches the document in git; this answers whether the ' +
+          'data still looks like the data. ' +
+          'Compares the last N runs’ recorded step outputs against the N before ' +
+          'them, field by field, and reports what changed: a field that ' +
+          'vanished or appeared, a null rate that moved, a type that changed ' +
+          'under it, a numeric distribution that shifted (two-sample ' +
+          'Kolmogorov-Smirnov), a category mix that shifted (population ' +
+          'stability index). The failure mode it exists for is the one every ' +
+          'other check is blind to — every run completes, every step succeeds, ' +
+          'the durations are unchanged, and an upstream API has quietly started ' +
+          'returning nulls. `available: false` with `reason: ' +
+          '"insufficient-history"` until both windows have enough runs. ' +
+          'Requires the `read` scope.',
+        operationId: 'getWorkflowDrift',
+        parameters: [
+          { $ref: '#/components/parameters/WorkflowId' },
+          {
+            name: 'recent',
+            in: 'query',
+            required: false,
+            schema: { type: 'integer', minimum: 1, maximum: 200 },
+            description: 'Runs in the recent window (default 50).',
+          },
+          {
+            name: 'baseline',
+            in: 'query',
+            required: false,
+            schema: { type: 'integer', minimum: 1, maximum: 500 },
+            description: 'Runs in the baseline window behind it (default 200).',
+          },
+        ],
+        responses: {
+          200: {
+            description: 'The output-drift report.',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/DataDriftReport' },
+              },
+            },
+          },
+          401: { $ref: '#/components/responses/Unauthorized' },
+          403: { $ref: '#/components/responses/Forbidden' },
+          404: { $ref: '#/components/responses/NotFound' },
+          429: { $ref: '#/components/responses/RateLimited' },
+        },
+      },
+    },
     '/workflows/{workflowId}/dependencies': {
       get: {
         tags: ['workflows'],
@@ -2782,6 +2835,90 @@ const spec = {
             items: {
               type: 'object',
               properties: { cap: { type: 'integer' }, makespanMs: { type: 'integer' } },
+            },
+          },
+        },
+      },
+      DataDriftFinding: {
+        type: 'object',
+        properties: {
+          nodeId: { type: 'string' },
+          nodeLabel: { type: 'string', description: 'The node’s label on the canvas.' },
+          path: { type: 'string', description: 'Dotted path within the output, e.g. `orders[].amount`.' },
+          kind: {
+            type: 'string',
+            enum: ['field-missing', 'field-added', 'presence', 'null-rate', 'type-changed', 'distribution', 'categories'],
+          },
+          severity: { type: 'string', enum: ['major', 'minor'] },
+          summary: { type: 'string', description: 'One sentence naming the change and both sides of it.' },
+          detail: {
+            type: 'object',
+            description: 'The evidence — rates, p-value, KS statistic or PSI, and which test produced it.',
+            additionalProperties: true,
+          },
+        },
+      },
+      DataDriftReport: {
+        type: 'object',
+        properties: {
+          workflowId: { type: 'string' },
+          available: { type: 'boolean' },
+          reason: {
+            type: 'string',
+            enum: ['not-found', 'insufficient-history'],
+            nullable: true,
+          },
+          monitoring: { type: 'boolean', description: 'Whether this workflow opted into drift *alerting*.' },
+          window: {
+            type: 'object',
+            properties: {
+              recent: {
+                type: 'object',
+                properties: {
+                  runs: { type: 'integer' },
+                  from: { type: 'string', nullable: true },
+                  to: { type: 'string', nullable: true },
+                },
+              },
+              baseline: {
+                type: 'object',
+                properties: {
+                  runs: { type: 'integer' },
+                  from: { type: 'string', nullable: true },
+                  to: { type: 'string', nullable: true },
+                },
+              },
+            },
+          },
+          summary: {
+            type: 'object',
+            properties: {
+              major: { type: 'integer' },
+              minor: { type: 'integer' },
+              nodesCompared: { type: 'integer' },
+              nodesSkipped: { type: 'integer' },
+              fieldsCompared: { type: 'integer' },
+              fieldsSkipped: {
+                type: 'integer',
+                description:
+                  'Fields that could not be compared — too few samples, an ' +
+                  'identifier rather than a category, or redacted. Reported ' +
+                  'rather than omitted, because a report that hides its skips ' +
+                  'is claiming coverage it does not have.',
+              },
+            },
+          },
+          nodes: {
+            type: 'array',
+            items: {
+              type: 'object',
+              properties: {
+                nodeId: { type: 'string' },
+                nodeLabel: { type: 'string' },
+                nodeType: { type: 'string', nullable: true },
+                compared: { type: 'integer' },
+                findings: { type: 'array', items: { $ref: '#/components/schemas/DataDriftFinding' } },
+              },
             },
           },
         },

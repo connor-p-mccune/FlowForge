@@ -492,6 +492,25 @@ ensureColumn('workflows', 'recovery_policy', "TEXT NOT NULL DEFAULT 'safe'")
 // coverage of a *workflow* a number that exists.
 ensureColumn('workflow_tests', 'generated_for', 'TEXT')
 
+// Output drift monitoring (services/driftMonitor.js). The analysis is always
+// available on demand; these columns are only about *alerting*, which is opt-in
+// per workflow exactly as the SLA targets, the SLO objective and the heartbeat
+// interval are — a workflow that has not asked is never swept.
+//
+// drift_checked_at throttles the sweep: the analysis parses hundreds of stored
+// step outputs, so it is deliberately not per-run.
+//
+// drift_fingerprint is the edge trigger, and it carries the design decision.
+// Every other monitor here edge-triggers on a boolean ("is it breached?"), which
+// would be wrong for drift: a second field breaking while the first is still
+// broken is new information and must alert. So the fingerprint hashes *which*
+// fields drifted and how — an unchanged set stays silent, a changed one alerts
+// again, and an empty one closes the incident.
+ensureColumn('workflows', 'drift_monitoring', 'INTEGER NOT NULL DEFAULT 0')
+ensureColumn('workflows', 'drift_checked_at', 'TEXT')
+ensureColumn('workflows', 'drift_alerted_at', 'TEXT')
+ensureColumn('workflows', 'drift_fingerprint', 'TEXT')
+
 // Two-factor authentication (TOTP). Optional, opt-in per user. totp_enabled stays
 // 0 until the user verifies a code from their authenticator, so a half-finished
 // setup never locks them out of login. totp_backup_codes is a JSON array of

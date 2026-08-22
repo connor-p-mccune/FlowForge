@@ -13,6 +13,7 @@ const { summarizeDurations, classifyRuns, mannKendall } = require('../services/r
 const { computeForecast } = require('../services/runForecast')
 const { analyzeRegressions } = require('../services/regressions')
 const stepTimings = require('../services/stepTimings')
+const { analyzeWorkflowDrift } = require('../services/driftMonitor')
 
 // Minimum completed runs before a duration trend is reported. The Mann-Kendall
 // normal approximation is unreliable on a handful of points, and "getting
@@ -314,6 +315,34 @@ router.get('/workflows/:id/slo', auth, (req, res) => {
     const workflow = getVisibleWorkflow(req.params.id, req.user.id)
     if (!workflow) return res.status(404).json({ error: 'Workflow not found' })
     res.json({ workflowId: workflow.id, ...computeSlo(workflow) })
+  } catch (err) {
+    console.error(err)
+    res.status(500).json({ error: 'Internal server error' })
+  }
+})
+
+// GET /api/workflows/:id/drift — has what this workflow's nodes *produce*
+// changed? Compares the last N runs' recorded step outputs against the N before
+// them, field by field. Read-only and derived entirely from what was already
+// persisted: this endpoint runs no workflow and writes nothing.
+//
+// Always available, whether or not the workflow opted into alerting — the
+// question "did something change under us?" is one somebody asks while
+// investigating, and gating the answer behind a setting they have not turned on
+// is the wrong moment to find that out.
+router.get('/workflows/:id/drift', auth, (req, res) => {
+  try {
+    const workflow = getVisibleWorkflow(req.params.id, req.user.id)
+    if (!workflow) return res.status(404).json({ error: 'Workflow not found' })
+    res.json({
+      workflowId: workflow.id,
+      monitoring: Boolean(workflow.drift_monitoring),
+      alertedAt: workflow.drift_alerted_at ?? null,
+      ...analyzeWorkflowDrift(workflow.id, {
+        recentRuns: req.query.recent,
+        baselineRuns: req.query.baseline,
+      }),
+    })
   } catch (err) {
     console.error(err)
     res.status(500).json({ error: 'Internal server error' })

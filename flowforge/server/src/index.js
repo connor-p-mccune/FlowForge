@@ -133,6 +133,11 @@ if (process.env.NODE_ENV !== 'test') {
   // as well as on its interval, because the runs it exists for are precisely
   // the ones a restart left behind.
   require('./services/crashRecovery').startRecoverySweep()
+  // Output drift: has what these nodes *produce* changed? A fifth sweep, and
+  // for a reason none of the others have — the analysis compares two windows of
+  // history against each other, so there is no single run whose settling could
+  // be the trigger. Only workflows that opted into alerting are ever visited.
+  require('./services/driftMonitor').startDriftMonitor()
 
   // Graceful shutdown (services/shutdown.js): on SIGTERM/SIGINT, drain in
   // dependency order instead of dying mid-run. Sources of new work stop first
@@ -159,6 +164,7 @@ if (process.env.NODE_ENV !== 'test') {
   onShutdown('maintenance-windows', () => require('./services/maintenanceWindow').stopMaintenanceWindows())
   onShutdown('canary-monitor', () => require('./services/canaryMonitor').stopCanaryMonitor())
   onShutdown('crash-recovery', () => require('./services/crashRecovery').stopRecoverySweep())
+  onShutdown('drift-monitor', () => require('./services/driftMonitor').stopDriftMonitor())
   onShutdown('socket-io', () => new Promise((resolve) => io.close(() => resolve())))
   // After the sockets are closed, so no operation can land between the flush
   // and the exit, and before the database closes so the write can happen at
