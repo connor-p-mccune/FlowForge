@@ -492,6 +492,45 @@ ensureColumn('workflows', 'recovery_policy', "TEXT NOT NULL DEFAULT 'safe'")
 // coverage of a *workflow* a number that exists.
 ensureColumn('workflow_tests', 'generated_for', 'TEXT')
 
+// Approval gates beyond "whoever gets there first" (services/approvalQuorum.js).
+// The runner resolves the node's declaration at run time and stamps it here, so
+// the rules a request was filed under travel with the request — editing the
+// canvas mid-wait cannot change what the people looking at it were told, and the
+// audit trail records the gate that actually applied.
+//
+// quorum is how many *distinct* approvals settle it (1 = the historical
+// behaviour). required_role restricts who may respond ('owner', or NULL for any
+// member who can edit). excluded_user_id is separation of duties, resolved to
+// the run's triggering user — NULL when there was none, because a webhook or
+// schedule run has nobody to exclude and the control must not quietly become
+// something else.
+ensureColumn('execution_approvals', 'quorum', 'INTEGER NOT NULL DEFAULT 1')
+ensureColumn('execution_approvals', 'required_role', 'TEXT')
+ensureColumn('execution_approvals', 'excluded_user_id', 'TEXT')
+
+// One row per person per approval. The UNIQUE constraint is the invariant that
+// makes a quorum a quorum: a gate one person can satisfy by clicking twice is
+// not four-eyes, and enforcing it here rather than with a check-then-insert
+// means two simultaneous clicks from the same account resolve to one vote by
+// construction instead of by luck.
+//
+// Kept even after the gate settles: "who approved this, and did anyone object"
+// is exactly the question an incident review asks, and the single responded_by
+// column on execution_approvals can only hold the last one.
+db.exec(`
+  CREATE TABLE IF NOT EXISTS execution_approval_responses (
+    id TEXT PRIMARY KEY,
+    approval_id TEXT NOT NULL REFERENCES execution_approvals(id) ON DELETE CASCADE,
+    user_id TEXT REFERENCES users(id),
+    decision TEXT NOT NULL,
+    note TEXT,
+    created_at TEXT NOT NULL,
+    UNIQUE (approval_id, user_id)
+  );
+  CREATE INDEX IF NOT EXISTS idx_execution_approval_responses_approval
+    ON execution_approval_responses (approval_id, created_at);
+`)
+
 // Output drift monitoring (services/driftMonitor.js). The analysis is always
 // available on demand; these columns are only about *alerting*, which is opt-in
 // per workflow exactly as the SLA targets, the SLO objective and the heartbeat

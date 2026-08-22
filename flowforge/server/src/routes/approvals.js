@@ -54,13 +54,29 @@ router.post('/approvals/:id/respond', auth, (req, res) => {
     if (result.outcome === 'not-found') {
       return res.status(404).json({ error: 'Approval not found' })
     }
+    // The message carries *which* rule refused — a viewer, an owner-only gate,
+    // or separation of duties. "You can't approve this" without saying why is
+    // the kind of response that becomes a support ticket.
     if (result.outcome === 'forbidden') {
-      return res.status(403).json({ error: 'Viewers have read-only access' })
+      return res.status(403).json({ error: result.message || 'Viewers have read-only access', reason: result.reason })
     }
     if (result.outcome === 'conflict') {
       return res.status(409).json({ error: `Approval already ${result.status}` })
     }
-    res.json({ approval: result.approval })
+    if (result.outcome === 'duplicate') {
+      return res.status(409).json({
+        error: 'You have already responded to this approval',
+        reason: 'already-responded',
+        progress: result.progress,
+      })
+    }
+    // 202, not 200: the vote was accepted and the gate is still open. A client
+    // that treats every 2xx as "done" would otherwise report a half-met quorum
+    // as an approval.
+    if (result.outcome === 'recorded') {
+      return res.status(202).json({ approval: result.approval, progress: result.progress })
+    }
+    res.json({ approval: result.approval, progress: result.progress })
   } catch (err) {
     console.error(err)
     res.status(500).json({ error: 'Internal server error' })

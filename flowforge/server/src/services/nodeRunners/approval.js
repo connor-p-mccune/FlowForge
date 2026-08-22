@@ -13,6 +13,7 @@
 
 const { v4: uuidv4 } = require('uuid')
 const db = require('../../config/database')
+const { parseGate, describeGate } = require('../approvalQuorum')
 
 const DEFAULT_TIMEOUT_MINUTES = 60
 const MAX_TIMEOUT_MINUTES = 7 * 24 * 60 // one week
@@ -34,7 +35,7 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
 // Tell every workspace member an approval is waiting. Best-effort (a
 // notification problem must never fail the run) and lazy-required so engine
 // unit tests don't pull the notification service in.
-function notifyMembers(run, { message, executionId }) {
+function notifyMembers(run, { message, executionId, requirement }) {
   try {
     const members = db
       .prepare('SELECT user_id FROM workspace_members WHERE workspace_id = ?')
@@ -44,7 +45,12 @@ function notifyMembers(run, { message, executionId }) {
       createNotification(member.user_id, {
         type: 'approval-requested',
         title: 'Approval needed',
-        message: `"${run.workflow_name}" is waiting for approval${message ? `: ${message}` : ''}`,
+        message:
+          `"${run.workflow_name}" is waiting for approval${message ? `: ${message}` : ''}` +
+          // Only when the gate asks for something beyond the default. Saying
+          // "requires 1 approval" on every request is a line people learn to
+          // skip, and this one has to be read on the day it says four.
+          (requirement ? ` (requires ${requirement})` : ''),
         link: `/workflow/${run.workflow_id}?execution=${executionId}`,
       })
     }
@@ -65,12 +71,26 @@ module.exports = async function approval(config, input, isDryRun, ctx = {}) {
 
   const run = db
     .prepare(
-      `SELECT w.id AS workflow_id, w.workspace_id, w.name AS workflow_name
+      `SELECT w.id AS workflow_id, w.workspace_id, w.name AS workflow_name,
+              e.triggered_by AS triggered_by
          FROM executions e JOIN workflows w ON w.id = e.workflow_id
         WHERE e.id = ?`
     )
     .get(executionId)
   if (!run) throw new Error('Approval node could not resolve its execution')
+
+  // The gate is resolved *now* and stamped onto the row, so the rules a request
+  // was filed under travel with the request: editing the canvas while somebody
+  // is looking at the approval cannot change what they were told it required,
+  // and the audit trail records the gate that actually applied rather than
+  // whatever the node says today.
+  //
+  // Separation of duties resolves to the run's triggering user, which is null
+  // for a webhook or schedule run — there is nobody to exclude, and the control
+  // is honestly inert rather than quietly becoming something else. The linter
+  // reports that case while it is still an edit.
+  const gate = parseGate(config)
+  const excludedUserId = gate.separationOfDuties ? (run.triggered_by ?? null) : null
 
   const id = uuidv4()
   const requestedAt = new Date()
@@ -82,14 +102,16 @@ module.exports = async function approval(config, input, isDryRun, ctx = {}) {
 
   db.prepare(
     `INSERT INTO execution_approvals
-       (id, execution_id, node_id, workflow_id, workspace_id, status, message, requested_at, expires_at)
-     VALUES (?, ?, ?, ?, ?, 'pending', ?, ?, ?)`
+       (id, execution_id, node_id, workflow_id, workspace_id, status, message, requested_at, expires_at,
+        quorum, required_role, excluded_user_id)
+     VALUES (?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?)`
   ).run(
     id, executionId, nodeId, run.workflow_id, run.workspace_id,
-    message, requestedAt.toISOString(), expiresAt.toISOString()
+    message, requestedAt.toISOString(), expiresAt.toISOString(),
+    gate.quorum, gate.requiredRole === 'any' ? null : gate.requiredRole, excludedUserId
   )
 
-  notifyMembers(run, { message, executionId })
+  notifyMembers(run, { message, executionId, requirement: describeGate(gate) })
 
   // Ride the exec-update channel so an open canvas can render approve/reject
   // controls without polling. The response itself needs no counterpart event:
@@ -104,6 +126,9 @@ module.exports = async function approval(config, input, isDryRun, ctx = {}) {
       status: 'pending',
       message,
       expiresAt: expiresAt.toISOString(),
+      quorum: gate.quorum,
+      requiredRole: gate.requiredRole,
+      requirement: describeGate(gate),
     })
   }
 
@@ -122,11 +147,24 @@ module.exports = async function approval(config, input, isDryRun, ctx = {}) {
       const responder = row.responded_by
         ? db.prepare('SELECT display_name FROM users WHERE id = ?').get(row.responded_by)
         : null
+      // Everyone who weighed in, not only whoever settled it. With a quorum the
+      // single responded_by column is the *last* approver, which is the least
+      // interesting one — the question afterwards is who signed off, and one
+      // name would answer it wrongly.
+      const responders = db
+        .prepare(
+          `SELECT u.display_name AS name, r.decision AS decision
+             FROM execution_approval_responses r LEFT JOIN users u ON u.id = r.user_id
+            WHERE r.approval_id = ? ORDER BY r.created_at`
+        )
+        .all(id)
+        .map((r) => ({ name: r.name ?? null, decision: r.decision }))
       return {
         result: row.status === 'approved',
         outcome: row.status,
         respondedBy: responder?.display_name ?? null,
         note: row.note ?? null,
+        ...(gate.quorum > 1 ? { quorum: gate.quorum, responders } : {}),
       }
     }
 

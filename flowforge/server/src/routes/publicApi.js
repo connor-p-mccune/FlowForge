@@ -1359,6 +1359,11 @@ function presentApproval(row) {
     respondedAt: row.responded_at,
     respondedBy: row.responded_by_name ?? null,
     note: row.note,
+    // Present only when the gate asks for more than the historical default, so
+    // an ordinary approval's payload is byte-for-byte what it always was.
+    ...(row.quorum > 1 ? { quorum: row.quorum } : {}),
+    ...(row.required_role ? { requiredRole: row.required_role } : {}),
+    ...(row.excluded_user_id ? { separationOfDuties: true } : {}),
   }
 }
 
@@ -1404,10 +1409,17 @@ router.post('/approvals/:id/respond', tokenAuth('approve'), (req, res) => {
       return res.status(404).json({ error: 'Approval not found' })
     }
     if (result.outcome === 'forbidden') {
-      return res.status(403).json({ error: 'Viewers have read-only access' })
+      return res.status(403).json({ error: result.message || 'Viewers have read-only access', reason: result.reason })
     }
     if (result.outcome === 'conflict') {
       return res.status(409).json({ error: `Approval already ${result.status}` })
+    }
+    if (result.outcome === 'duplicate') {
+      return res.status(409).json({
+        error: 'You have already responded to this approval',
+        reason: 'already-responded',
+        progress: result.progress,
+      })
     }
     const row = db.prepare(
       `SELECT a.*, w.name AS workflow_name, u.display_name AS responded_by_name
@@ -1416,7 +1428,10 @@ router.post('/approvals/:id/respond', tokenAuth('approve'), (req, res) => {
          LEFT JOIN users u ON u.id = a.responded_by
         WHERE a.id = ?`
     ).get(req.params.id)
-    res.json({ approval: presentApproval(row) })
+    // 202 while the gate is still open, so a CI job that treats every 2xx as
+    // "approved" cannot mistake a half-met quorum for a decision.
+    const code = result.outcome === 'recorded' ? 202 : 200
+    res.status(code).json({ approval: presentApproval(row), progress: result.progress })
   } catch (err) {
     console.error(err)
     res.status(500).json({ error: 'Internal server error' })
