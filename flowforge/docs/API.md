@@ -724,6 +724,68 @@ planning used to be a deploy, and this makes it a query. See
 
 Requires the `read` scope.
 
+### Detect drift in what a workflow produces
+
+```bash
+curl -s "https://your-flowforge-host/api/v1/workflows/6f0c…/drift" \
+  -H "Authorization: Bearer $FLOWFORGE_TOKEN"
+```
+
+**Output** drift, not definition drift — [`/diff`](#detect-drift-against-an-exported-document)
+answers whether the graph still matches the document in git; this answers
+whether the data still looks like the data.
+
+Response `200` — the last N runs' recorded step outputs compared against the N
+before them, field by field. `available: false` with
+`reason: "insufficient-history"` until both windows have enough runs.
+
+```json
+{
+  "workflowId": "6f0c…",
+  "available": true,
+  "monitoring": false,
+  "window": {
+    "recent":   { "runs": 50,  "from": "2026-03-01T…", "to": "2026-03-08T…" },
+    "baseline": { "runs": 200, "from": "2026-02-01T…", "to": "2026-03-01T…" }
+  },
+  "summary": {
+    "major": 1, "minor": 1,
+    "nodesCompared": 2, "nodesSkipped": 0,
+    "fieldsCompared": 14, "fieldsSkipped": 3
+  },
+  "nodes": [
+    {
+      "nodeId": "fetch", "nodeLabel": "Fetch orders", "nodeType": "action-http",
+      "compared": 9,
+      "findings": [
+        {
+          "nodeId": "fetch", "nodeLabel": "Fetch orders",
+          "path": "customer.email",
+          "kind": "null-rate", "severity": "major",
+          "summary": "customer.email is null in 41.0% of records, was 0.2%",
+          "detail": { "baselineRate": 0.002, "recentRate": 0.41, "pValue": 1.2e-14, "test": "two-proportion" }
+        }
+      ]
+    }
+  ]
+}
+```
+
+`kind` is one of `field-missing`, `field-added`, `presence`, `null-rate`,
+`type-changed`, `distribution` (two-sample Kolmogorov-Smirnov) or `categories`
+(population stability index). `detail` carries the evidence, so a finding never
+needs investigating before it can be acted on.
+
+`fieldsSkipped` is reported rather than omitted: a field can be uncomparable
+because it has too few samples, because it is an identifier rather than a
+category, or because the engine redacted it. A report that hid those would be
+claiming a coverage it does not have.
+
+`?recent=N` and `?baseline=N` widen the windows. `flowforge drift <id> --strict`
+gates a build on it. See [docs/DRIFT.md](./DRIFT.md).
+
+Requires the `read` scope.
+
 ### Workflow dependencies (impact analysis)
 
 ```bash

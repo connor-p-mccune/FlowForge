@@ -23,6 +23,7 @@ problem sounds familiar.
 | **Path invariants** | Every static check asks about a *place* — this node's config, this value's shape. None could answer *"can this ever charge a card without the approval having run?"*, which is about a **path**. Turns out the engine's activation rule makes that question identical to graph dominance, so it's a solved compiler problem. Violations report the counterexample path. | [GUARANTEES.md](./docs/GUARANTEES.md) |
 | **Reaching a branch** | Every check here reasons about the *graph*, so a switch case sitting under a condition that already ruled it out is wired, typed, reachable and dead — and nothing says so. Asking whether an input exists is a solver question: difference logic, finite domains, DPLL(T). The solver returns a *model*, so the answer is also the payload that drives the branch — which is how the test suite gets generated. | [PATHS.md](./docs/PATHS.md) |
 | **Collaborative editing** | Last-write-wins on `Date.now()` meant whose laptop was fast decided whose edit survived, edits collided per *element* so two people editing different fields of one node lost half the work, and a dropped connection diverged **permanently**. Now a CRDT — commutative and idempotent, tested by applying every permutation of an operation set and asserting one document. | [ARCHITECTURE.md](./docs/ARCHITECTURE.md#real-time-collaboration) |
+| **Watching the data** | Every monitor here watches *time* (percentiles, trend, change point) or *outcome* (success rate, error budget, heartbeat). None looks at a value. So a workflow whose upstream quietly starts returning `null` for 40% of the emails is green on every dashboard — every run completes, every step succeeds, nothing is slower. Profiling what nodes produce and comparing this month against last is a solved problem (KS, PSI); making it *quiet enough to read* is the work. | [DRIFT.md](./docs/DRIFT.md) |
 | **Scheduling** | The engine runs branches in parallel up to a cap, and everything else treated that cap as though it didn't exist: every timing analysis assumed a slot was always free, and the scheduler launched whichever ready node came first — declaration order. Under contention that choice *is* the run's duration. Ordering by upward rank is a fifty-year-old result whose bound holds whatever the estimates turn out to be. And the node that delayed yours is often a sibling holding a slot — a dependency with no edge, which nothing over the DAG can name. | [SCHEDULING.md](./docs/SCHEDULING.md) |
 | **Breakpoints** | Every other debugging tool here is a *record*, and none helps with *"why is this node about to send **that**?"* So the run stops — after the config resolves, before the runner fires — and you can change what it runs with. A breakpoint lives on the **run**, never the workflow, so a schedule tick has nowhere to hit one. | [ARCHITECTURE.md](./docs/ARCHITECTURE.md#breakpoints) |
 | **A safe expression language** | Users need real logic in a config field. `eval` is not an option. Hand-written lexer → Pratt parser → tree-walking evaluator, statically type-checked against the shapes the graph proves it will have. | [EXPRESSIONS.md](./docs/EXPRESSIONS.md) |
@@ -804,6 +805,48 @@ status completed
   outage alerts once, not on every run. Available in the panel, via
   `flowforge insights`, and on the public API. See
   [docs/INSIGHTS.md](./docs/INSIGHTS.md).
+- **Output drift monitoring** — every monitor in this list watches one of two
+  things. *Time*: duration percentiles, the Mann-Kendall trend, Pettitt's change
+  point, the critical path, the SLA budget. Or *outcome*: success rate, the SLO
+  error budget, the heartbeat, the canary's z-test. **Not one of them ever looks
+  at a value.** So a workflow whose upstream API quietly starts returning `null`
+  for `customer.email` in 40% of records is green on every dashboard here: every
+  run completes, every step succeeds, the durations are unchanged, the success
+  rate is 100%, the graph is well-typed, every invariant holds, no policy is
+  violated — and forty percent of the emails are not being sent. That is an
+  incident no other check can *express*. So each node's recorded outputs are
+  profiled into per-path summaries and the **last 50 runs are compared against
+  the 200 before them**: a field that vanished or appeared, a null rate that
+  moved, a type that changed under it (a number serialised as a string is the
+  classic), a numeric distribution that shifted — **two-sample
+  Kolmogorov-Smirnov**, distribution-free because nobody knows what distribution
+  a workflow's outputs follow, and sensitive to a change in *shape* rather than
+  centre, so a field that became bimodal with the same median is caught where a
+  t-test reports nothing — and a category mix that shifted, by **population
+  stability index**, chosen over chi-square for one reason: it doesn't grow with
+  the sample, and a χ² over ten thousand records calls a 0.3% move significant,
+  which is true and useless. There is deliberately **no schema to declare**: one
+  a person maintains goes stale and then reports every workflow compliant
+  forever, so the baseline is the workflow's own past, which maintains itself.
+  Precision is the whole design, because the second false alarm is what teaches
+  somebody to close the tab: both windows must clear a sample floor, every test
+  needs an **effect size** and not just significance (over 500 records KS finds a
+  permanent 2% shift in a timestamp), a high-cardinality string is an
+  **identifier rather than a category** (order ids are 100% new values every
+  window and PSI over them is always large), a **redacted** field is excluded so
+  that adding one to `redact` can never read as data drift, and what couldn't be
+  compared is **counted and reported** rather than quietly dropped. The
+  load-bearing test isn't that a change is found — it's that two windows of the
+  same data produce an *empty* report. Which steps count is equally deliberate:
+  not failed ones (that output is an error object), not `reused` or `cached`
+  ones — those adopted an *earlier* run's data, and letting them in biases every
+  verdict toward "nothing changed", the one direction a monitor must never fail
+  in. Alerting is opt-in and edge-triggered on a **fingerprint of what drifted**
+  rather than a boolean, because a second field breaking while the first is still
+  broken is new information; recovery fires only once the drifted period has aged
+  out of the baseline too, so the all-clear means the data has genuinely been
+  normal for a full window. In 📊 Insights, `flowforge drift --strict`, the public
+  API, and `/metrics`. See [docs/DRIFT.md](./docs/DRIFT.md).
 - **Regression attribution** — the trend above says *degrading*, which is true
   and almost never actionable: a workflow that ran in 200ms for a month and
   900ms since Tuesday is correctly called degrading, and you still have the
@@ -1178,6 +1221,8 @@ Copy `.env.example` to `.env` before running. **Never commit `.env`.**
 | `SLA_SUCCESS_RATE_MIN_RUNS` | no | Minimum settled runs before the success-rate floor check fires (default 5) |
 | `SLA_ANOMALY_MIN_RUNS` | no | Minimum completed-run baseline before an anomaly alert fires (default 20) |
 | `HEARTBEAT_CHECK_INTERVAL_MS` | no | How often the heartbeat monitor sweeps for overdue workflows (default 60000) |
+| `DRIFT_CHECK_INTERVAL_MS` | no | How often the output-drift sweep looks for workflows due a re-analysis (default 60000) |
+| `DRIFT_REANALYSE_INTERVAL_MS` | no | How often any one monitored workflow is re-analysed for output drift (default 1800000 — 30 min) |
 | `MAINTENANCE_CHECK_INTERVAL_MS` | no | How often the maintenance-window sweep reconciles auto-pause/resume (default 60000) |
 | `WEBHOOK_DELIVERY_RETENTION_DAYS` | no | Prune settled delivery-log rows after this many days (default 30; 0 = keep) |
 | `CANARY_CHECK_INTERVAL_MS` | no | How often the canary sweep re-analyses running releases (default 60000) |
@@ -1341,7 +1386,8 @@ flowforge/
 ├── cli/           Zero-dependency terminal client for the public API
 ├── docs/          API reference, architecture deep dive, and one design record per hard part
 │                 (FXL, types, guarantees, paths, lineage, policies, merge, releases,
-│                  preview, provenance, rollback, durability, insights, scheduling)
+│                  preview, provenance, rollback, durability, insights, scheduling,
+│                  drift)
 ├── docker-compose.yml
 ├── .env.example
 ├── .env.production.example
