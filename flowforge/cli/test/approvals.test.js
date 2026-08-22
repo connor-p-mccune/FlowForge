@@ -84,3 +84,73 @@ test('a missing approve scope surfaces the server message', async () => {
   )
   await stub.close()
 })
+
+// Quorum gates: a response that does not settle the gate must not read as a
+// decision. A script inferring "approved" from a successful call would act on a
+// half-met quorum, which is the precise thing four-eyes exists to prevent.
+test('approve reports progress when the quorum is not yet met', async () => {
+  const stub = await startStub(() => ({
+    status: 202,
+    json: {
+      approval: { id: 'ap-1', workflowName: 'Refunds', status: 'pending' },
+      progress: { settled: false, status: 'pending', approvals: 1, needed: 3 },
+    },
+  }))
+  const ctx = makeCtx(stub.api)
+  const code = await approve({ positionals: ['ap-1'], flags: {} }, ctx)
+  await stub.close()
+
+  assert.equal(code, 0)
+  assert.match(ctx.output(), /recorded/)
+  assert.match(ctx.output(), /1 of 3 approvals for "Refunds"/)
+  assert.match(ctx.output(), /still waiting/)
+  assert.ok(!/continues down/.test(ctx.output()))
+})
+
+test('approve reports the decision once the quorum is met', async () => {
+  const stub = await startStub(() => ({
+    json: {
+      approval: { id: 'ap-1', workflowName: 'Refunds', status: 'approved' },
+      progress: { settled: true, status: 'approved', approvals: 3, needed: 3 },
+    },
+  }))
+  const ctx = makeCtx(stub.api)
+  const code = await approve({ positionals: ['ap-1'], flags: {} }, ctx)
+  await stub.close()
+
+  assert.equal(code, 0)
+  assert.match(ctx.output(), /approved/)
+  assert.match(ctx.output(), /continues down the approved branch/)
+})
+
+test('the inbox names what a gate requires, and only when it requires something', async () => {
+  const withQuorum = await startStub(() => ({
+    json: {
+      approvals: [
+        {
+          id: 'ap-1', workflowName: 'Refunds', message: 'Over 10k', status: 'pending',
+          requestedAt: '2026-03-01T09:00:00.000Z',
+          quorum: 2, requiredRole: 'owner', separationOfDuties: true,
+        },
+      ],
+    },
+  }))
+  const quorumCtx = makeCtx(withQuorum.api)
+  await approvals({ positionals: [], flags: {} }, quorumCtx)
+  await withQuorum.close()
+  assert.match(quorumCtx.output(), /REQUIRES/)
+  assert.match(quorumCtx.output(), /2 approvals · owner · not the requester/)
+
+  const plain = await startStub(() => ({
+    json: {
+      approvals: [
+        { id: 'ap-2', workflowName: 'Refunds', message: '', status: 'pending', requestedAt: '2026-03-01T09:00:00.000Z' },
+      ],
+    },
+  }))
+  const plainCtx = makeCtx(plain.api)
+  await approvals({ positionals: [], flags: {} }, plainCtx)
+  await plain.close()
+  // An always-present, usually-empty column is noise in a terminal.
+  assert.ok(!/REQUIRES/.test(plainCtx.output()))
+})
