@@ -34,6 +34,9 @@ export default function RunSettingsPanel({ workflowId, open, onClose }) {
   const [slaDurationInput, setSlaDurationInput] = useState('') // seconds, '' = no target
   const [slaSuccessInput, setSlaSuccessInput] = useState('') // percent, '' = no target
   const [heartbeatInput, setHeartbeatInput] = useState('') // minutes, '' = no expectation
+  // Output-drift *alerting*. The report is always available in the Insights
+  // panel; this only decides whether the sweep visits this workflow.
+  const [driftMonitoring, setDriftMonitoring] = useState(false)
   // Maintenance window: a cron (start) + duration (minutes). '' cron = none.
   const [maintCronInput, setMaintCronInput] = useState('')
   const [maintDurationInput, setMaintDurationInput] = useState('')
@@ -112,6 +115,7 @@ export default function RunSettingsPanel({ workflowId, open, onClose }) {
         setHeartbeatInput(
           wf.heartbeat_interval_minutes ? String(wf.heartbeat_interval_minutes) : ''
         )
+        setDriftMonitoring(Boolean(wf.drift_monitoring))
         setMaintCronInput(wf.maintenance_cron || '')
         setMaintDurationInput(
           wf.maintenance_duration_minutes ? String(wf.maintenance_duration_minutes) : ''
@@ -238,6 +242,7 @@ export default function RunSettingsPanel({ workflowId, open, onClose }) {
           sla_max_duration_ms: durSeconds === null ? null : Math.round(durSeconds * 1000),
           sla_min_success_rate: successPct === null ? null : successPct / 100,
           heartbeat_interval_minutes: heartbeatMinutes,
+          drift_monitoring: driftMonitoring,
           maintenance_cron: maintenanceCron,
           maintenance_duration_minutes: maintenanceDuration,
           maintenance_timezone: maintenanceCron === null ? null : maintTimezone || null,
@@ -418,6 +423,24 @@ export default function RunSettingsPanel({ workflowId, open, onClose }) {
                   value={heartbeatInput}
                   onChange={(e) => setHeartbeatInput(e.target.value)}
                 />
+              </label>
+
+              <div className="run-settings__section">Output drift</div>
+              <p className="webhook-panel__hint">
+                Watch what this workflow’s nodes <em>produce</em>, not just
+                whether they ran: a field that stops arriving, a null rate that
+                jumps, a number that changes shape. Compares the last 50 runs
+                against the 200 before them and alerts the owner once per
+                distinct change. The report is always available in 📊 Insights —
+                this only controls the alert.
+              </p>
+              <label className="run-settings__check">
+                <input
+                  type="checkbox"
+                  checked={driftMonitoring}
+                  onChange={(e) => setDriftMonitoring(e.target.checked)}
+                />
+                <span>Alert me when a node’s output changes shape</span>
               </label>
 
               <div className="run-settings__section">Maintenance window</div>

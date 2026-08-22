@@ -2065,6 +2065,20 @@ html, body, #root {
   font-weight: 600;
   color: #374151;
 }
+/* A boolean setting: the label sits beside the box rather than above it. */
+.run-settings__check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 10px 0;
+  font-size: 12px;
+  font-weight: 600;
+  color: #374151;
+  cursor: pointer;
+}
+.run-settings__check input {
+  margin: 0;
+}
 .run-settings__field input,
 .run-settings__field select {
   padding: 6px 8px;
@@ -2332,6 +2346,54 @@ html, body, #root {
 }
 .insights__sla-item--ok { color: #059669; }
 .insights__sla-item--breach { color: #dc2626; font-weight: 600; }
+/* Output drift: one block per node, one row per changed field. Severity is a
+   dot rather than a colour block — the summary text is the content, and a
+   full-width red band on a minor finding would read as an outage. */
+.insights__drift-node { margin: 8px 0 12px; }
+.insights__drift-node-name {
+  font-size: 12px;
+  font-weight: 600;
+  color: #374151;
+  margin-bottom: 4px;
+}
+.insights__drift-list { list-style: none; margin: 0; padding: 0; }
+.insights__drift-clean {
+  font-size: 12px;
+  color: #15803d;
+  margin: 6px 0 12px;
+}
+.drift {
+  border-left: 2px solid #e5e7eb;
+  padding: 4px 0 4px 8px;
+  margin-bottom: 6px;
+}
+.drift--major { border-left-color: #dc2626; }
+.drift--minor { border-left-color: #f59e0b; }
+.drift__head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+}
+.drift--major .drift__severity { color: #dc2626; }
+.drift--minor .drift__severity { color: #f59e0b; }
+.drift__path {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  color: #111827;
+  font-size: 11px;
+}
+.drift__kind {
+  color: #6b7280;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  font-size: 10px;
+}
+.drift__summary {
+  font-size: 12px;
+  color: #4b5563;
+  line-height: 1.4;
+}
+
 .insights__steps { list-style: none; margin: 0; padding: 0; }
 .insights__step {
   display: flex;

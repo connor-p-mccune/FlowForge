@@ -77,9 +77,17 @@ const REGRESSIONS = {
 
 // Resolve insights, forecast, and regressions to their own payloads; the panel
 // fetches all three independently so one being unavailable hides only itself.
-function mockByPath({ insights = BUNDLE, forecast = FORECAST, regressions = REGRESSIONS } = {}) {
+const NO_DRIFT = { workflowId: 'wf1', available: false, reason: 'not-found' }
+
+function mockByPath({
+  insights = BUNDLE,
+  forecast = FORECAST,
+  regressions = REGRESSIONS,
+  drift = NO_DRIFT,
+} = {}) {
   apiFetch.mockImplementation((path) => {
     if (path.endsWith('/forecast')) return Promise.resolve(forecast)
+    if (path.endsWith('/drift')) return Promise.resolve(drift)
     if (path.endsWith('/regressions')) {
       return regressions instanceof Error
         ? Promise.reject(regressions)
@@ -301,5 +309,103 @@ describe('InsightsPanel — concurrency', () => {
     setup()
     await screen.findByText('93.1%')
     expect(screen.queryByText(/Concurrency ·/)).not.toBeInTheDocument()
+  })
+})
+
+// The only section in this panel about the *data* rather than the run. It
+// catches the failure the rest are blind to: every run completes, every step
+// succeeds, every duration is unchanged, and a field stopped arriving.
+describe('InsightsPanel — output drift', () => {
+  const DRIFTED = {
+    workflowId: 'wf1',
+    available: true,
+    monitoring: false,
+    window: { recent: { runs: 50 }, baseline: { runs: 200 } },
+    summary: { major: 1, minor: 1, nodesCompared: 2, nodesSkipped: 0, fieldsCompared: 14, fieldsSkipped: 3 },
+    nodes: [
+      {
+        nodeId: 'http-1',
+        nodeLabel: 'Fetch orders',
+        nodeType: 'action-http',
+        compared: 9,
+        skipped: [],
+        findings: [
+          {
+            nodeId: 'http-1',
+            path: 'customer.email',
+            kind: 'null-rate',
+            severity: 'major',
+            summary: 'customer.email is null in 41.0% of records, was 0.2%',
+            detail: { test: 'two-proportion' },
+          },
+        ],
+      },
+      { nodeId: 'log-1', nodeLabel: 'Log result', nodeType: 'output-log', compared: 5, skipped: [], findings: [] },
+    ],
+  }
+
+  // The node label also appears in "slowest steps" and the forecast's
+  // bottleneck line, so these scope to the drift section rather than the
+  // document — otherwise a passing assertion would prove nothing.
+  const driftNodeNames = (container) =>
+    [...container.querySelectorAll('.insights__drift-node-name')].map((el) => el.textContent)
+
+  it('names the field, the node, and both sides of the change', async () => {
+    mockByPath({ drift: DRIFTED })
+    const { container } = setup()
+    expect(await screen.findByText('customer.email')).toBeInTheDocument()
+    expect(screen.getByText(/null in 41\.0% of records, was 0\.2%/)).toBeInTheDocument()
+    expect(driftNodeNames(container)).toEqual(['Fetch orders'])
+  })
+
+  it('reports the windows compared and what it had to skip', async () => {
+    mockByPath({ drift: DRIFTED })
+    setup()
+    expect(await screen.findByText(/Last 50 runs vs the 200 before them/)).toBeInTheDocument()
+    expect(screen.getByText(/14 fields compared, 3 skipped/)).toBeInTheDocument()
+  })
+
+  it('marks severity without shouting about a minor finding', async () => {
+    mockByPath({ drift: DRIFTED })
+    const { container } = setup()
+    await screen.findByText('customer.email')
+    expect(container.querySelectorAll('.drift--major')).toHaveLength(1)
+    expect(container.querySelectorAll('.drift--minor')).toHaveLength(0)
+  })
+
+  it('omits a node with nothing to report', async () => {
+    mockByPath({ drift: DRIFTED })
+    const { container } = setup()
+    await screen.findByText('customer.email')
+    expect(driftNodeNames(container)).not.toContain('Log result')
+  })
+
+  it('points at the setting when alerting is off and something drifted', async () => {
+    mockByPath({ drift: DRIFTED })
+    setup()
+    expect(await screen.findByText(/Turn on/)).toBeInTheDocument()
+  })
+
+  it('says nothing changed rather than showing an empty section', async () => {
+    mockByPath({
+      drift: { ...DRIFTED, monitoring: true, summary: { ...DRIFTED.summary, major: 0, minor: 0 }, nodes: [] },
+    })
+    setup()
+    expect(await screen.findByText(/No change in what this workflow produces/)).toBeInTheDocument()
+  })
+
+  it('says how much more history it needs', async () => {
+    mockByPath({
+      drift: { workflowId: 'wf1', available: false, reason: 'insufficient-history', needed: 30, have: 8 },
+    })
+    setup()
+    expect(await screen.findByText(/Needs 30 completed runs/)).toBeInTheDocument()
+  })
+
+  it('renders the rest of the panel when drift is unavailable', async () => {
+    mockByPath({ drift: NO_DRIFT })
+    setup()
+    expect(await screen.findByText('93.1%')).toBeInTheDocument()
+    expect(screen.queryByText('Output drift')).not.toBeInTheDocument()
   })
 })

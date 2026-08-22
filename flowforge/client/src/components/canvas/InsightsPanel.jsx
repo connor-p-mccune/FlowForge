@@ -215,10 +215,85 @@ function ChangePoint({ change, labelFor }) {
   )
 }
 
+// Drift in what the workflow's nodes *produce*.
+//
+// Everything else in this panel is about the run — how long, how often, how
+// many failed. This is the only section about the data, and it is the one that
+// catches the failure the rest are blind to: an upstream API quietly starting
+// to send nulls, while every run completes, every step succeeds and every
+// duration is unchanged.
+//
+// Findings carry their evidence inline, because a finding somebody has to go
+// and verify is not a finding — and the coverage line is always shown, because
+// a report that hides what it could not compare is claiming a completeness it
+// does not have.
+function DriftFinding({ finding }) {
+  return (
+    <li className={`drift drift--${finding.severity}`}>
+      <div className="drift__head">
+        <span className="drift__severity">{finding.severity === 'major' ? '●' : '○'}</span>
+        <code className="drift__path">{finding.path}</code>
+        <span className="drift__kind">{finding.kind.replace('-', ' ')}</span>
+      </div>
+      <div className="drift__summary">{finding.summary}</div>
+    </li>
+  )
+}
+
+function Drift({ drift }) {
+  if (!drift) return null
+  if (!drift.available) {
+    if (drift.reason !== 'insufficient-history') return null
+    return (
+      <>
+        <div className="insights__section">Output drift</div>
+        <p className="webhook-panel__hint">
+          Needs {drift.needed} completed runs to compare two windows — {drift.have} so far.
+        </p>
+      </>
+    )
+  }
+
+  const { summary, nodes: driftNodes, window } = drift
+  const withFindings = driftNodes.filter((n) => n.findings.length > 0)
+
+  return (
+    <>
+      <div className="insights__section">Output drift</div>
+      <p className="webhook-panel__hint">
+        Last {window.recent.runs} runs vs the {window.baseline.runs} before them.{' '}
+        {summary.fieldsCompared} fields compared
+        {summary.fieldsSkipped > 0 ? `, ${summary.fieldsSkipped} skipped` : ''}.
+      </p>
+      {withFindings.length === 0 ? (
+        <p className="insights__drift-clean">No change in what this workflow produces.</p>
+      ) : (
+        withFindings.map((node) => (
+          <div key={node.nodeId} className="insights__drift-node">
+            <div className="insights__drift-node-name">{node.nodeLabel}</div>
+            <ul className="insights__drift-list">
+              {node.findings.map((f) => (
+                <DriftFinding key={`${f.path}:${f.kind}`} finding={f} />
+              ))}
+            </ul>
+          </div>
+        ))
+      )}
+      {!drift.monitoring && summary.major > 0 && (
+        <p className="webhook-panel__hint">
+          Turn on <strong>Output drift</strong> in Run settings to be alerted when
+          this changes again.
+        </p>
+      )}
+    </>
+  )
+}
+
 export default function InsightsPanel({ workflowId, open, onClose, nodes = [] }) {
   const [data, setData] = useState(null)
   const [forecast, setForecast] = useState(null)
   const [regressions, setRegressions] = useState(null)
+  const [drift, setDrift] = useState(null)
   const [error, setError] = useState(null)
 
   useEffect(() => {
@@ -228,6 +303,7 @@ export default function InsightsPanel({ workflowId, open, onClose, nodes = [] })
     setData(null)
     setForecast(null)
     setRegressions(null)
+    setDrift(null)
     apiFetch(`/api/workflows/${workflowId}/insights`)
       .then((d) => {
         if (!cancelled) setData(d)
@@ -252,6 +328,16 @@ export default function InsightsPanel({ workflowId, open, onClose, nodes = [] })
       })
       .catch(() => {
         /* change-point detection is best-effort in the panel */
+      })
+    // And the same for drift, which is the most expensive of the four: it
+    // parses every stored step output in both windows, so a workflow with a
+    // long history must not hold up the numbers above it.
+    apiFetch(`/api/workflows/${workflowId}/drift`)
+      .then((d) => {
+        if (!cancelled) setDrift(d)
+      })
+      .catch(() => {
+        /* drift detection is best-effort in the panel */
       })
     return () => {
       cancelled = true
@@ -357,6 +443,8 @@ export default function InsightsPanel({ workflowId, open, onClose, nodes = [] })
                 </ul>
               </>
             )}
+
+            <Drift drift={drift} />
 
             {regressions?.changePoints?.length > 0 && (
               <>

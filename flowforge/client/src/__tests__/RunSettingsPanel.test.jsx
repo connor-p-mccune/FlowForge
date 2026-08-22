@@ -194,6 +194,46 @@ describe('RunSettingsPanel', () => {
     )
   })
 
+  it('loads and saves the output-drift alert setting', async () => {
+    apiFetch.mockImplementation((path, opts) => {
+      if (path === '/api/workflows/wf1' && !opts) {
+        return Promise.resolve({ workflow: { ...WORKFLOW, drift_monitoring: 1 } })
+      }
+      if (path === '/api/workspaces/ws1/workflows') {
+        return Promise.resolve({ workflows: WORKSPACE_WORKFLOWS })
+      }
+      if (path === '/api/workflows/wf1' && opts?.method === 'PUT') {
+        return Promise.resolve({ workflow: WORKFLOW })
+      }
+      return Promise.reject(new Error(`unexpected: ${path}`))
+    })
+    setup()
+    const box = await screen.findByRole('checkbox', { name: /output changes shape/i })
+    expect(box).toBeChecked()
+
+    fireEvent.click(box)
+    fireEvent.click(screen.getByRole('button', { name: /save settings/i }))
+    await waitFor(() =>
+      expect(apiFetch).toHaveBeenCalledWith('/api/workflows/wf1', {
+        method: 'PUT',
+        body: expect.objectContaining({ drift_monitoring: false }),
+      })
+    )
+  })
+
+  it('defaults output-drift alerting to off', async () => {
+    setup()
+    const box = await screen.findByRole('checkbox', { name: /output changes shape/i })
+    expect(box).not.toBeChecked()
+    fireEvent.click(screen.getByRole('button', { name: /save settings/i }))
+    await waitFor(() =>
+      expect(apiFetch).toHaveBeenCalledWith('/api/workflows/wf1', {
+        method: 'PUT',
+        body: expect.objectContaining({ drift_monitoring: false }),
+      })
+    )
+  })
+
   it('sends a null heartbeat when the field is empty, and rejects bad values', async () => {
     setup()
     const input = await screen.findByLabelText(/expect a success every/i)
