@@ -39,6 +39,7 @@ const COMMANDS = {
   regressions: require('../src/commands/regressions'),
   forecast: require('../src/commands/forecast'),
   contention: require('../src/commands/contention'),
+  drift: require('../src/commands/drift'),
   schedule: require('../src/commands/schedule'),
   check: require('../src/commands/check'),
   test: require('../src/commands/test'),
@@ -86,6 +87,7 @@ Usage:
   flowforge regressions <id> [--limit N]           When the duration changed, and which deploy did it (exits non-zero on a regression)
   flowforge forecast <id> [--cap N]                Predicted next-run duration, bottleneck, and what the parallelism cap costs
   flowforge contention <exec-id> [--max <ratio>]   Where a run's time went — work vs waiting for a slot (exits non-zero over the budget)
+  flowforge drift <workflow-id> [--strict]         Has what this workflow *produces* changed? Fields, null rates, distributions (--strict fails the build)
   flowforge schedule <workflow-id> [--count N]     Upcoming scheduled run times (UTC)
   flowforge check <workflow-id> [--strict]         Gate CI on workflow health (exits non-zero on a breach)
   flowforge test <workflow-id> [--junit <file>]    Run the workflow's test scenarios (exits non-zero on failure)
