@@ -21,10 +21,16 @@ const db = require('../config/database')
 const { computeSignature } = require('./webhookSignature')
 const { safeFetch } = require('./ssrfGuard')
 const { recordWebhookDelivery } = require('./metrics')
+const retryBudget = require('./retryBudget')
 
 // All read live so tests (and deployments) can tune without re-requiring.
 const maxAttempts = () => Math.max(1, parseInt(process.env.WEBHOOK_MAX_ATTEMPTS || '5', 10) || 5)
 const retryBaseMs = () => Math.max(1, parseInt(process.env.WEBHOOK_RETRY_BASE_MS || '30000', 10) || 30000)
+// How far out a delivery is pushed when its host is over its retry budget.
+// Defaults to a full budget window, so the deferral outlasts the condition that
+// caused it rather than bouncing off the same exhausted budget a second later.
+const retryBudgetDeferMs = () =>
+  Math.max(1000, parseInt(process.env.RETRY_BUDGET_WINDOW_MS || '60000', 10) || 60000)
 const deliveryTimeoutMs = () =>
   Math.max(100, parseInt(process.env.WEBHOOK_DELIVERY_TIMEOUT_MS || '10000', 10) || 10000)
 const dispatchIntervalMs = () =>
@@ -149,7 +155,25 @@ async function attemptDelivery(delivery) {
   }
   // 30s, 2m, 8m, 32m… — generous enough to ride out a receiver deploy without
   // holding a failed endpoint in the hot loop.
-  const backoff = retryBaseMs() * 4 ** (attempts - 1)
+  let backoff = retryBaseMs() * 4 ** (attempts - 1)
+
+  // Retry budget (retryBudget.js). A receiver that is struggling rather than
+  // down gets the same treatment a struggling API does: FlowForge's retries are
+  // capped as a fraction of the requests it is sending that host, so they cannot
+  // become the load that finishes it off.
+  //
+  // Here the budget **defers rather than discards**, which is the one place it
+  // behaves differently from the engine's. A node retry has nowhere to wait — the
+  // run is in flight and the alternative to retrying now is failing. A delivery
+  // has a durable queue and an attempt budget of its own, so being over budget
+  // means "not yet" rather than "never", and pushing the next attempt out a full
+  // window costs the receiver nothing and loses no event.
+  const state = retryBudget.allowRetry(sub.url)
+  if (!state.allowed) {
+    backoff = Math.max(backoff, retryBudgetDeferMs())
+  } else {
+    retryBudget.recordRetry(sub.url)
+  }
   db.prepare(
     `UPDATE event_deliveries
         SET attempts = ?, response_status = ?, error = ?, next_attempt_at = ?

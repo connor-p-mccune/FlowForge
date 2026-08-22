@@ -32,6 +32,7 @@ const redaction = require('./redaction')
 const nodePriority = require('./nodePriority')
 const stepTimings = require('./stepTimings')
 const scheduleSim = require('./scheduleSim')
+const retryBudget = require('./retryBudget')
 
 const runners = {
   'action-http': require('./nodeRunners/httpRequest'),
@@ -279,11 +280,36 @@ function applyFault(runner, fault) {
 async function runWithRetries(node, config, input, isDryRun, ctx, fault) {
   const runner = applyFault(getRunner(node.type), fault)
   const maxAttempts = SINGLE_ATTEMPT_TYPES.has(node.type) ? 1 : MAX_ATTEMPTS
+  // The URL this node will call, for the node types whose purpose is to call
+  // one. Null everywhere else, and the budget then never applies — a Transform
+  // node's retry costs nobody anything.
+  const egressUrl = isDryRun ? null : retryBudget.egressUrlOf(node, config)
+
   for (let attempt = 1; ; attempt++) {
     try {
       return await runner(config, input, isDryRun, ctx)
     } catch (err) {
       if (attempt >= maxAttempts) throw err
+
+      // Retry budget: a host under strain fails *some* requests, every failure
+      // gets retried, and the retries are the load that finishes it off. The
+      // circuit breaker cannot see this — it never gets N consecutive failures,
+      // because the host keeps answering. So retries are capped as a fraction of
+      // the host's requests, and once that is spent the run fails now rather
+      // than after two more attempts that make things worse.
+      //
+      // The original error is what surfaces; the note is appended to it, because
+      // "the API returned 503" is the cause and "we did not try again" is only
+      // the reason it stopped there.
+      if (egressUrl) {
+        const state = retryBudget.allowRetry(egressUrl)
+        if (!state.allowed) {
+          err.message = `${err.message} (${retryBudget.suppressionNote(state)})`
+          throw err
+        }
+        retryBudget.recordRetry(egressUrl)
+      }
+
       await sleep(BASE_BACKOFF_MS * 2 ** (attempt - 1))
     }
   }

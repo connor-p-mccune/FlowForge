@@ -22,6 +22,7 @@
 const dns = require('dns').promises
 const net = require('net')
 const { withCircuit } = require('./circuitBreaker')
+const retryBudget = require('./retryBudget')
 
 const MAX_REDIRECTS = 5
 
@@ -160,7 +161,14 @@ async function assertSafeUrl(rawUrl) {
 // server onto an internal address. Every call runs under the target host's
 // circuit breaker (circuitBreaker.js): a host that keeps failing fast-fails
 // here instead of stacking timeouts across node retries and webhook attempts.
+//
+// Every call is also counted against the host's retry budget
+// (retryBudget.js). Counting here rather than at each caller is what makes the
+// budget a bound on *the host's* load: an HTTP node's requests, a Slack node's
+// and the webhook dispatcher's all land in one denominator, because the host
+// experiences one total. A count per caller would be three budgets and no bound.
 async function safeFetch(rawUrl, options = {}) {
+  retryBudget.recordRequest(rawUrl)
   return withCircuit(rawUrl, () => guardedFetch(rawUrl, options))
 }
 
