@@ -11,30 +11,30 @@
 // too. Same rules as the app's 🔎 Issues panel, because it is the same
 // linter.
 
-const fs = require('fs')
+const { readDocument } = require('../document')
 const { bold, gray, red, yellow, green } = require('../format')
 
 module.exports = async function lint(args, ctx) {
   const [workflowId, file] = args.positionals
   if (!workflowId) {
-    ctx.log('Usage: flowforge lint <workflow-id> [file.json] [--strict]')
+    ctx.log('Usage: flowforge lint <workflow-id> [file.json|file.flow] [--strict]')
     return 1
   }
 
   let body = {}
   if (file) {
-    let doc
-    try {
-      doc = JSON.parse(fs.readFileSync(file, 'utf8'))
-    } catch (err) {
-      ctx.log(`Could not read "${file}": ${err.message}`)
+    const doc = readDocument(file)
+    if (doc.error) {
+      ctx.log(doc.error)
       return 1
     }
-    if (!doc.graph_data) {
+    // A `.flow` file goes over as text: the server parses it and reports a
+    // syntax error with the line it is on, so there is nothing to check here.
+    if (!doc.isFlow && !doc.payload.graph_data) {
       ctx.log('The file is not a workflow export (expected { graph_data }).')
       return 1
     }
-    body = { graph_data: doc.graph_data }
+    body = doc.isFlow ? doc.payload : { graph_data: doc.payload.graph_data }
   }
 
   const report = await ctx.api.post(`/api/v1/workflows/${workflowId}/lint`, body)

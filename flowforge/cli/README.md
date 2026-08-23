@@ -80,6 +80,12 @@ export FLOWFORGE_TOKEN=ffp_…
 | `flowforge approve <id> [--note "…"]` | Wave a paused run through its approval gate (needs the `approve` scope) |
 | `flowforge reject <id> [--note "…"]` | Send it down the rejected branch instead |
 
+Every command that takes a **document** — `import`, `diff`, `lint`, `merge`,
+`preview` — accepts either form: the JSON export, or a `.flow` file. The text
+is sent as-is and parsed server-side, so a syntax error comes back with the
+line it is on and the CLI never carries a second copy of the grammar
+([docs](../docs/DSL.md)).
+
 `--watch` polls every 2 seconds (`--interval <seconds>` to change) and prints
 each step transition once. `NO_COLOR=1` (or piping stdout) disables colors.
 

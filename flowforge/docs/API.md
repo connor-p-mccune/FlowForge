@@ -241,6 +241,12 @@ format's emit order is the signing canonical order. On the CLI,
 `flowforge import <ws> sync.flow` detects the form by extension and then by
 content. See [docs/DSL.md](./DSL.md).
 
+> Every endpoint that takes a workflow **document** accepts `{ flow }` in place
+> of `graph_data` — import, [diff](#detect-drift-against-an-exported-document),
+> [lint](#lint-a-workflow), [merge](#merge-a-document-into-the-live-workflow)
+> and preview. A `.flow` file that could be promoted but not diffed or linted
+> would be a format nobody could adopt.
+
 ### Detect drift against an exported document
 
 The check the export/import loop leaves open: is the deployed workflow still

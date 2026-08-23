@@ -20,18 +20,19 @@
 // identically to "broken" cannot tell the difference between a colleague's edit
 // and an outage. `release` already uses 2 for the same reason.
 
-const fs = require('fs')
+const { readDocument: readFile } = require('../document')
 const { bold, gray, green, red, yellow } = require('../format')
 
+// The candidate side of the merge, in either form. A `.flow` file goes over as
+// text — the server parses it and reports a syntax error with the line it is
+// on, so there is nothing for this to validate.
 function readDocument(file, ctx) {
-  let doc
-  try {
-    doc = JSON.parse(fs.readFileSync(file, 'utf8'))
-  } catch (err) {
-    ctx.log(red(`Could not read "${file}": ${err.message}`))
+  const doc = readFile(file)
+  if (doc.error) {
+    ctx.log(red(doc.error))
     return null
   }
-  if (!doc.graph_data) {
+  if (!doc.isFlow && !doc.payload.graph_data) {
     ctx.log(red('The file is not a workflow export (expected { graph_data }).'))
     return null
   }
@@ -41,7 +42,7 @@ function readDocument(file, ctx) {
 module.exports = async function merge(args, ctx) {
   const [workflowId, file] = args.positionals
   if (!workflowId || !file) {
-    ctx.log('Usage: flowforge merge <workflow-id> <file.json> [--yes] [--ours|--theirs] [--base <version>]')
+    ctx.log('Usage: flowforge merge <workflow-id> <file.json|file.flow> [--yes] [--ours|--theirs] [--base <version>]')
     return 1
   }
   if (args.flags.ours && args.flags.theirs) {
@@ -53,7 +54,11 @@ module.exports = async function merge(args, ctx) {
   if (!doc) return 1
 
   const strategy = args.flags.ours ? 'ours' : args.flags.theirs ? 'theirs' : 'manual'
-  const body = { graph_data: doc.graph_data, strategy, apply: Boolean(args.flags.yes) }
+  const body = {
+    ...(doc.isFlow ? doc.payload : { graph_data: doc.payload.graph_data }),
+    strategy,
+    apply: Boolean(args.flags.yes),
+  }
   if (args.flags.base) body.baseVersion = args.flags.base
 
   const report = await ctx.api.post(`/api/v1/workflows/${workflowId}/merge`, body)

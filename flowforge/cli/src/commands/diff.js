@@ -11,31 +11,33 @@
 // The report reads from the file's perspective: "+ added" exists live but
 // not in the file, "- removed" is in the file but gone live.
 
-const fs = require('fs')
+const { readDocument } = require('../document')
 const { bold, gray, green, red, yellow } = require('../format')
 
 module.exports = async function diff(args, ctx) {
   const [workflowId, file] = args.positionals
   if (!workflowId || !file) {
-    ctx.log('Usage: flowforge diff <workflow-id> <file.json>')
+    ctx.log('Usage: flowforge diff <workflow-id> <file.json|file.flow>')
     return 1
   }
 
-  let doc
-  try {
-    doc = JSON.parse(fs.readFileSync(file, 'utf8'))
-  } catch (err) {
-    ctx.log(`Could not read "${file}": ${err.message}`)
+  const doc = readDocument(file)
+  if (doc.error) {
+    ctx.log(doc.error)
     return 1
   }
-  if (!doc.graph_data) {
+  // A `.flow` file is handed over as text and parsed server-side, so there is
+  // nothing to check for here — the server reports a syntax error with the line
+  // it is on, which is the whole reason the format is text.
+  if (!doc.isFlow && !doc.payload.graph_data) {
     ctx.log('The file is not a workflow export (expected { graph_data }).')
     return 1
   }
 
-  const report = await ctx.api.post(`/api/v1/workflows/${workflowId}/diff`, {
-    graph_data: doc.graph_data,
-  })
+  const report = await ctx.api.post(
+    `/api/v1/workflows/${workflowId}/diff`,
+    doc.isFlow ? doc.payload : { graph_data: doc.payload.graph_data }
+  )
 
   if (report.identical) {
     ctx.log(green(`No drift — the live workflow matches ${file}.`))

@@ -14,6 +14,10 @@ const path = require('path')
 const { startStub, makeCtx } = require('./helpers')
 const exportWorkflow = require('../src/commands/export')
 const importWorkflow = require('../src/commands/import')
+const diff = require('../src/commands/diff')
+const lint = require('../src/commands/lint')
+const merge = require('../src/commands/merge')
+const preview = require('../src/commands/preview')
 
 const FLOW = `workflow "Order pipeline"
   description: "Handles orders"
@@ -138,4 +142,55 @@ test('import reports a missing file rather than throwing', async () => {
   const code = await importWorkflow({ positionals: ['ws-1', 'nope.flow'], flags: {} }, ctx)
   assert.equal(code, 1)
   assert.match(ctx.output(), /Could not read/)
+})
+
+// The format is only useful if every tool that reads a definition reads it. A
+// `.flow` file that could be imported but not diffed, linted, merged or
+// previewed would be a format nobody could adopt.
+
+async function sendsFlow(command, positionals, response) {
+  const stub = await startStub(() => ({ json: response }))
+  const ctx = makeCtx(stub.api)
+  await command({ positionals, flags: {} }, ctx)
+  await stub.close()
+  return stub.requests[0].body
+}
+
+test('diff sends a .flow file as text', async () => {
+  const file = tempFile('sync.flow', FLOW)
+  const body = await sendsFlow(diff, ['wf-1', file], { identical: true })
+  assert.deepEqual(body, { flow: FLOW })
+})
+
+test('lint sends a .flow file as text', async () => {
+  const file = tempFile('sync.flow', FLOW)
+  const body = await sendsFlow(lint, ['wf-1', file], {
+    issues: [], summary: { errors: 0, warnings: 0 },
+  })
+  assert.deepEqual(body, { flow: FLOW })
+})
+
+test('merge sends a .flow file as text, keeping its own flags', async () => {
+  const file = tempFile('sync.flow', FLOW)
+  const body = await sendsFlow(merge, ['wf-1', file], {
+    conflicts: [], applied: false, base: { version: 3 }, changes: {},
+  })
+  assert.equal(body.flow, FLOW)
+  assert.equal(body.strategy, 'manual')
+  assert.equal(body.apply, false)
+})
+
+test('preview sends a .flow file as text', async () => {
+  const file = tempFile('sync.flow', FLOW)
+  const body = await sendsFlow(preview, ['wf-1', file], {
+    replayed: 0, differing: 0, differences: [], skipped: [],
+  })
+  assert.deepEqual(body, { flow: FLOW })
+})
+
+test('each of them still sends a JSON export as a graph', async () => {
+  const file = tempFile('sync.json', JSON.stringify(JSON_DOC))
+  const body = await sendsFlow(diff, ['wf-1', file], { identical: true })
+  assert.ok(!('flow' in body))
+  assert.deepEqual(body.graph_data, JSON_DOC.graph_data)
 })

@@ -21,6 +21,38 @@ const { rollbackExecution } = require('../services/executionEngine')
 const { describeLineage, analyzeLineage, traceProvenance, traceImpact } = require('../services/lineage')
 const { verifyGuarantees, parseGuarantees } = require('../services/guarantees')
 const { parseWorkflow, formatWorkflow, DslError } = require('../services/workflowDsl')
+
+// Every endpoint that takes a workflow *document* accepts it in either form: as
+// the JSON export, or as `.flow` text under `flow`. Resolving it in one place
+// means the format is a first-class input to the whole toolchain rather than to
+// import alone — a `.flow` file that could be promoted but not diffed, linted or
+// merged would be a format nobody could adopt.
+//
+// The text is parsed into exactly the shape the JSON path produces, so
+// everything downstream — the size caps, the signature check, the guarantees —
+// stays one code path rather than two that have to be kept in agreement. A
+// signature over a `.flow` file verifies for free, because the format's emit
+// order *is* the signing canonical order.
+//
+// Returns the resolved body, or null after sending a 400 with the position the
+// parser found — the whole reason the format is text.
+function resolveDocument(req, res) {
+  const body = req.body || {}
+  if (typeof body.flow !== 'string') return body
+  try {
+    return { ...body, ...parseWorkflow(body.flow) }
+  } catch (err) {
+    if (err instanceof DslError) {
+      res.status(400).json({
+        error: `Line ${err.line}: ${err.message}`,
+        line: err.line,
+        column: err.column,
+      })
+      return null
+    }
+    throw err
+  }
+}
 const { analyzePaths } = require('../services/pathConstraints')
 const { analyzeRegressions } = require('../services/regressions')
 const { previewDeploy } = require('../services/backtest')
@@ -234,29 +266,8 @@ router.post('/workspaces/:id/workflows/import', tokenAuth('manage'), (req, res) 
     // roles bound what its owner may do.
     if (forbidViewer(res, req.params.id, req.user.id)) return
 
-    // A `.flow` document arrives as text under `flow` and is parsed into the
-    // same shape the JSON path produces, so everything below it — the size
-    // cap, the signature check, the guarantees — is one code path rather than
-    // two that have to be kept in agreement.
-    //
-    // A signature over a `.flow` file verifies for free: the format's emit
-    // order *is* the signing canonical order, so the parsed document
-    // canonicalises to exactly what was signed.
-    let body = req.body || {}
-    if (typeof body.flow === 'string') {
-      try {
-        body = { ...body, ...parseWorkflow(body.flow) }
-      } catch (err) {
-        if (err instanceof DslError) {
-          return res.status(400).json({
-            error: `Line ${err.line}: ${err.message}`,
-            line: err.line,
-            column: err.column,
-          })
-        }
-        throw err
-      }
-    }
+    const body = resolveDocument(req, res)
+    if (!body) return
 
     const { name, graph_data: graphData } = body
     if (typeof name !== 'string' || name.trim() === '' || name.length > 200) {
@@ -783,7 +794,9 @@ router.post('/workflows/:id/diff', tokenAuth('read'), (req, res) => {
     const workflow = getWorkflowForMember(req.params.id, req.user.id)
     if (!workflow) return res.status(404).json({ error: 'Workflow not found' })
 
-    const graphData = req.body?.graph_data
+    const body = resolveDocument(req, res)
+    if (!body) return
+    const graphData = body.graph_data
     if (!graphData || !Array.isArray(graphData.nodes) || !Array.isArray(graphData.edges)) {
       return res.status(400).json({ error: 'graph_data must include nodes and edges arrays' })
     }
@@ -832,7 +845,9 @@ router.post('/workflows/:id/preview', tokenAuth('read'), async (req, res) => {
     const workflow = getWorkflowForMember(req.params.id, req.user.id)
     if (!workflow) return res.status(404).json({ error: 'Workflow not found' })
 
-    const graphData = req.body?.graph_data
+    const body = resolveDocument(req, res)
+    if (!body) return
+    const graphData = body.graph_data
     if (!graphData || !Array.isArray(graphData.nodes) || !Array.isArray(graphData.edges)) {
       return res.status(400).json({ error: 'graph_data must include nodes and edges arrays' })
     }
@@ -846,7 +861,7 @@ router.post('/workflows/:id/preview', tokenAuth('read'), async (req, res) => {
     const report = await previewDeploy(
       workflow,
       { nodes: graphData.nodes, edges: graphData.edges },
-      { runs: req.body?.runs }
+      { runs: body.runs }
     )
     res.json({
       workflowId: workflow.id,
@@ -881,19 +896,21 @@ router.post('/workflows/:id/merge', tokenAuth('manage'), (req, res) => {
     if (!workflow) return res.status(404).json({ error: 'Workflow not found' })
     if (forbidViewer(res, workflow.workspace_id, req.user.id)) return
 
-    const graphData = req.body?.graph_data
+    const body = resolveDocument(req, res)
+    if (!body) return
+    const graphData = body.graph_data
     if (graphData && Buffer.byteLength(JSON.stringify(graphData), 'utf8') > MAX_IMPORT_GRAPH_BYTES) {
       return res.status(413).json({ error: 'Workflow graph is too large (max 500KB)' })
     }
 
-    const strategy = req.body?.strategy ?? 'manual'
+    const strategy = body.strategy ?? 'manual'
     const merged = mergeDocument(workflow, graphData, {
       strategy,
-      baseVersion: req.body?.baseVersion,
+      baseVersion: body.baseVersion,
     })
     if (merged.error) return res.status(400).json({ error: merged.error })
 
-    if (!req.body?.apply || !merged.graph) return res.json(merged.body)
+    if (!body.apply || !merged.graph) return res.json(merged.body)
 
     applyMerge(workflow, merged.graph)
     recordAudit(workflow.workspace_id, req.user.id, 'workflow.merged', {
@@ -927,8 +944,10 @@ router.post('/workflows/:id/lint', tokenAuth('read'), (req, res) => {
     const workflow = getWorkflowForMember(req.params.id, req.user.id)
     if (!workflow) return res.status(404).json({ error: 'Workflow not found' })
 
+    const body = resolveDocument(req, res)
+    if (!body) return
     let graph
-    const graphData = req.body?.graph_data
+    const graphData = body.graph_data
     if (graphData !== undefined) {
       if (!graphData || !Array.isArray(graphData.nodes) || !Array.isArray(graphData.edges)) {
         return res.status(400).json({ error: 'graph_data must include nodes and edges arrays' })

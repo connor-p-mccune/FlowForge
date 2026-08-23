@@ -190,6 +190,11 @@ why the signature and the merge already exclude them.
 | `flowforge import <ws> sync.flow` | Sends the text; the server parses it. A syntax error comes back as `Line 12: …`, the position the parser found. |
 | `GET /api/v1/workflows/:id/export?format=flow` | `text/plain`, not JSON-wrapped — the point of the format is being a file in a repository. |
 | `POST /api/v1/workspaces/:id/workflows/import` | Accepts `{ flow: "…" }`, parsed into the same shape the JSON path produces so the size cap, the signature check and the guarantees stay one code path. |
+| `diff`, `lint`, `merge`, `preview` | Every endpoint and command that takes a **document** accepts either form. A `.flow` file that could be imported but not diffed, linted, merged or previewed would be a format nobody could adopt, so the resolution happens once, in front of all of them. |
+
+The Export menu in the app offers both, because they answer different
+questions: the JSON is what a machine consumes on the way back in, and the
+`.flow` is what a human reads in a pull request.
 
 The CLI deliberately carries **no copy of the grammar**. Unlike the signing
 canonicalisation — which is duplicated there because signing has to work

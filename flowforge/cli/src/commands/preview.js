@@ -23,7 +23,7 @@
 // behaviourally inert — which is exactly what a refactor, a rename, or a
 // config-only edit claims to be.
 
-const fs = require('fs')
+const { readDocument } = require('../document')
 const { bold, gray, red, green, yellow, cyan } = require('../format')
 
 module.exports = async function preview(args, ctx) {
@@ -33,21 +33,30 @@ module.exports = async function preview(args, ctx) {
     return 1
   }
 
-  let document
-  try {
-    document = JSON.parse(fs.readFileSync(file, 'utf8'))
-  } catch (err) {
-    ctx.log(red(`Could not read ${file}: ${err.message}`))
-    return 1
-  }
-  const graphData = document?.graph_data || document?.graph || document
-  if (!graphData || !Array.isArray(graphData.nodes) || !Array.isArray(graphData.edges)) {
-    ctx.log(red(`${file} does not look like an exported workflow (no graph_data.nodes/edges).`))
+  const doc = readDocument(file)
+  if (doc.error) {
+    ctx.log(red(doc.error))
     return 1
   }
 
+  // A `.flow` file goes over as text and is parsed server-side; a JSON one is
+  // reduced to its graph here, tolerating the three shapes an export or a
+  // hand-written file takes.
+  let payload
+  if (doc.isFlow) {
+    payload = doc.payload
+  } else {
+    const document = doc.payload
+    const graphData = document?.graph_data || document?.graph || document
+    if (!graphData || !Array.isArray(graphData.nodes) || !Array.isArray(graphData.edges)) {
+      ctx.log(red(`${file} does not look like an exported workflow (no graph_data.nodes/edges).`))
+      return 1
+    }
+    payload = { graph_data: { nodes: graphData.nodes, edges: graphData.edges } }
+  }
+
   const report = await ctx.api.post(`/api/v1/workflows/${workflowId}/preview`, {
-    graph_data: { nodes: graphData.nodes, edges: graphData.edges },
+    ...payload,
     ...(args.flags.runs ? { runs: Number(args.flags.runs) } : {}),
   })
 
