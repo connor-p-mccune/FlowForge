@@ -44,6 +44,7 @@ describe('GET /api/v1/openapi.json', () => {
       '/workflows/{workflowId}/dependencies',
       '/workflows/{workflowId}/diff',
       '/workflows/{workflowId}/drift',
+      '/workflows/{workflowId}/effects',
       '/workflows/{workflowId}/executions',
       '/workflows/{workflowId}/export',
       '/workflows/{workflowId}/forecast',

@@ -21,6 +21,7 @@ const { rollbackExecution } = require('../services/executionEngine')
 const { describeLineage, analyzeLineage, traceProvenance, traceImpact } = require('../services/lineage')
 const { verifyGuarantees, parseGuarantees } = require('../services/guarantees')
 const { parseWorkflow, formatWorkflow, DslError } = require('../services/workflowDsl')
+const { analyzeEffects } = require('../services/effects')
 
 // Every endpoint that takes a workflow *document* accepts it in either form: as
 // the JSON export, or as `.flow` text under `flow`. Resolving it in one place
@@ -1167,6 +1168,36 @@ router.get('/workflows/:id/lineage', tokenAuth('read'), (req, res) => {
     }
 
     res.json({ workflowId: workflow.id, ...describeLineage(graph) })
+  } catch (err) {
+    console.error(err)
+    res.status(500).json({ error: 'Internal server error' })
+  }
+})
+
+// GET /api/v1/workflows/:id/effects — what a run can do to the outside world,
+// and what has to be true first (services/effects.js).
+//
+// The CI-shaped question is a promotion review's: "this is going to production,
+// what can it reach and which gates hold?" Every effect carries the decisions
+// it is control-dependent on, so a gate that a second trigger routes around
+// shows up as an effect with no conditions rather than as a gate somebody
+// assumed was holding. Read-only and pure, so `read` is the whole
+// authorisation story.
+router.get('/workflows/:id/effects', tokenAuth('read'), (req, res) => {
+  try {
+    const workflow = getWorkflowForMember(req.params.id, req.user.id)
+    if (!workflow) return res.status(404).json({ error: 'Workflow not found' })
+    let graph = { nodes: [], edges: [] }
+    try {
+      const parsed = JSON.parse(workflow.graph_json)
+      graph = {
+        nodes: Array.isArray(parsed.nodes) ? parsed.nodes : [],
+        edges: Array.isArray(parsed.edges) ? parsed.edges : [],
+      }
+    } catch {
+      /* unparseable stored graph — describe an empty effect set */
+    }
+    res.json({ workflowId: workflow.id, ...analyzeEffects(graph) })
   } catch (err) {
     console.error(err)
     res.status(500).json({ error: 'Internal server error' })

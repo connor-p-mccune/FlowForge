@@ -1427,6 +1427,45 @@ const spec = {
         },
       },
     },
+    '/workflows/{workflowId}/effects': {
+      get: {
+        tags: ['workflows'],
+        summary: 'What a run can do, and what has to be true first',
+        description:
+          'Every node that reaches outside FlowForge or costs money — an HTTP ' +
+          'call, an email, a Slack post, a sub-workflow, a model call — with ' +
+          'the **decisions it is control-dependent on**. An effect requires ' +
+          'outcome `o` of decision `D` when `D` dominates it *and* exactly one ' +
+          'of `D`’s outcomes leads to it; anything ambiguous yields fewer ' +
+          'conditions rather than more, because a precondition claimed and not ' +
+          'real is a review that concluded the wrong thing.\n\n' +
+          'The question a promotion review opens with, and the one neither the ' +
+          'linter (a node’s config), lineage (where a value came from) nor the ' +
+          'declared guarantees (a property somebody thought to write down) ' +
+          'answers. An effect with no conditions happens on every run — ' +
+          'including one whose gate a second trigger routes around, which is ' +
+          'exactly the case somebody assumes is covered.\n\n' +
+          '`decisions` is the same analysis read backwards: for each outcome, ' +
+          'which effects it gates — *if this approval rejects, what can still ' +
+          'happen?* Requires the `read` scope.',
+        operationId: 'getWorkflowEffects',
+        parameters: [{ $ref: '#/components/parameters/WorkflowId' }],
+        responses: {
+          200: {
+            description: 'The effect report, or `available: false` for an empty or cyclic graph.',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/EffectReport' },
+              },
+            },
+          },
+          401: { $ref: '#/components/responses/Unauthorized' },
+          403: { $ref: '#/components/responses/Forbidden' },
+          404: { $ref: '#/components/responses/NotFound' },
+          429: { $ref: '#/components/responses/RateLimited' },
+        },
+      },
+    },
     '/workflows/{workflowId}/lineage': {
       get: {
         tags: ['workflows'],
@@ -3001,6 +3040,85 @@ const spec = {
                 compared: { type: 'integer' },
                 findings: { type: 'array', items: { $ref: '#/components/schemas/DataDriftFinding' } },
               },
+            },
+          },
+        },
+      },
+      EffectReport: {
+        type: 'object',
+        properties: {
+          workflowId: { type: 'string' },
+          available: { type: 'boolean' },
+          reason: { type: 'string', enum: ['empty', 'cycle'], nullable: true },
+          effects: {
+            type: 'array',
+            items: {
+              type: 'object',
+              properties: {
+                nodeId: { type: 'string' },
+                label: { type: 'string' },
+                type: { type: 'string', description: 'The node type.' },
+                kind: {
+                  type: 'string',
+                  enum: ['http', 'email', 'slack', 'sub-workflow', 'model'],
+                },
+                target: {
+                  type: 'string',
+                  nullable: true,
+                  description:
+                    'The host, address, workflow or model it reaches. Null when the ' +
+                    'graph does not determine it — a templated *authority* rather ' +
+                    'than a templated path.',
+                },
+                always: {
+                  type: 'boolean',
+                  description: 'True when no decision gates it: it happens on every run that gets there.',
+                },
+                conditions: {
+                  type: 'array',
+                  description: 'Every decision that must go a particular way for this effect to run.',
+                  items: {
+                    type: 'object',
+                    properties: {
+                      nodeId: { type: 'string' },
+                      label: { type: 'string' },
+                      type: { type: 'string', nullable: true },
+                      outcome: { type: 'string', description: 'e.g. `true`, `valid`, `refund`, `error`.' },
+                    },
+                  },
+                },
+              },
+            },
+          },
+          decisions: {
+            type: 'array',
+            description: 'The same analysis backwards: which effects each outcome gates.',
+            items: {
+              type: 'object',
+              properties: {
+                nodeId: { type: 'string' },
+                label: { type: 'string' },
+                type: { type: 'string', nullable: true },
+                outcomes: {
+                  type: 'array',
+                  items: {
+                    type: 'object',
+                    properties: {
+                      name: { type: 'string' },
+                      gates: { type: 'array', items: { type: 'string' } },
+                    },
+                  },
+                },
+              },
+            },
+          },
+          summary: {
+            type: 'object',
+            properties: {
+              total: { type: 'integer' },
+              unconditional: { type: 'integer' },
+              gated: { type: 'integer' },
+              dynamicTargets: { type: 'integer' },
             },
           },
         },
