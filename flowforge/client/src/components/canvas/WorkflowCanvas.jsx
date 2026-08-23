@@ -257,6 +257,13 @@ function CanvasInner({ workflowId }) {
           id: payload.approvalId,
           message: payload.message,
           expiresAt: payload.expiresAt,
+          // The declared gate, so the panel can say "0 of 3 approvals,
+          // workspace owners only" rather than offering two buttons and
+          // letting somebody discover the rule by being refused.
+          quorum: payload.quorum,
+          requiredRole: payload.requiredRole,
+          separationOfDuties: payload.separationOfDuties,
+          approvals: 0,
         },
       }))
     } else if (
@@ -617,10 +624,25 @@ function CanvasInner({ workflowId }) {
   // for everyone watching. A 409 just means someone else decided first.
   const handleRespondApproval = useCallback(async (approvalId, decision) => {
     try {
-      await apiFetch(`/api/approvals/${approvalId}/respond`, {
+      const { progress } = await apiFetch(`/api/approvals/${approvalId}/respond`, {
         method: 'POST',
         body: { decision },
       })
+      // A gate with a quorum may not settle on this response. Saying "run
+      // continuing" then would be wrong, and it would be wrong in the
+      // direction four-eyes exists to prevent — so the count is echoed back
+      // instead, and the controls stay up for the next person.
+      if (progress && progress.settled === false) {
+        setPendingApprovals((prev) => {
+          const entry = Object.entries(prev).find(([, a]) => a.id === approvalId)
+          if (!entry) return prev
+          return { ...prev, [entry[0]]: { ...entry[1], approvals: progress.approvals } }
+        })
+        toastRef.current.success(
+          `Recorded — ${progress.approvals} of ${progress.needed} approvals.`
+        )
+        return
+      }
       toastRef.current.success(decision === 'approve' ? 'Approved — run continuing.' : 'Rejected.')
     } catch (err) {
       toastRef.current.error(`Couldn’t record the decision: ${err.message}`)

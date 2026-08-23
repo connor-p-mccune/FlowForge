@@ -42,16 +42,39 @@ export default function ApprovalsInbox() {
 
   async function respond(approval, decision) {
     try {
-      await apiFetch(`/api/approvals/${approval.id}/respond`, {
+      const { progress } = await apiFetch(`/api/approvals/${approval.id}/respond`, {
         method: 'POST',
         body: { decision },
       })
+      // A gate with a quorum may not settle on this response. The row stays —
+      // somebody else still has to look at it — and only this person's ability
+      // to vote again is spent, which the server enforces anyway.
+      if (progress && progress.settled === false) {
+        toast.success(`Recorded — ${progress.approvals} of ${progress.needed} approvals.`)
+        setApprovals((prev) =>
+          prev.map((a) =>
+            a.id === approval.id ? { ...a, approvals_count: progress.approvals, voted: true } : a
+          )
+        )
+        return
+      }
       toast.success(decision === 'approve' ? 'Approved — run continuing.' : 'Rejected.')
     } catch (err) {
       // A conflict means someone else already decided — either way the row is done.
       toast.error(`Couldn’t record the decision: ${err.message}`)
     }
     setApprovals((prev) => prev.filter((a) => a.id !== approval.id))
+  }
+
+  // What the gate asks for beyond one response from anybody. Nothing for the
+  // overwhelming majority of approvals.
+  function gateOf(a) {
+    const quorum = Number(a.quorum) || 1
+    const parts = []
+    if (quorum > 1) parts.push(`${Number(a.approvals_count) || 0} of ${quorum} approvals`)
+    if (a.required_role === 'owner') parts.push('owners only')
+    if (a.excluded_user_id) parts.push('not the requester')
+    return parts.join(' · ')
   }
 
   if (!approvals || approvals.length === 0) return null
@@ -71,21 +94,31 @@ export default function ApprovalsInbox() {
             >
               <span className="approvals-inbox__workflow">{a.workflow_name || 'a workflow'}</span>
               {a.message && <span className="approvals-inbox__message">{a.message}</span>}
+              {gateOf(a) && <span className="approval-gate__quorum">{gateOf(a)}</span>}
               <span className="approvals-inbox__time">{timeAgo(a.requested_at)}</span>
             </button>
             <div className="approvals-inbox__actions">
-              <button
-                className="approval-actions__btn approval-actions__btn--approve"
-                onClick={() => respond(a, 'approve')}
-              >
-                ✓ Approve
-              </button>
-              <button
-                className="approval-actions__btn approval-actions__btn--reject"
-                onClick={() => respond(a, 'reject')}
-              >
-                ✕ Reject
-              </button>
+              {a.voted ? (
+                // This person has spent their vote; the gate is waiting on
+                // somebody else. Buttons that would only ever return a 409 are
+                // worse than no buttons.
+                <span className="approvals-inbox__voted">Waiting on others</span>
+              ) : (
+                <>
+                  <button
+                    className="approval-actions__btn approval-actions__btn--approve"
+                    onClick={() => respond(a, 'approve')}
+                  >
+                    ✓ Approve
+                  </button>
+                  <button
+                    className="approval-actions__btn approval-actions__btn--reject"
+                    onClick={() => respond(a, 'reject')}
+                  >
+                    ✕ Reject
+                  </button>
+                </>
+              )}
             </div>
           </li>
         ))}

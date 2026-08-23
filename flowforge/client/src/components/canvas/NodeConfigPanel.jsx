@@ -959,11 +959,48 @@ export default function NodeConfigPanel({
                 <option value="fail">Fail the run</option>
               </select>
             </label>
+            <label className="config-panel__field">
+              <span>Approvals required</span>
+              <input
+                type="number"
+                min={1}
+                max={20}
+                value={config.quorum ?? 1}
+                onChange={(e) => setConfig('quorum', Number(e.target.value))}
+              />
+            </label>
+            <label className="config-panel__field">
+              <span>Who can approve</span>
+              <select
+                value={config.approverRole || 'any'}
+                onChange={(e) => setConfig('approverRole', e.target.value)}
+              >
+                <option value="any">Any workspace member</option>
+                <option value="owner">Workspace owners only</option>
+              </select>
+            </label>
+            <label className="config-panel__check">
+              <input
+                type="checkbox"
+                checked={config.separationOfDuties === true}
+                onChange={(e) => setConfig('separationOfDuties', e.target.checked)}
+              />
+              <span>Whoever started the run cannot approve it</span>
+            </label>
             <p className="config-panel__hint">
-              The run pauses here until a workspace member approves or rejects —
+              The run pauses here until enough workspace members approve —
               everyone is notified, and the decision can be made from the run
-              panel or a notification link. Test runs auto-approve.
+              panel or a notification link. A single rejection settles it
+              whatever the quorum: enough people agreeing it is safe is not the
+              same as nobody objecting. One person counts once. Test runs
+              auto-approve.
             </p>
+            {config.separationOfDuties === true && (
+              <p className="config-panel__hint">
+                Runs started by a webhook or a schedule have no user to exclude,
+                so this applies only to runs a person or an API token started.
+              </p>
+            )}
           </>
         )
       case 'wait-callback':

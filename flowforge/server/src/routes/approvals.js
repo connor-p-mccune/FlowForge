@@ -22,8 +22,15 @@ router.get('/approvals', auth, (req, res) => {
     if (!STATUSES.includes(status)) {
       return res.status(400).json({ error: `status must be one of: ${STATUSES.join(', ')}` })
     }
+    // `approvals_count` so the inbox can show "1 of 3" without a second round
+    // trip, and `has_voted` so somebody who has already responded is offered
+    // "waiting on others" rather than two buttons that would only ever 409.
     const approvals = db.prepare(
-      `SELECT a.*, w.name AS workflow_name, u.display_name AS responded_by_name
+      `SELECT a.*, w.name AS workflow_name, u.display_name AS responded_by_name,
+              (SELECT COUNT(*) FROM execution_approval_responses r
+                WHERE r.approval_id = a.id AND r.decision = 'approve') AS approvals_count,
+              EXISTS (SELECT 1 FROM execution_approval_responses r
+                       WHERE r.approval_id = a.id AND r.user_id = ?) AS voted
          FROM execution_approvals a
          JOIN workspace_members wm ON wm.workspace_id = a.workspace_id AND wm.user_id = ?
          LEFT JOIN workflows w ON w.id = a.workflow_id
@@ -31,7 +38,7 @@ router.get('/approvals', auth, (req, res) => {
         WHERE a.status = ?
         ORDER BY a.requested_at DESC
         LIMIT 100`
-    ).all(req.user.id, status)
+    ).all(req.user.id, req.user.id, status)
     res.json({ approvals })
   } catch (err) {
     console.error(err)

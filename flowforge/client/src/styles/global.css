@@ -2661,6 +2661,31 @@ html, body, #root {
   color: #9d174d;
 }
 
+/* What the gate asks for beyond one response, and how far along it is. Absent
+   entirely on an ordinary approval — see ApprovalGate in ExecutionPanel.jsx. */
+.approval-gate {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+  font-size: 11px;
+}
+.approval-gate__quorum {
+  font-weight: 600;
+  color: #9d174d;
+}
+.approval-gate__rules {
+  color: #9f1239;
+  opacity: 0.75;
+}
+
+.approvals-inbox__voted {
+  font-size: 11px;
+  color: #9f1239;
+  opacity: 0.8;
+  white-space: nowrap;
+}
+
 .approval-actions__buttons {
   display: flex;
   gap: 6px;

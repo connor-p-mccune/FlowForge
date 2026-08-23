@@ -85,14 +85,24 @@ export const NODE_DEFS = {
     subtype: 'aggregate',
     config: { source: '', value: '', groupBy: '' },
   },
-  // Approval: pauses the run until a workspace member approves or rejects,
-  // then routes down the matching branch. timeoutMinutes bounds the wait;
-  // onTimeout picks what an expired wait does ('reject' the branch, or 'fail'
-  // the run).
+  // Approval: pauses the run until enough workspace members approve, then
+  // routes down the matching branch. timeoutMinutes bounds the wait; onTimeout
+  // picks what an expired wait does ('reject' the branch, or 'fail' the run).
+  //
+  // quorum / approverRole / separationOfDuties default to the behaviour every
+  // approval had before they existed — one response, from any member, from
+  // anybody — so an existing node is untouched by their arrival.
   'approval': {
     label: 'Approval',
     subtype: 'approval',
-    config: { message: '', timeoutMinutes: 60, onTimeout: 'reject' },
+    config: {
+      message: '',
+      timeoutMinutes: 60,
+      onTimeout: 'reject',
+      quorum: 1,
+      approverRole: 'any',
+      separationOfDuties: false,
+    },
   },
   // Wait for callback: pauses the run until an external system POSTs to the
   // node's one-time callback URL, then routes received / timed-out. Upstream

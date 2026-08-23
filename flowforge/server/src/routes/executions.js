@@ -14,6 +14,7 @@ const { isPaused, PAUSED_ERROR } = require('../services/workflowPause')
 const { rollbackExecution } = require('../services/executionEngine')
 const { recordAudit } = require('../services/auditLog')
 const { parseDebugRequest, resumeBreak, listBreaks } = require('../services/debugger')
+const { listResponses: listApprovalResponses } = require('../services/approvals')
 const runSchedule = require('../services/runSchedule')
 const scheduleSim = require('../services/scheduleSim')
 const nodePriority = require('../services/nodePriority')
@@ -237,11 +238,17 @@ router.get('/executions/:id', auth, (req, res) => {
     const childExecutions = buildChildExecutions(execution.id)
     // Approval requests this run filed (approval nodes), so the run detail can
     // show who decided what — or offer approve/reject while one is pending.
+    // Every vote rides along, not only whoever settled it: under a quorum the
+    // `responded_by` column holds the *last* approver, which is the least
+    // interesting of the names, and "who signed off on this" is the question
+    // somebody opens a finished run to answer.
     const approvals = db.prepare(
-      `SELECT a.*, u.display_name AS responded_by_name
+      `SELECT a.*, u.display_name AS responded_by_name,
+              (SELECT COUNT(*) FROM execution_approval_responses r
+                WHERE r.approval_id = a.id AND r.decision = 'approve') AS approvals_count
          FROM execution_approvals a LEFT JOIN users u ON u.id = a.responded_by
         WHERE a.execution_id = ? ORDER BY a.requested_at`
-    ).all(execution.id)
+    ).all(execution.id).map((a) => ({ ...a, responses: listApprovalResponses(a.id) }))
 
     // Critical path: the longest dependency-respecting chain of steps, computed
     // from the run's recorded timings against the workflow's current edges

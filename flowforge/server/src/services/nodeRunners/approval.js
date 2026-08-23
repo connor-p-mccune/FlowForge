@@ -128,6 +128,7 @@ module.exports = async function approval(config, input, isDryRun, ctx = {}) {
       expiresAt: expiresAt.toISOString(),
       quorum: gate.quorum,
       requiredRole: gate.requiredRole,
+      separationOfDuties: Boolean(excludedUserId),
       requirement: describeGate(gate),
     })
   }

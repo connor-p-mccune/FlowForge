@@ -67,4 +67,43 @@ describe('ExecutionPanel approval controls', () => {
     renderPanel({ steps: runningGate, pendingApprovals: {} })
     expect(screen.queryByRole('button', { name: /approve/i })).not.toBeInTheDocument()
   })
+
+  describe('the declared gate', () => {
+    it('says nothing about an ordinary approval', () => {
+      // "1 approval required" on every gate is a line people learn to skip,
+      // and this one has to be read on the day it says four.
+      const { container } = render(<div />)
+      renderPanel({ steps: runningGate, pendingApprovals: pending })
+      expect(container.querySelector('.approval-gate')).toBeNull()
+      expect(screen.queryByText(/approvals/)).not.toBeInTheDocument()
+    })
+
+    it('shows how far along a quorum is', () => {
+      renderPanel({
+        steps: runningGate,
+        pendingApprovals: { gate: { id: 'appr-1', message: 'Ship?', quorum: 3, approvals: 1 } },
+      })
+      expect(screen.getByText('1 of 3 approvals')).toBeInTheDocument()
+    })
+
+    it('names the rules rather than letting somebody discover them by being refused', () => {
+      renderPanel({
+        steps: runningGate,
+        pendingApprovals: {
+          gate: { id: 'appr-1', message: 'Ship?', quorum: 2, requiredRole: 'owner', separationOfDuties: true },
+        },
+      })
+      expect(screen.getByText('0 of 2 approvals')).toBeInTheDocument()
+      expect(screen.getByText('workspace owners only · not whoever started the run')).toBeInTheDocument()
+    })
+
+    it('shows a rule even when the gate needs only one approval', () => {
+      renderPanel({
+        steps: runningGate,
+        pendingApprovals: { gate: { id: 'appr-1', message: 'Ship?', requiredRole: 'owner' } },
+      })
+      expect(screen.getByText('workspace owners only')).toBeInTheDocument()
+      expect(screen.queryByText(/of 1 approvals/)).not.toBeInTheDocument()
+    })
+  })
 })

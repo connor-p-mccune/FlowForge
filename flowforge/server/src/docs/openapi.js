@@ -2157,11 +2157,19 @@ const spec = {
         tags: ['approvals'],
         summary: 'Approve or reject a waiting run',
         description:
-          'Settles a pending approval gate; the paused run then continues down ' +
-          'the approved or rejected branch. Requires the dedicated `approve` ' +
-          'scope — a token that can trigger runs cannot implicitly wave them ' +
-          'through their own gates. Exactly one responder wins a race; the ' +
-          'loser receives 409 with the verdict.',
+          'Records a response on a pending approval gate. Requires the ' +
+          'dedicated `approve` scope — a token that can trigger runs cannot ' +
+          'implicitly wave them through its own gates.\n\n' +
+          '**Do not infer the decision from a 2xx.** A gate that declares a ' +
+          'quorum may not settle on this response: `200` means it settled ' +
+          '(`progress.status` is the verdict, and the run has continued down ' +
+          'that branch), `202` means the response was recorded and the gate is ' +
+          'still open. A client treating every 2xx as "approved" would ' +
+          'otherwise act on a half-met quorum.\n\n' +
+          'A single **rejection** settles the gate whatever the quorum, and one ' +
+          'person counts once — a second response from the same account is a ' +
+          '409 with `reason: "already-responded"`. A 403 carries which rule ' +
+          'refused: `viewer`, `role`, or `separation-of-duties`.',
         operationId: 'respondToApproval',
         parameters: [{ $ref: '#/components/parameters/ApprovalId' }],
         requestBody: {
@@ -2181,12 +2189,30 @@ const spec = {
         },
         responses: {
           200: {
-            description: 'The settled approval.',
+            description: 'The gate settled — `progress.status` is the verdict.',
             content: {
               'application/json': {
                 schema: {
                   type: 'object',
-                  properties: { approval: { $ref: '#/components/schemas/Approval' } },
+                  properties: {
+                    approval: { $ref: '#/components/schemas/Approval' },
+                    progress: { $ref: '#/components/schemas/ApprovalProgress' },
+                  },
+                },
+              },
+            },
+          },
+          202: {
+            description:
+              'Recorded, and the gate is still open — more approvals are needed.',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    approval: { $ref: '#/components/schemas/Approval' },
+                    progress: { $ref: '#/components/schemas/ApprovalProgress' },
+                  },
                 },
               },
             },
@@ -2606,8 +2632,41 @@ const spec = {
           requestedAt: { type: 'string', format: 'date-time' },
           expiresAt: { type: 'string', format: 'date-time', nullable: true },
           respondedAt: { type: 'string', format: 'date-time', nullable: true },
-          respondedBy: { type: 'string', nullable: true },
+          respondedBy: {
+            type: 'string',
+            nullable: true,
+            description:
+              'Whoever settled it. Under a quorum this is the *last* approver — ' +
+              'the full list of votes lives on the run detail.',
+          },
           note: { type: 'string', nullable: true },
+          // Present only when the gate declares something beyond the default,
+          // so an ordinary approval's payload is what it always was.
+          quorum: {
+            type: 'integer',
+            description: 'Distinct approvals required. Absent when the gate needs only one.',
+          },
+          requiredRole: {
+            type: 'string',
+            enum: ['owner'],
+            description: 'Present when only workspace owners may settle this gate.',
+          },
+          separationOfDuties: {
+            type: 'boolean',
+            description: 'Present when whoever triggered the run may not approve it.',
+          },
+        },
+      },
+      ApprovalProgress: {
+        type: 'object',
+        description:
+          'Where the gate stands after this response. Read `settled` rather than ' +
+          'inferring the decision from the status code.',
+        properties: {
+          settled: { type: 'boolean' },
+          status: { type: 'string', enum: ['pending', 'approved', 'rejected'] },
+          approvals: { type: 'integer', description: 'Distinct approvals gathered so far.' },
+          needed: { type: 'integer', description: 'The gate’s quorum.' },
         },
       },
       ExecutionStep: {

@@ -29,6 +29,30 @@ function CallbackWaiting({ callback }) {
   )
 }
 
+// What a gate asks for beyond one response from anybody, and how far along it
+// is. Renders nothing for an ordinary approval — a line reading "1 approval
+// required" on every gate is one people learn to skip, and this one has to be
+// read on the day it says four.
+function ApprovalGate({ approval }) {
+  const quorum = Number(approval.quorum) || 1
+  const rules = []
+  if (approval.requiredRole === 'owner') rules.push('workspace owners only')
+  if (approval.separationOfDuties) rules.push('not whoever started the run')
+  if (quorum <= 1 && rules.length === 0) return null
+
+  const approvals = Number(approval.approvals) || 0
+  return (
+    <span className="approval-gate">
+      {quorum > 1 && (
+        <span className="approval-gate__quorum">
+          {approvals} of {quorum} approvals
+        </span>
+      )}
+      {rules.length > 0 && <span className="approval-gate__rules">{rules.join(' · ')}</span>}
+    </span>
+  )
+}
+
 // `childExecutionsByNode` (optional) maps a step's nodeId → the sub-workflow runs
 // that step spawned, each { execution, steps, childExecutionsByNode } so the tree
 // nests recursively. Present in the History detail view (fetched from
@@ -69,6 +93,7 @@ export function StepList({ steps, nodes, childExecutionsByNode, pendingApprovals
                 <span className="approval-actions__message">
                   {approval.message || 'Waiting for approval'}
                 </span>
+                <ApprovalGate approval={approval} />
                 <div className="approval-actions__buttons">
                   <button
                     className="approval-actions__btn approval-actions__btn--approve"

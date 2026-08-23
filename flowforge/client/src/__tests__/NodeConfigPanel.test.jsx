@@ -103,6 +103,41 @@ describe('NodeConfigPanel rendering', () => {
     expect(screen.getByRole('option', { name: 'Fail the run' }).selected).toBe(true)
   })
 
+  it('renders the gate fields for approval, defaulting to the historical behaviour', () => {
+    setup(mk('approval', { config: { message: 'Ship it?' } }))
+    expect(screen.getByText('Approvals required')).toBeInTheDocument()
+    expect(screen.getByText('Who can approve')).toBeInTheDocument()
+    expect(screen.getByRole('option', { name: 'Any workspace member' }).selected).toBe(true)
+    const sod = screen.getByRole('checkbox', { name: /cannot approve it/i })
+    expect(sod).not.toBeChecked()
+  })
+
+  it('reads back a declared quorum, role, and separation of duties', () => {
+    setup(
+      mk('approval', {
+        config: { message: 'Refund?', quorum: 3, approverRole: 'owner', separationOfDuties: true },
+      })
+    )
+    expect(screen.getByDisplayValue('3')).toBeInTheDocument()
+    expect(screen.getByRole('option', { name: 'Workspace owners only' }).selected).toBe(true)
+    expect(screen.getByRole('checkbox', { name: /cannot approve it/i })).toBeChecked()
+    // And the limit is stated where it applies, not left to be discovered.
+    expect(screen.getByText(/no user to exclude/)).toBeInTheDocument()
+  })
+
+  it('does not warn about unattended runs until separation of duties is on', () => {
+    setup(mk('approval', { config: { message: 'Refund?' } }))
+    expect(screen.queryByText(/no user to exclude/)).not.toBeInTheDocument()
+  })
+
+  it('reports a quorum change as a config edit', () => {
+    const { onChange } = setup(mk('approval', { config: { message: 'Ship it?' } }))
+    fireEvent.change(screen.getByDisplayValue('1'), { target: { value: '2' } })
+    expect(onChange).toHaveBeenCalledWith('n1', expect.objectContaining({
+      config: expect.objectContaining({ quorum: 2 }),
+    }))
+  })
+
   it('renders prompt fields for ai-prompt', () => {
     setup(mk('ai-prompt'))
     expect(screen.getByText(/^Prompt/)).toBeInTheDocument()
