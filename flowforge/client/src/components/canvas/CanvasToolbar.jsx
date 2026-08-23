@@ -28,6 +28,8 @@ export default function CanvasToolbar({
   onToggleLineage,
   lineageOpen,
   onToggleGuarantees,
+  onToggleFlowText,
+  flowTextOpen,
   guaranteesOpen,
   onTogglePaths,
   pathsOpen,
@@ -186,6 +188,14 @@ export default function CanvasToolbar({
         aria-pressed={guaranteesOpen}
       >
         🛡 Guarantees
+      </button>
+      <button
+        className={`toolbar-btn toolbar-btn--issues${flowTextOpen ? ' toolbar-btn--active' : ''}`}
+        title="Text — the whole workflow as .flow. Renaming a dozen nodes is one find-and-replace here"
+        onClick={onToggleFlowText}
+        aria-pressed={flowTextOpen}
+      >
+        {'</>'} Text
       </button>
       <button
         className={`toolbar-btn toolbar-btn--issues${pathsOpen ? ' toolbar-btn--active' : ''}`}

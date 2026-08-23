@@ -40,6 +40,7 @@ import {
 import IssuesPanel from './IssuesPanel'
 import LineagePanel from './LineagePanel'
 import GuaranteesPanel from './GuaranteesPanel'
+import FlowTextPanel from './FlowTextPanel'
 import PathsPanel from './PathsPanel'
 import PreviewPanel from './PreviewPanel'
 import DebuggerPanel from './DebuggerPanel'
@@ -124,6 +125,7 @@ function CanvasInner({ workflowId }) {
   const [issuesOpen, setIssuesOpen] = useState(false)
   const [lineageOpen, setLineageOpen] = useState(false)
   const [guaranteesOpen, setGuaranteesOpen] = useState(false)
+  const [flowTextOpen, setFlowTextOpen] = useState(false)
   const [pathsOpen, setPathsOpen] = useState(false)
   const [previewOpen, setPreviewOpen] = useState(false)
   // The pause this run is currently sitting at, or null. Driven by the
@@ -721,6 +723,7 @@ function CanvasInner({ workflowId }) {
   const handleTogglePaths = useCallback(() => setPathsOpen((v) => !v), [])
   const handleTogglePreview = useCallback(() => setPreviewOpen((v) => !v), [])
   const handleToggleDebugger = useCallback(() => setDebuggerOpen((v) => !v), [])
+  const handleToggleFlowText = useCallback(() => setFlowTextOpen((v) => !v), [])
 
   // Clicking an issue selects the offending node (opening its config panel)
   // and pans the viewport to it.
@@ -1175,6 +1178,8 @@ function CanvasInner({ workflowId }) {
         previewOpen={previewOpen}
         onToggleDebugger={handleToggleDebugger}
         debuggerOpen={debuggerOpen}
+        onToggleFlowText={handleToggleFlowText}
+        flowTextOpen={flowTextOpen}
         onDeploy={handleDeploy}
         onToggleHistory={handleToggleHistory}
         onOpenMerge={() => setMergeOpen(true)}
@@ -1357,6 +1362,21 @@ function CanvasInner({ workflowId }) {
           edges={edges}
           onClose={() => setGuaranteesOpen(false)}
           onSelectNode={handleSelectIssueNode}
+        />
+      )}
+      {/* The canvas is for drawing; this is for surgery. Applying goes through
+          the server and the canvas reloads the result — the same shape as a
+          merge or a restore, so the collaboration layer sees one external
+          change rather than a storm of synthetic edits. */}
+      {flowTextOpen && (
+        <FlowTextPanel
+          workflowId={workflowId}
+          open={flowTextOpen}
+          onClose={() => setFlowTextOpen(false)}
+          onApplied={(updated) => {
+            applyWorkflow(updated)
+            toastRef.current.success('Workflow updated from text.')
+          }}
         />
       )}
       {/* And the fourth, which is the only one that reasons about the *data*:

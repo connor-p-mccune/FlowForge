@@ -18,7 +18,7 @@ const { ROLLBACK_POLICIES } = require('../services/compensation')
 const { POLICIES: RECOVERY_POLICIES } = require('../services/crashRecovery')
 const { describeLineage, analyzeLineage, traceProvenance, traceImpact } = require('../services/lineage')
 const { verifyGuarantees, parseGuarantees } = require('../services/guarantees')
-const { formatWorkflow } = require('../services/workflowDsl')
+const { formatWorkflow, parseWorkflow, DslError } = require('../services/workflowDsl')
 const { analyzePaths } = require('../services/pathConstraints')
 const { previewDeploy } = require('../services/backtest')
 const { verifyImport } = require('../services/trustStore')
@@ -617,6 +617,81 @@ router.put('/workflows/:id/graph', auth, validate(graphRule), (req, res) => {
       type: 'workflow', id: workflow.id, name: workflow.name,
     }, { coalesceWindowMs: EDIT_COALESCE_MS })
     res.json({ ok: true })
+  } catch (err) {
+    console.error(err)
+    res.status(500).json({ error: 'Internal server error' })
+  }
+})
+
+// PUT /api/workflows/:id/flow { flow } — replace the workflow from its text
+// form (services/workflowDsl).
+//
+// The canvas is for drawing and text is for surgery. Renaming twelve nodes,
+// repointing five HTTP nodes at a new host, or reordering a switch's cases are
+// all one find-and-replace in a text editor and twelve dialogs on a canvas —
+// and the second is why people give up and do it in the database.
+//
+// It writes the **whole document**, not just the graph: the name, the
+// description and the declared guarantees are all lines in the file, so editing
+// one there has to mean what it says. That is the same reason `--name` is
+// refused for a `.flow` import.
+//
+// Server-side, like a merge or a version restore, and for the same reason: the
+// canvas reloads the result rather than trying to reconcile a second time on
+// the client, so the collaboration layer sees one external change instead of a
+// storm of synthetic edits.
+router.put('/workflows/:id/flow', auth, (req, res) => {
+  try {
+    const workflow = db.prepare('SELECT * FROM workflows WHERE id = ?').get(req.params.id)
+    if (!workflow || !isMember(workflow.workspace_id, req.user.id)) {
+      return res.status(404).json({ error: 'Workflow not found' })
+    }
+    if (forbidViewer(res, workflow.workspace_id, req.user.id)) return
+
+    if (typeof req.body?.flow !== 'string') {
+      return res.status(400).json({ error: 'flow must be a string of .flow source' })
+    }
+
+    let document
+    try {
+      document = parseWorkflow(req.body.flow)
+    } catch (err) {
+      if (err instanceof DslError) {
+        // The position is the product: a text editor can put the cursor on it.
+        return res.status(400).json({
+          error: err.message,
+          line: err.line,
+          column: err.column,
+          frame: err.frame,
+        })
+      }
+      throw err
+    }
+
+    const name = (document.name || '').trim()
+    if (!name || name.length > 200) {
+      return res.status(400).json({ error: 'The workflow needs a name (max 200 chars)' })
+    }
+    const graphJson = JSON.stringify(document.graph_data)
+    if (Buffer.byteLength(graphJson, 'utf8') > 500 * 1024) {
+      return res.status(413).json({ error: 'Workflow graph is too large (max 500KB)' })
+    }
+
+    const guarantees = parseGuarantees(document.guarantees)
+    const now = new Date().toISOString()
+    db.prepare(
+      `UPDATE workflows SET name = ?, description = ?, graph_json = ?, guarantees_json = ?, updated_at = ?
+        WHERE id = ?`
+    ).run(
+      name, document.description ?? null, graphJson,
+      guarantees.length ? JSON.stringify(guarantees) : null, now, req.params.id
+    )
+
+    activityService.logEvent(workflow.workspace_id, req.user.id, 'workflow.updated', {
+      type: 'workflow', id: workflow.id, name,
+    }, { coalesceWindowMs: EDIT_COALESCE_MS })
+
+    res.json({ workflow: db.prepare('SELECT * FROM workflows WHERE id = ?').get(req.params.id) })
   } catch (err) {
     console.error(err)
     res.status(500).json({ error: 'Internal server error' })

@@ -12,7 +12,16 @@ export async function apiFetch(path, options = {}) {
     body: options.body ? JSON.stringify(options.body) : undefined,
   })
   const data = await res.json()
-  if (!res.ok) throw new Error(data.error || 'Request failed')
+  if (!res.ok) {
+    // The message is what almost every caller wants, so it stays the Error's
+    // message. The status and the whole body ride along for the few that need
+    // more than a sentence — a parse failure reporting the line and column it
+    // stopped at, say, which a caller can put a cursor on.
+    const error = new Error(data.error || 'Request failed')
+    error.status = res.status
+    error.body = data
+    throw error
+  }
   return data
 }
 
