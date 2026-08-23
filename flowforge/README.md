@@ -23,6 +23,7 @@ problem sounds familiar.
 | **Path invariants** | Every static check asks about a *place* — this node's config, this value's shape. None could answer *"can this ever charge a card without the approval having run?"*, which is about a **path**. Turns out the engine's activation rule makes that question identical to graph dominance, so it's a solved compiler problem. Violations report the counterexample path. | [GUARANTEES.md](./docs/GUARANTEES.md) |
 | **Reaching a branch** | Every check here reasons about the *graph*, so a switch case sitting under a condition that already ruled it out is wired, typed, reachable and dead — and nothing says so. Asking whether an input exists is a solver question: difference logic, finite domains, DPLL(T). The solver returns a *model*, so the answer is also the payload that drives the branch — which is how the test suite gets generated. | [PATHS.md](./docs/PATHS.md) |
 | **Collaborative editing** | Last-write-wins on `Date.now()` meant whose laptop was fast decided whose edit survived, edits collided per *element* so two people editing different fields of one node lost half the work, and a dropped connection diverged **permanently**. Now a CRDT — commutative and idempotent, tested by applying every permutation of an operation set and asserting one document. | [ARCHITECTURE.md](./docs/ARCHITECTURE.md#real-time-collaboration) |
+| **Approving a run** | "The run pauses until *a* member responds" is the right default and the wrong one for what people put gates in front of: a refund, a migration, a payout. The requirement is the right humans, enough of them, and not the person who asked. Quorum, owner-only, separation of duties — plus the parts that are easy to get wrong: one rejection settles it, one person counts once (a `UNIQUE` index, not a check), and the linter refuses a gate the workspace can never satisfy, because an unsatisfiable gate doesn't fail — it *waits*. | [APPROVALS.md](./docs/APPROVALS.md) |
 | **Watching the data** | Every monitor here watches *time* (percentiles, trend, change point) or *outcome* (success rate, error budget, heartbeat). None looks at a value. So a workflow whose upstream quietly starts returning `null` for 40% of the emails is green on every dashboard — every run completes, every step succeeds, nothing is slower. Profiling what nodes produce and comparing this month against last is a solved problem (KS, PSI); making it *quiet enough to read* is the work. | [DRIFT.md](./docs/DRIFT.md) |
 | **Scheduling** | The engine runs branches in parallel up to a cap, and everything else treated that cap as though it didn't exist: every timing analysis assumed a slot was always free, and the scheduler launched whichever ready node came first — declaration order. Under contention that choice *is* the run's duration. Ordering by upward rank is a fifty-year-old result whose bound holds whatever the estimates turn out to be. And the node that delayed yours is often a sibling holding a slot — a dependency with no edge, which nothing over the DAG can name. | [SCHEDULING.md](./docs/SCHEDULING.md) |
 | **Breakpoints** | Every other debugging tool here is a *record*, and none helps with *"why is this node about to send **that**?"* So the run stops — after the config resolves, before the runner fires — and you can change what it runs with. A breakpoint lives on the **run**, never the workflow, so a schedule tick has nowhere to hit one. | [ARCHITECTURE.md](./docs/ARCHITECTURE.md#breakpoints) |
@@ -147,12 +148,39 @@ status completed
   before the run, and every expression field has an **inline playground** to
   evaluate it against sample data. See [docs/EXPRESSIONS.md](./docs/EXPRESSIONS.md).
 - **Human-in-the-loop approvals** — drop an **Approval** gate anywhere in a
-  workflow: the run pauses, every workspace member is notified, and whoever
-  decides first routes the run down the approved or rejected branch — from the
-  dashboard's **Waiting on you** inbox, the run panel, a notification link,
-  the public API (dedicated `approve` token scope), or `flowforge approve` in
-  a terminal. Timeouts are configurable (reject the branch or fail the run),
-  and test runs auto-approve.
+  workflow: the run pauses, every workspace member is notified, and the decision
+  routes the run down the approved or rejected branch — from the dashboard's
+  **Waiting on you** inbox, the run panel, a notification link, the public API
+  (dedicated `approve` token scope), or `flowforge approve` in a terminal.
+  Timeouts are configurable (reject the branch or fail the run), and test runs
+  auto-approve. The default is one response from any member, which is right
+  until you look at what people actually put a gate in front of — a refund over
+  ten thousand, a production migration, a payout — where the requirement is
+  never that *a* human looked but that the **right** humans, **enough** of them,
+  and **not the person who asked**. So a gate can declare a **quorum** (N
+  distinct approvals — four-eyes), an **owner-only** requirement (a control any
+  member can wave through is a control the org doesn't have), and **separation
+  of duties** (whoever triggered the run can't approve it; without it the person
+  who wants the refund is one click from granting it). A **single rejection
+  settles the gate** whatever the quorum — the symmetric-looking alternative
+  means a lone reviewer who spots the problem has to recruit two colleagues
+  before the dangerous thing stops. **One person counts once**, enforced by a
+  `UNIQUE` index rather than a check-then-insert, because two simultaneous
+  clicks from one account both pass a check and a quorum somebody can satisfy
+  alone isn't a quorum. The gate is **stamped on the request when it's filed**,
+  so editing the canvas mid-wait can't change what the people looking at it were
+  told, and the audit trail records the gate that actually applied. A response is
+  **two writes** — a vote kept forever, and the verdict only when the votes
+  settle it — because `responded_by` holds whoever was *last*, which under
+  four-eyes is the least interesting name; a partial approval is logged too,
+  since if the request then times out it's the only record anybody approved it.
+  An unsettled vote returns **202**, so a bot treating every 2xx as "approved"
+  can't act on a half-met quorum. And the linter refuses a gate the workspace
+  **can never satisfy** — a quorum of four among three people, an owner-only gate
+  counted against owners, a quorum that separation of duties makes unreachable —
+  because an unsatisfiable gate doesn't fail, it *waits*, until a 3am timeout
+  that looks like nobody was paying attention. See
+  [docs/APPROVALS.md](./docs/APPROVALS.md).
 - **Machine-in-the-loop callbacks** — a **Wait for Callback** node pauses the
   run until an external system POSTs to its one-time URL, then routes down
   the received or timed-out branch with the delivered payload: async job
@@ -1416,7 +1444,7 @@ flowforge/
 ├── docs/          API reference, architecture deep dive, and one design record per hard part
 │                 (FXL, types, guarantees, paths, lineage, policies, merge, releases,
 │                  preview, provenance, rollback, durability, insights, scheduling,
-│                  drift)
+│                  drift, approvals)
 ├── docker-compose.yml
 ├── .env.example
 ├── .env.production.example

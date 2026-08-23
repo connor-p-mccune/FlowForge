@@ -1184,11 +1184,29 @@ curl -s -X POST https://your-flowforge-host/api/v1/approvals/a1b2…/respond \
   -d '{"decision": "approve", "note": "LGTM"}'
 ```
 
-Settles a pending gate; the paused run continues down the approved or
-rejected branch. Requires the dedicated **`approve` scope** — a token that
-can trigger runs cannot implicitly wave them through their own gates.
-Exactly one responder wins a race: the loser gets `409` with the verdict.
-`404` for unknown ids or non-members.
+Records a response on a pending gate. Requires the dedicated **`approve`
+scope** — a token that can trigger runs cannot implicitly wave them through
+its own gates. `404` for unknown ids or non-members.
+
+**Do not infer the decision from a 2xx.** A gate that declares a quorum may
+not settle on this response, so the outcome is in `progress`:
+
+```json
+{
+  "approval": { "id": "a1b2…", "status": "pending", "quorum": 3 },
+  "progress": { "settled": false, "status": "pending", "approvals": 1, "needed": 3 }
+}
+```
+
+| Status | Meaning |
+|---|---|
+| `200` | The gate settled — `progress.status` is `approved` or `rejected`, and the run has continued down that branch. |
+| `202` | The response was recorded and the gate is **still open**. A client treating every 2xx as "approved" would otherwise act on a half-met quorum. |
+| `403` | Refused, with `reason`: `viewer`, `role` (the gate requires an owner), or `separation-of-duties` (you started this run). |
+| `409` | Already settled (`reason` absent), or you have already responded (`reason: "already-responded"`, with the current `progress`). |
+
+A single **rejection** settles the gate whatever the quorum, and one person
+counts once. See [docs/APPROVALS.md](./APPROVALS.md).
 
 ### Deliver a callback to a waiting run
 
