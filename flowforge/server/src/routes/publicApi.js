@@ -20,6 +20,7 @@ const { requestCancel } = require('../services/executionControl')
 const { rollbackExecution } = require('../services/executionEngine')
 const { describeLineage, analyzeLineage, traceProvenance, traceImpact } = require('../services/lineage')
 const { verifyGuarantees, parseGuarantees } = require('../services/guarantees')
+const { parseWorkflow, formatWorkflow, DslError } = require('../services/workflowDsl')
 const { analyzePaths } = require('../services/pathConstraints')
 const { analyzeRegressions } = require('../services/regressions')
 const { previewDeploy } = require('../services/backtest')
@@ -233,7 +234,31 @@ router.post('/workspaces/:id/workflows/import', tokenAuth('manage'), (req, res) 
     // roles bound what its owner may do.
     if (forbidViewer(res, req.params.id, req.user.id)) return
 
-    const { name, graph_data: graphData } = req.body || {}
+    // A `.flow` document arrives as text under `flow` and is parsed into the
+    // same shape the JSON path produces, so everything below it — the size
+    // cap, the signature check, the guarantees — is one code path rather than
+    // two that have to be kept in agreement.
+    //
+    // A signature over a `.flow` file verifies for free: the format's emit
+    // order *is* the signing canonical order, so the parsed document
+    // canonicalises to exactly what was signed.
+    let body = req.body || {}
+    if (typeof body.flow === 'string') {
+      try {
+        body = { ...body, ...parseWorkflow(body.flow) }
+      } catch (err) {
+        if (err instanceof DslError) {
+          return res.status(400).json({
+            error: `Line ${err.line}: ${err.message}`,
+            line: err.line,
+            column: err.column,
+          })
+        }
+        throw err
+      }
+    }
+
+    const { name, graph_data: graphData } = body
     if (typeof name !== 'string' || name.trim() === '' || name.length > 200) {
       return res.status(400).json({ error: 'name is required (max 200 chars)' })
     }
@@ -257,7 +282,7 @@ router.post('/workspaces/:id/workflows/import', tokenAuth('manage'), (req, res) 
     // document changed after it was signed — while whether an *unsigned* import
     // is acceptable is the workspace's own policy.
     const workspace = db.prepare('SELECT * FROM workspaces WHERE id = ?').get(req.params.id)
-    const provenance = verifyImport(workspace, req.body)
+    const provenance = verifyImport(workspace, body)
     if (!provenance.allowed) {
       return res.status(403).json({
         error: provenance.reason,
@@ -265,7 +290,7 @@ router.post('/workspaces/:id/workflows/import', tokenAuth('manage'), (req, res) 
       })
     }
 
-    const guarantees = parseGuarantees(req.body.guarantees)
+    const guarantees = parseGuarantees(body.guarantees)
 
     const id = uuidv4()
     const now = new Date().toISOString()
@@ -718,7 +743,7 @@ router.get('/workflows/:id/export', tokenAuth('read'), (req, res) => {
     } catch {
       /* unparseable graph — export the empty shape rather than fail */
     }
-    res.json({
+    const document = {
       exportVersion: '1.0',
       name: workflow.name,
       description: workflow.description,
@@ -728,7 +753,18 @@ router.get('/workflows/:id/export', tokenAuth('read'), (req, res) => {
       // are the reason a reviewer approved it.
       guarantees: parseGuarantees(workflow.guarantees_json),
       exportedAt: new Date().toISOString(),
-    })
+    }
+
+    // `?format=flow` serves the reviewable text form instead of the JSON
+    // (services/workflowDsl). Served as text/plain rather than wrapped in a
+    // JSON field, because the entire point of the format is being a file in a
+    // repository — `flowforge export <id> --flow > sync.flow` should produce
+    // the file, not something that needs unwrapping first.
+    if (req.query.format === 'flow') {
+      res.type('text/plain').send(formatWorkflow(document))
+      return
+    }
+    res.json(document)
   } catch (err) {
     console.error(err)
     res.status(500).json({ error: 'Internal server error' })
