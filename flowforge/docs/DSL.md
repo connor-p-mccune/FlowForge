@@ -191,6 +191,26 @@ why the signature and the merge already exclude them.
 | `GET /api/v1/workflows/:id/export?format=flow` | `text/plain`, not JSON-wrapped — the point of the format is being a file in a repository. |
 | `POST /api/v1/workspaces/:id/workflows/import` | Accepts `{ flow: "…" }`, parsed into the same shape the JSON path produces so the size cap, the signature check and the guarantees stay one code path. |
 | `diff`, `lint`, `merge`, `preview` | Every endpoint and command that takes a **document** accepts either form. A `.flow` file that could be imported but not diffed, linted, merged or previewed would be a format nobody could adopt, so the resolution happens once, in front of all of them. |
+| **`</> Text` on the canvas** | The workflow as text, editable. See below. |
+| `PUT /api/workflows/:id/flow` | Replaces the workflow from its text form. Writes the *whole* document — name, description, guarantees, graph. |
+
+### Editing as text
+
+The canvas is for drawing; text is for surgery.
+
+Renaming twelve nodes, repointing five HTTP nodes at a new host, or reordering
+a switch's cases are each **one find-and-replace** in a text editor and twelve
+dialogs on a canvas. The second is why people give up and edit the database.
+
+Applying goes to the server, which parses and writes, and the canvas then
+reloads the result — the same shape as a merge or a version restore, and for
+the same reason: the collaboration layer sees one external change rather than a
+storm of synthetic edits, and there stays exactly one parser.
+
+A syntax error comes back with a line, a column and the offending source, and
+the panel **uses** all three: the frame is rendered under the box and the caret
+moves to the position. A position that is reported and not used is a position
+the reader has to count to.
 
 The Export menu in the app offers both, because they answer different
 questions: the JSON is what a machine consumes on the way back in, and the

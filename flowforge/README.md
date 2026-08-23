@@ -744,6 +744,17 @@ status completed
   import time in another environment. The round trip is tested as a property
   over 300 generated documents — `parse ∘ format` is the identity on semantics,
   *and* formatting is a fixed point, so a file can't churn on every pass.
+  And it's a first-class input everywhere, not just at import: `diff`, `lint`,
+  `merge` and `preview` all take it, because a format that could be promoted but
+  not checked is one nobody could adopt. The canvas gets a **`</> Text` panel**
+  too — the canvas is for drawing and text is for surgery, since renaming a
+  dozen nodes or repointing five HTTP nodes is one find-and-replace here and
+  twelve dialogs there. Applying goes through the server and the canvas reloads,
+  exactly as a merge or a restore does, so the collaboration layer sees one
+  external change rather than a storm of synthetic edits — and a syntax error
+  comes back with a line, a column and the offending source, all three of which
+  the panel *uses*: it renders the frame and moves the caret, because a position
+  reported and not used is a position the reader has to count to.
   `flowforge export <id> --flow`, `flowforge import <ws> sync.flow`, and
   `?format=flow` on the API. See [docs/DSL.md](./docs/DSL.md).
 - **Three-way merge** — drift detection tells you git and production diverged

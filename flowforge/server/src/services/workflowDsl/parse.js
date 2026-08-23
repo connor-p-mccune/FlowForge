@@ -154,8 +154,14 @@ function parseWorkflow(text) {
       if (!split) throw fail('A property must be `key: <json value>`', i)
       if (!split.key) throw fail('A property needs a name before the colon', i)
       const { value, nextIndex } = readValue(lines, i, split.rest, split.colon)
+      // Captured before `i` advances past a multi-line value: an unknown
+      // property is a mistake on the line the *key* is on, and reporting the
+      // last line of its JSON would send the reader to the wrong place.
+      const keyLine = i
       i = nextIndex
-      applyProperty(block, split.key, value, () => fail(`Unknown property "${split.key}"`, i))
+      applyProperty(block, split.key, value, () =>
+        fail(`Unknown property "${split.key}"`, keyLine)
+      )
       continue
     }
 

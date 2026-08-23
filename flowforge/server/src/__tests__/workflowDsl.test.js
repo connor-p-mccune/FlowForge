@@ -435,3 +435,17 @@ describe('the signature is invariant under formatting', () => {
     expect(canonicalPayload(back)).not.toBe(canonicalPayload(doc))
   })
 })
+
+describe('error positions point at the mistake', () => {
+  it('blames the key line, not the last line of its value', () => {
+    // The position is the product. Reporting the closing brace of a multi-line
+    // value would send the reader three lines past the typo.
+    try {
+      parse('workflow "W"\n  bogus: {\n    "a": 1\n  }\n')
+      throw new Error('expected a DslError')
+    } catch (err) {
+      expect(err.line).toBe(2)
+      expect(err.message).toMatch(/Unknown property "bogus"/)
+    }
+  })
+})
