@@ -35,6 +35,10 @@ function Origin({ origin }) {
 export default function LineagePanel({ workflowId, nodes, edges, selectedNodeId, onClose, onSelectNode }) {
   const [report, setReport] = useState(null) // whole-graph
   const [trace, setTrace] = useState(null) // per-node
+  // What a run can do and what gates it (services/effects.js). Lineage says
+  // where data *leaves*; this says under what conditions — the two halves of
+  // the question somebody has when they open this panel before a deploy.
+  const [effects, setEffects] = useState(null)
   const [error, setError] = useState(null)
 
   const load = useCallback(async () => {
@@ -51,6 +55,16 @@ export default function LineagePanel({ workflowId, nodes, edges, selectedNodeId,
       } else {
         setReport(res)
         setTrace(null)
+        // A second, independent read: an unavailable effect report must not
+        // hide the dataflow, and vice versa.
+        apiFetch(`/api/workflows/${workflowId}/effects`, {
+          method: 'POST',
+          body: serializeGraph(nodes, edges),
+        })
+          .then(setEffects)
+          .catch(() => {
+            /* best-effort in the panel */
+          })
       }
       if (res.ok === false) setError('The graph has a cycle — there is no dataflow to trace.')
     } catch (err) {
@@ -89,7 +103,7 @@ export default function LineagePanel({ workflowId, nodes, edges, selectedNodeId,
         )}
 
         {!error && !selectedNodeId && report?.ok && (
-          <GraphMap report={report} onSelectNode={onSelectNode} />
+          <GraphMap report={report} effects={effects} onSelectNode={onSelectNode} />
         )}
 
         {!selectedNodeId && (
@@ -188,7 +202,42 @@ function NodeTrace({ trace, onSelectNode }) {
   )
 }
 
-function GraphMap({ report, onSelectNode }) {
+// What a run can do to the outside world, and what has to be true first.
+//
+// The unconditional ones lead, because that is the sentence a reviewer needs
+// before any of the others: *this happens on every run*. It is also what a gate
+// somebody routed around looks like — an approval still drawn on the canvas
+// with a second trigger reaching past it — which is precisely the case worth
+// putting at the top rather than sorting alphabetically into the middle.
+function Effects({ effects, onSelectNode }) {
+  if (!effects?.available || effects.effects.length === 0) return null
+  return (
+    <>
+      <h3 className="lineage-section">What a run can do</h3>
+      <ul className="lineage-chain">
+        {effects.effects.map((e) => (
+          <li key={e.nodeId}>
+            <button className="lineage-link" onClick={() => onSelectNode(e.nodeId)}>
+              {e.label}
+            </button>
+            <span className={`lineage-sensitivity lineage-sensitivity--${e.always ? 'high' : 'low'}`}>
+              {e.kind}
+            </span>
+            <span className="lineage-chain__where">
+              {e.target || 'destination not fixed by the graph'}
+              {' — '}
+              {e.always
+                ? 'on every run'
+                : e.conditions.map((c) => `${c.label} = ${c.outcome}`).join(' and ')}
+            </span>
+          </li>
+        ))}
+      </ul>
+    </>
+  )
+}
+
+function GraphMap({ report, effects, onSelectNode }) {
   const secrets = Object.entries(report.secretReach || {})
   return (
     <>
@@ -210,6 +259,8 @@ function GraphMap({ report, onSelectNode }) {
           </ul>
         </>
       )}
+
+      <Effects effects={effects} onSelectNode={onSelectNode} />
 
       {report.sinks.length > 0 && (
         <>

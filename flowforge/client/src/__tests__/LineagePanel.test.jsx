@@ -168,3 +168,74 @@ describe('LineagePanel', () => {
     expect(await screen.findByText(/Nothing leaves this workflow/)).toBeInTheDocument()
   })
 })
+
+// Lineage says where data *leaves*; the effect report says under what
+// conditions. The two halves of the question somebody has open before a deploy,
+// which is why they share a panel.
+describe('LineagePanel — what a run can do', () => {
+  const EFFECTS = {
+    workflowId: 'wf1',
+    available: true,
+    effects: [
+      {
+        nodeId: 'score', label: 'Fraud score', type: 'ai-classify', kind: 'model',
+        target: 'gpt-4o-mini', always: true, conditions: [],
+      },
+      {
+        nodeId: 'charge', label: 'Charge card', type: 'action-http', kind: 'http',
+        target: 'api.acme.com', always: false,
+        conditions: [{ nodeId: 'approve', label: 'Approve', type: 'approval', outcome: 'true' }],
+      },
+    ],
+    decisions: [],
+    summary: { total: 2, unconditional: 1, gated: 1, dynamicTargets: 0 },
+  }
+
+  // Key on the path: the panel fires two independent reads, and a single
+  // mockResolvedValue would answer both with the same body.
+  const mockByPath = (effects = EFFECTS) => {
+    apiFetch.mockImplementation((path) =>
+      Promise.resolve(path.endsWith('/effects') ? effects : MAP)
+    )
+  }
+
+  it('lists each effect with what it reaches and what gates it', async () => {
+    mockByPath()
+    panel()
+    expect(await screen.findByText(/What a run can do/)).toBeInTheDocument()
+    expect(screen.getByText(/api\.acme\.com — Approve = true/)).toBeInTheDocument()
+  })
+
+  it('says plainly when something happens on every run', async () => {
+    // The sentence a reviewer needs before any of the others — and what a gate
+    // somebody routed around looks like.
+    mockByPath()
+    panel()
+    expect(await screen.findByText(/gpt-4o-mini — on every run/)).toBeInTheDocument()
+  })
+
+  it('names a destination the graph does not fix rather than guessing', async () => {
+    mockByPath({
+      ...EFFECTS,
+      effects: [{ ...EFFECTS.effects[0], target: null }],
+    })
+    panel()
+    expect(await screen.findByText(/destination not fixed by the graph/)).toBeInTheDocument()
+  })
+
+  it('renders the dataflow even when the effect report is unavailable', async () => {
+    mockByPath({ workflowId: 'wf1', available: false, reason: 'cycle' })
+    panel()
+    await waitFor(() => expect(screen.getByText(/built from the webhook payload/)).toBeInTheDocument())
+    expect(screen.queryByText(/What a run can do/)).not.toBeInTheDocument()
+  })
+
+  it('asks about the graph on screen, not the one that was saved', async () => {
+    mockByPath()
+    panel()
+    await screen.findByText(/What a run can do/)
+    const call = apiFetch.mock.calls.find(([path]) => path.endsWith('/effects'))
+    expect(call[1].method).toBe('POST')
+    expect(call[1].body.nodes.map((n) => n.id)).toEqual(['hook', 'charge'])
+  })
+})
