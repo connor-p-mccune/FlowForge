@@ -149,6 +149,40 @@ half missing — a promotion that dropped them would silently ship the workflow
 without the assertions that were the reason it passed review. Import accepts
 them back.
 
+#### `?format=flow` — the reviewable text form
+
+```bash
+curl -s "https://your-flowforge-host/api/v1/workflows/6f0c…/export?format=flow" \
+  -H "Authorization: Bearer $FLOWFORGE_TOKEN" > workflows/nightly-sync.flow
+```
+
+Returns `text/plain` — the same definition as the JSON above, in the form a
+human is actually going to read in a pull request:
+
+```
+workflow "Order pipeline"
+  description: "Handles incoming orders"
+
+guarantee requires charge approve
+
+node charge: action-http @ 480,160
+  label: "Charge card"
+  method: "POST"
+  url: "https://api.acme.com/v1/charges/{{hook.orderId}}"
+
+node hook: trigger-webhook @ 100,200
+  label: "Order webhook"
+
+hook -> charge
+```
+
+Nodes are sorted by id with their config beneath them, connections are gathered
+at the end, and there is **no `exportedAt`** — the field that makes `git diff` on
+an unchanged workflow non-empty. The emit order is the same canonical order the
+[signature](./PROVENANCE.md) uses, so re-formatting a file cannot break its
+signature and two people who export the same workflow get byte-identical text.
+See [docs/DSL.md](./DSL.md).
+
 Requires the `read` scope.
 
 ### Import a workflow
@@ -181,6 +215,31 @@ can't also fire runs, and vice versa. On the CLI:
 flowforge export 6f0c… > workflows/sync.json      # on staging
 flowforge import $PROD_WS workflows/sync.json     # on prod
 ```
+
+#### Importing the text form
+
+A `.flow` document is sent as a `flow` string and parsed server-side into the
+same shape, so the size cap, the signature check and the guarantees are one code
+path rather than two that have to be kept in agreement:
+
+```bash
+curl -s -X POST https://your-flowforge-host/api/v1/workspaces/a1b2…/workflows/import \
+  -H "Authorization: Bearer $FLOWFORGE_TOKEN" \
+  -H "Content-Type: application/json" \
+  --data-raw "$(jq -Rs '{flow: .}' workflows/nightly-sync.flow)"
+```
+
+A syntax error returns `400` with the position the parser found:
+
+```json
+{ "error": "Line 12: Value must be JSON — strings need quotes (\"POST\", not POST)",
+  "line": 12, "column": 11 }
+```
+
+A signature made over the JSON export **verifies against the text**, because the
+format's emit order is the signing canonical order. On the CLI,
+`flowforge import <ws> sync.flow` detects the form by extension and then by
+content. See [docs/DSL.md](./DSL.md).
 
 ### Detect drift against an exported document
 

@@ -63,8 +63,8 @@ Usage:
   flowforge workspaces                             List workspaces (import targets)
   flowforge audit <ws-id> [--verify] [--action <f>] Audit log + hash-chain verification (exits non-zero on a broken chain)
   flowforge search <query> [--limit N]             Find workflows by name or by what's inside them
-  flowforge export <workflow-id>                   Print the portable workflow JSON (pipe to a file)
-  flowforge import <workspace-id> <file> [--name]  Create a draft workflow from an exported file
+  flowforge export <workflow-id> [--flow]          Print the portable workflow JSON — or --flow for the reviewable text form (pipe to a file)
+  flowforge import <workspace-id> <file> [--name]  Create a draft workflow from an exported .json or .flow file
   flowforge keygen [--out <prefix>]                Mint an Ed25519 signing key pair (offline; never touches a server)
   flowforge sign <file> --key <private.key>        Sign an exported definition — or --check <public.pub> to verify one
   flowforge diff <workflow-id> <file>              Compare the live workflow against an exported file (exits non-zero on drift)

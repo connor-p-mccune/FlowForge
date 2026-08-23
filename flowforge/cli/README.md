@@ -42,9 +42,9 @@ export FLOWFORGE_TOKEN=ffp_…
 | Command | What it does |
 |---|---|
 | `flowforge workflows` | List workflows visible to the token (the ID column is what `trigger` takes) |
-| `flowforge export <id>` | Print the workflow's portable JSON to stdout — `flowforge export <id> > workflows/sync.json` checks it into git |
+| `flowforge export <id> [--flow]` | Print the workflow's portable JSON to stdout — `flowforge export <id> > workflows/sync.json` checks it into git. `--flow` writes the **reviewable text form** instead: nodes sorted with their config beneath them, connections gathered at the end, and no `exportedAt` — the field that makes `git diff` on an unchanged workflow non-empty ([docs](../docs/DSL.md)) |
 | `flowforge workspaces` | List workspaces visible to the token (the ID column is what `import` takes) |
-| `flowforge import <ws-id> <file> [--name "…"]` | Create a draft workflow from an exported file — promote definitions between environments (needs the `manage` scope) |
+| `flowforge import <ws-id> <file> [--name "…"]` | Create a draft workflow from an exported `.json` **or `.flow`** file — promote definitions between environments (needs the `manage` scope). A `.flow` file is sent as text and parsed server-side, so a syntax error comes back with the line it is on |
 | `flowforge keygen [--out <prefix>]` | Mint an Ed25519 signing key pair. **Offline** — it talks to no server ([docs](../docs/PROVENANCE.md)) |
 | `flowforge sign <file> --key <k>` | Sign an exported definition where the review happens; `--check <pub>` verifies one with no server, token, or trust in the pipeline |
 | `flowforge diff <id> <file>` | Compare the **live** workflow against an exported file — exits non-zero on drift, so CI catches the promotion someone forgot (or the hand-edit someone made) |

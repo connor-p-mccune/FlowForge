@@ -936,13 +936,36 @@ const spec = {
           'The workflow in the same portable, self-contained shape the app’s ' +
           'Export button downloads (no internal ids or ownership) — pipe it to ' +
           'a file and check it into version control. The document round-trips ' +
-          'through the app’s import. Requires the `read` scope.',
+          'through the app’s import.\n\n' +
+          '`?format=flow` returns the same definition as `text/plain` in the ' +
+          '**reviewable text form** instead: nodes sorted by id with their ' +
+          'config beneath them, connections gathered at the end, and no ' +
+          '`exportedAt` — the field that makes `git diff` on an unchanged ' +
+          'workflow non-empty. Its emit order is the signing canonical order, ' +
+          'so re-formatting cannot break a signature and two exports of one ' +
+          'workflow are byte-identical.\n\n' +
+          'Requires the `read` scope.',
         operationId: 'exportWorkflow',
-        parameters: [{ $ref: '#/components/parameters/WorkflowId' }],
+        parameters: [
+          { $ref: '#/components/parameters/WorkflowId' },
+          {
+            name: 'format',
+            in: 'query',
+            required: false,
+            schema: { type: 'string', enum: ['json', 'flow'] },
+            description: '`flow` serves the reviewable text form as text/plain.',
+          },
+        ],
         responses: {
           200: {
-            description: 'The portable workflow document.',
+            description: 'The portable workflow document, as JSON or as `.flow` text.',
             content: {
+              'text/plain': {
+                schema: { type: 'string' },
+                example:
+                  'workflow "Order pipeline"\n\nnode hook: trigger-webhook @ 100,200\n' +
+                  '  label: "Order webhook"\n\nhook -> charge\n',
+              },
               'application/json': {
                 schema: {
                   type: 'object',

@@ -23,6 +23,7 @@ problem sounds familiar.
 | **Path invariants** | Every static check asks about a *place* — this node's config, this value's shape. None could answer *"can this ever charge a card without the approval having run?"*, which is about a **path**. Turns out the engine's activation rule makes that question identical to graph dominance, so it's a solved compiler problem. Violations report the counterexample path. | [GUARANTEES.md](./docs/GUARANTEES.md) |
 | **Reaching a branch** | Every check here reasons about the *graph*, so a switch case sitting under a condition that already ruled it out is wired, typed, reachable and dead — and nothing says so. Asking whether an input exists is a solver question: difference logic, finite domains, DPLL(T). The solver returns a *model*, so the answer is also the payload that drives the branch — which is how the test suite gets generated. | [PATHS.md](./docs/PATHS.md) |
 | **Collaborative editing** | Last-write-wins on `Date.now()` meant whose laptop was fast decided whose edit survived, edits collided per *element* so two people editing different fields of one node lost half the work, and a dropped connection diverged **permanently**. Now a CRDT — commutative and idempotent, tested by applying every permutation of an operation set and asserting one document. | [ARCHITECTURE.md](./docs/ARCHITECTURE.md#real-time-collaboration) |
+| **Reviewing a definition** | The GitOps loop — drift detection, three-way merge, Ed25519 signing — is all built around a document a human reviews, and the document is JSON. Renaming a node is a diff nobody reads, the connections live in a flat array at the bottom of the file, and `exportedAt` means `git diff` on an *unchanged* workflow is never empty. A line-oriented text format fixes all three, and its emit order is the signature's canonical order, so re-formatting can't break a signature. | [DSL.md](./docs/DSL.md) |
 | **Approving a run** | "The run pauses until *a* member responds" is the right default and the wrong one for what people put gates in front of: a refund, a migration, a payout. The requirement is the right humans, enough of them, and not the person who asked. Quorum, owner-only, separation of duties — plus the parts that are easy to get wrong: one rejection settles it, one person counts once (a `UNIQUE` index, not a check), and the linter refuses a gate the workspace can never satisfy, because an unsatisfiable gate doesn't fail — it *waits*. | [APPROVALS.md](./docs/APPROVALS.md) |
 | **Watching the data** | Every monitor here watches *time* (percentiles, trend, change point) or *outcome* (success rate, error budget, heartbeat). None looks at a value. So a workflow whose upstream quietly starts returning `null` for 40% of the emails is green on every dashboard — every run completes, every step succeeds, nothing is slower. Profiling what nodes produce and comparing this month against last is a solved problem (KS, PSI); making it *quiet enough to read* is the work. | [DRIFT.md](./docs/DRIFT.md) |
 | **Scheduling** | The engine runs branches in parallel up to a cap, and everything else treated that cap as though it didn't exist: every timing analysis assumed a slot was always free, and the scheduler launched whichever ready node came first — declaration order. Under contention that choice *is* the run's duration. Ordering by upward rank is a fifty-year-old result whose bound holds whatever the estimates turn out to be. And the node that delayed yours is often a sibling holding a slot — a dependency with no edge, which nothing over the DAG can name. | [SCHEDULING.md](./docs/SCHEDULING.md) |
@@ -715,6 +716,36 @@ status completed
   workflow against the file and exits non-zero when they differ — the
   promotion someone forgot, or the hand-edit someone made in production —
   with node moves ignored, so only meaningful changes count.
+- **A workflow you can review (`.flow`)** — every part of that loop is built
+  around a document a human is supposed to **review**, and that document is a
+  JSON blob. Three things are wrong with it as a review artefact: renaming one
+  node is a diff nobody reads; the connections are a flat array at the *bottom*
+  of the file, hundreds of lines from the nodes they connect, so rewiring a
+  branch is four changed lines that give no clue what they mean; and every
+  export carries a fresh `exportedAt`, so **`git diff` on an unchanged workflow
+  is never empty** — which is the one thing a review artefact must never do. So
+  there's a text format, with a parser and a formatter: `workflow "…"`,
+  `node <id>: <type> @ x,y` with its config indented beneath it, `a -true-> b`
+  for the connections, gathered at the end. Three decisions carry it. It's
+  **line-oriented because diffs are** — unlike FXL next door, which is a real
+  lexer feeding a Pratt parser, this is parsed a line at a time on purpose,
+  because a grammar that spans lines produces hunks that span lines and the
+  whole point is that changing one thing changes one line. **Values are JSON**
+  (`"POST"`, not `POST`) — a small ugliness that buys total fidelity, because
+  config holds `{{templates}}`, quotes, newlines, JSON Schemas and regexes, and
+  inventing a second escaping scheme for those is how a format starts losing
+  data on the day somebody pastes something unusual. And **the emit order is the
+  signature's canonical order** — nodes by id, edges by endpoints and handle,
+  config keys sorted, the same rules the Ed25519 signing uses — so re-formatting
+  can't break a signature, two people who export the same workflow get
+  byte-identical text, and a signature made over the JSON verifies against the
+  `.flow` a reviewer was handed. The formatter **refuses rather than lies**: an
+  id it couldn't read back throws instead of emitting something that fails at
+  import time in another environment. The round trip is tested as a property
+  over 300 generated documents — `parse ∘ format` is the identity on semantics,
+  *and* formatting is a fixed point, so a file can't churn on every pass.
+  `flowforge export <id> --flow`, `flowforge import <ws> sync.flow`, and
+  `?format=flow` on the API. See [docs/DSL.md](./docs/DSL.md).
 - **Three-way merge** — drift detection tells you git and production diverged
   and then leaves you to pick which side's work to throw away: import the file
   and lose the live edit, or re-export and lose the reviewed change. A two-way
@@ -1470,7 +1501,7 @@ flowforge/
 ├── docs/          API reference, architecture deep dive, and one design record per hard part
 │                 (FXL, types, guarantees, paths, lineage, policies, merge, releases,
 │                  preview, provenance, rollback, durability, insights, scheduling,
-│                  drift, approvals)
+│                  drift, approvals, the .flow format)
 ├── docker-compose.yml
 ├── .env.example
 ├── .env.production.example
