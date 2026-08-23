@@ -40,8 +40,8 @@ problem sounds familiar.
 | **Promotion provenance** | `export → git → review → CI → import` passes a definition through four systems that can change it, and a `manage` token imports anything. So a document carries an Ed25519 signature — over the graph's *semantics*, not its bytes, because a signature that breaks when somebody drags a node is one people learn to skip. | [PROVENANCE.md](./docs/PROVENANCE.md) |
 | **Governance** | The linter asks "will this run?"; a policy asks "is this *allowed* here?". Rules are type-checked when saved, so one reading a misspelled field is refused rather than reporting every workflow compliant forever. | [POLICIES.md](./docs/POLICIES.md) |
 
-Everything above is covered by tests: **156 server suites (2199 tests)**, 61
-client files (576), 206 CLI tests, and 84 pytest tests for the AI service — lint
+Everything above is covered by tests: **159 server suites (2242 tests)**, 61
+client files (577), 219 CLI tests, and 84 pytest tests for the AI service — lint
 and all four run on every push.
 
 ---
