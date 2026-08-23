@@ -2,9 +2,9 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 
 import Sidebar from '../components/layout/Sidebar'
-import { apiFetch } from '../services/api'
+import { apiFetch, apiFetchText } from '../services/api'
 
-vi.mock('../services/api', () => ({ apiFetch: vi.fn() }))
+vi.mock('../services/api', () => ({ apiFetch: vi.fn(), apiFetchText: vi.fn() }))
 
 const { navigate } = vi.hoisted(() => ({ navigate: vi.fn() }))
 vi.mock('react-router-dom', () => ({
@@ -49,35 +49,61 @@ async function renderSidebar() {
 beforeEach(() => {
   vi.clearAllMocks()
   mockApi()
+  apiFetchText.mockResolvedValue('workflow "My Flow"\n\nnode n1: output-log @ 0,0\n')
 })
 
 describe('Sidebar workflow actions menu', () => {
-  it('opens a menu offering Rename, Export, and Delete', async () => {
+  it('opens a menu offering Rename, both exports, and Delete', async () => {
     await renderSidebar()
     fireEvent.click(screen.getByRole('button', { name: 'Workflow actions' }))
 
     expect(screen.getByRole('menuitem', { name: 'Rename' })).toBeInTheDocument()
-    expect(screen.getByRole('menuitem', { name: 'Export' })).toBeInTheDocument()
+    // Both forms are offered rather than one replacing the other: JSON is what
+    // a machine consumes, .flow is what a human reviews.
+    expect(screen.getByRole('menuitem', { name: 'Export JSON' })).toBeInTheDocument()
+    expect(screen.getByRole('menuitem', { name: 'Export .flow' })).toBeInTheDocument()
     expect(screen.getByRole('menuitem', { name: 'Delete' })).toBeInTheDocument()
   })
 
-  it('exports a workflow by downloading a JSON blob', async () => {
-    // Stub the browser download path (jsdom does not implement these).
+  // Stub the browser download path (jsdom does not implement these) and hand
+  // back the spies so a test can assert the file that would have been saved.
+  function stubDownload() {
     const createObjectURL = vi.fn(() => 'blob:mock')
     const revokeObjectURL = vi.fn()
     Object.defineProperty(URL, 'createObjectURL', { value: createObjectURL, configurable: true })
     Object.defineProperty(URL, 'revokeObjectURL', { value: revokeObjectURL, configurable: true })
     const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {})
+    return { createObjectURL, revokeObjectURL, click }
+  }
+
+  it('exports a workflow by downloading a JSON blob', async () => {
+    const { createObjectURL, revokeObjectURL, click } = stubDownload()
 
     await renderSidebar()
     fireEvent.click(screen.getByRole('button', { name: 'Workflow actions' }))
-    fireEvent.click(screen.getByRole('menuitem', { name: 'Export' }))
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Export JSON' }))
 
     await waitFor(() => expect(apiFetch).toHaveBeenCalledWith('/api/workflows/wf1/export'))
     expect(createObjectURL).toHaveBeenCalledTimes(1)
+    expect(createObjectURL.mock.calls[0][0].type).toBe('application/json')
     expect(click).toHaveBeenCalledTimes(1)
     expect(revokeObjectURL).toHaveBeenCalledWith('blob:mock')
 
+    click.mockRestore()
+  })
+
+  it('exports the reviewable text form as .flow', async () => {
+    const { createObjectURL, click } = stubDownload()
+
+    await renderSidebar()
+    fireEvent.click(screen.getByRole('button', { name: 'Workflow actions' }))
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Export .flow' }))
+
+    // Fetched as text, not JSON — the body *is* the file.
+    await waitFor(() =>
+      expect(apiFetchText).toHaveBeenCalledWith('/api/workflows/wf1/export?format=flow')
+    )
+    expect(createObjectURL.mock.calls[0][0].type).toBe('text/plain')
     click.mockRestore()
   })
 

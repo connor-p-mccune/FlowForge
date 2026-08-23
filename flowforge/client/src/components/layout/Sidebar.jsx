@@ -1,18 +1,18 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useNavigate, useParams, useLocation } from 'react-router-dom'
-import { apiFetch } from '../../services/api'
+import { apiFetch, apiFetchText } from '../../services/api'
 import Skeleton, { SkeletonRows } from '../Skeleton'
 import TemplateGallery from '../templates/TemplateGallery'
 import ImportWorkflowModal from '../workflows/ImportWorkflowModal'
 
 // Turn a workflow name into a safe download filename: "My Flow!" -> "my-flow.json".
-function exportFilename(name) {
+function exportFilename(name, extension = 'json') {
   const slug = (name || 'workflow')
     .trim()
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/^-+|-+$/g, '')
-  return `${slug || 'workflow'}.json`
+  return `${slug || 'workflow'}.${extension}`
 }
 
 export default function Sidebar({ open = false, onNavigate }) {
@@ -177,17 +177,27 @@ export default function Sidebar({ open = false, onNavigate }) {
     }
   }
 
-  // Fetch the workflow's portable export JSON and save it as a file download. The
-  // export endpoint returns JSON (not a file); the browser download happens here.
-  async function handleExport(workflow) {
+  // Fetch the workflow's portable export and save it as a file download. The
+  // export endpoint returns a document (not a file); the browser download
+  // happens here.
+  //
+  // `format` picks which document: the JSON that round-trips through import, or
+  // the `.flow` text form — the same definition in the shape somebody is going
+  // to read in a pull request. Both are offered rather than one replacing the
+  // other, because they answer different questions: JSON is what a machine
+  // consumes, `.flow` is what a human reviews.
+  async function handleExport(workflow, format = 'json') {
     setError(null)
     try {
-      const data = await apiFetch(`/api/workflows/${workflow.id}/export`)
-      const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' })
+      const isFlow = format === 'flow'
+      const body = isFlow
+        ? await apiFetchText(`/api/workflows/${workflow.id}/export?format=flow`)
+        : JSON.stringify(await apiFetch(`/api/workflows/${workflow.id}/export`), null, 2)
+      const blob = new Blob([body], { type: isFlow ? 'text/plain' : 'application/json' })
       const url = URL.createObjectURL(blob)
       const a = document.createElement('a')
       a.href = url
-      a.download = exportFilename(workflow.name)
+      a.download = exportFilename(workflow.name, isFlow ? 'flow' : 'json')
       document.body.appendChild(a)
       a.click()
       a.remove()
@@ -427,7 +437,15 @@ export default function Sidebar({ open = false, onNavigate }) {
                             className="sidebar__menu-item"
                             onClick={() => { setMenuOpenId(null); handleExport(wf) }}
                           >
-                            Export
+                            Export JSON
+                          </button>
+                          <button
+                            role="menuitem"
+                            className="sidebar__menu-item"
+                            title="The reviewable text form — what to put in a pull request"
+                            onClick={() => { setMenuOpenId(null); handleExport(wf, 'flow') }}
+                          >
+                            Export .flow
                           </button>
                           <button
                             role="menuitem"

@@ -18,6 +18,7 @@ const { ROLLBACK_POLICIES } = require('../services/compensation')
 const { POLICIES: RECOVERY_POLICIES } = require('../services/crashRecovery')
 const { describeLineage, analyzeLineage, traceProvenance, traceImpact } = require('../services/lineage')
 const { verifyGuarantees, parseGuarantees } = require('../services/guarantees')
+const { formatWorkflow } = require('../services/workflowDsl')
 const { analyzePaths } = require('../services/pathConstraints')
 const { previewDeploy } = require('../services/backtest')
 const { verifyImport } = require('../services/trustStore')
@@ -257,7 +258,7 @@ router.get('/workflows/:id/export', auth, (req, res) => {
     if (!workflow || !isMember(workflow.workspace_id, req.user.id)) {
       return res.status(404).json({ error: 'Workflow not found' })
     }
-    res.json({
+    const document = {
       exportVersion: '1.0',
       name: workflow.name,
       description: workflow.description,
@@ -269,7 +270,15 @@ router.get('/workflows/:id/export', auth, (req, res) => {
       // without the checks that were the reason it passed review.
       guarantees: parseGuarantees(workflow.guarantees_json),
       exportedAt: new Date().toISOString(),
-    })
+    }
+    // `?format=flow` serves the reviewable text form (services/workflowDsl),
+    // so the app's Export can hand somebody the file they will actually put in
+    // a pull request rather than the one they will have to translate.
+    if (req.query.format === 'flow') {
+      res.type('text/plain').send(formatWorkflow(document))
+      return
+    }
+    res.json(document)
   } catch (err) {
     console.error(err)
     res.status(500).json({ error: 'Internal server error' })
