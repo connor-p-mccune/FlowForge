@@ -36,7 +36,14 @@ function mockApi() {
 async function renderSidebar() {
   render(<Sidebar />)
   // Wait for the workflow row to load before interacting.
-  return screen.findByRole('button', { name: 'My Flow' })
+  //
+  // The generous timeout is deliberate rather than superstitious: the row
+  // appears only after a *chain* of two fetches (workspaces, then that
+  // workspace's workflows), so it needs two render passes rather than one.
+  // Testing Library's 1000ms default is enough on an idle machine and not
+  // enough when the whole suite is running in parallel, which made this the
+  // one test in the repo that failed on load and passed on its own.
+  return screen.findByRole('button', { name: 'My Flow' }, { timeout: 5000 })
 }
 
 beforeEach(() => {
