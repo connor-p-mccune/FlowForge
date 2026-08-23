@@ -20,6 +20,7 @@ const { describeLineage, analyzeLineage, traceProvenance, traceImpact } = requir
 const { verifyGuarantees, parseGuarantees } = require('../services/guarantees')
 const { formatWorkflow, parseWorkflow, DslError } = require('../services/workflowDsl')
 const { analyzeEffects } = require('../services/effects')
+const { analyzeConvergence } = require('../services/convergence')
 const { analyzePaths } = require('../services/pathConstraints')
 const { previewDeploy } = require('../services/backtest')
 const { verifyImport } = require('../services/trustStore')
@@ -1037,6 +1038,42 @@ router.post('/workflows/:id/effects', auth, (req, res) => {
     }
 
     res.json({ workflowId: workflow.id, ...analyzeEffects(graph) })
+  } catch (err) {
+    console.error(err)
+    res.status(500).json({ error: 'Internal server error' })
+  }
+})
+
+// POST /api/workflows/:id/convergence — where parallel branches collide, and
+// which of those collisions the graph itself resolves (services/convergence.js).
+//
+// Same body contract as its neighbours, and the same reason: the canvas asks
+// about the graph on screen. This one has a particular claim on being asked
+// live, because the answer changes the moment somebody draws a connection —
+// wiring a third branch into a join is exactly the edit that creates a
+// collision, and the author is more likely to accept the finding while their
+// hand is still on the mouse than in a lint report a week later.
+router.post('/workflows/:id/convergence', auth, (req, res) => {
+  try {
+    const workflow = db.prepare('SELECT * FROM workflows WHERE id = ?').get(req.params.id)
+    if (!workflow || !isMember(workflow.workspace_id, req.user.id)) {
+      return res.status(404).json({ error: 'Workflow not found' })
+    }
+
+    let graph
+    if (req.body && Array.isArray(req.body.nodes) && Array.isArray(req.body.edges)) {
+      if (req.body.nodes.length > 2000 || req.body.edges.length > 5000) {
+        return res.status(400).json({ error: 'Graph too large to analyse' })
+      }
+      graph = { nodes: req.body.nodes, edges: req.body.edges }
+    } else {
+      graph = parseGraphData(workflow.graph_json)
+    }
+
+    res.json({
+      workflowId: workflow.id,
+      ...analyzeConvergence(graph, { resolveWorkflow: graphResolver(workflow.workspace_id) }),
+    })
   } catch (err) {
     console.error(err)
     res.status(500).json({ error: 'Internal server error' })

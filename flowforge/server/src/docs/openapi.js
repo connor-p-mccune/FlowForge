@@ -1466,6 +1466,46 @@ const spec = {
         },
       },
     },
+    '/workflows/{workflowId}/convergence': {
+      get: {
+        tags: ['workflows'],
+        summary: 'Where parallel branches collide',
+        description:
+          'When several edges arrive at one node, the engine builds that ' +
+          'node’s input by assigning the upstream outputs over each other — so ' +
+          'if two branches both produce a `status`, exactly one survives.\n\n' +
+          'The merge order is derived from the graph rather than from how it ' +
+          'was stored: contributors are ranked by longest-path depth, so a node ' +
+          'downstream of another overrides it, and no storage layer can change ' +
+          'the answer. What this reports is the part no order can fix. Two ' +
+          'contributors at *different* depths are settled — `resolution: ' +
+          '"dataflow"` — because the deeper one ran later and saw the ' +
+          'shallower one’s value, which a reader can predict from the canvas. ' +
+          'Two at the *same* depth are genuinely concurrent, the graph is ' +
+          'silent, and the canonical edge sort breaks the tie alphabetically: ' +
+          '`resolution: "tie-break"`, and only a human can resolve it.\n\n' +
+          'Gate a pipeline on `summary.tieBroken`. Branches that can never both ' +
+          'run — a condition’s `true` and `false` handles wired into one join — ' +
+          'are not collisions and are never reported. Requires the `read` scope.',
+        operationId: 'getWorkflowConvergence',
+        parameters: [{ $ref: '#/components/parameters/WorkflowId' }],
+        responses: {
+          200: {
+            description:
+              'The convergence report, or `available: false` for an empty or cyclic graph.',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ConvergenceReport' },
+              },
+            },
+          },
+          401: { $ref: '#/components/responses/Unauthorized' },
+          403: { $ref: '#/components/responses/Forbidden' },
+          404: { $ref: '#/components/responses/NotFound' },
+          429: { $ref: '#/components/responses/RateLimited' },
+        },
+      },
+    },
     '/workflows/{workflowId}/lineage': {
       get: {
         tags: ['workflows'],
@@ -3040,6 +3080,93 @@ const spec = {
                 compared: { type: 'integer' },
                 findings: { type: 'array', items: { $ref: '#/components/schemas/DataDriftFinding' } },
               },
+            },
+          },
+        },
+      },
+      ConvergenceReport: {
+        type: 'object',
+        properties: {
+          workflowId: { type: 'string' },
+          available: { type: 'boolean' },
+          reason: { type: 'string', enum: ['empty', 'cycle'], nullable: true },
+          joins: {
+            type: 'array',
+            description: 'Nodes where two or more branches supply the same field.',
+            items: {
+              type: 'object',
+              properties: {
+                nodeId: { type: 'string' },
+                label: { type: 'string' },
+                type: { type: 'string', description: 'The node type.' },
+                arity: { type: 'integer', description: 'How many edges arrive here.' },
+                mergeOrder: {
+                  type: 'array',
+                  items: { type: 'string' },
+                  description:
+                    'The contributing node ids in the order the engine assigns them. ' +
+                    'Last wins.',
+                },
+                collisions: {
+                  type: 'array',
+                  items: {
+                    type: 'object',
+                    properties: {
+                      key: { type: 'string', description: 'The field two branches both supply.' },
+                      resolution: {
+                        type: 'string',
+                        enum: ['dataflow', 'tie-break'],
+                        description:
+                          '`dataflow` — the contributors sit at different depths, so the ' +
+                          'deeper one wins predictably. `tie-break` — they are concurrent, ' +
+                          'the graph does not decide, and the canonical edge sort does.',
+                      },
+                      decidedBy: {
+                        type: 'string',
+                        nullable: true,
+                        description:
+                          'The contributor whose value survives. Null when that itself ' +
+                          'depends on which branch ran.',
+                      },
+                      sameType: {
+                        type: 'boolean',
+                        description:
+                          'False when the contributors are differently shaped, which can ' +
+                          'change what a downstream expression is allowed to do.',
+                      },
+                      contributors: {
+                        type: 'array',
+                        items: {
+                          type: 'object',
+                          properties: {
+                            nodeId: { type: 'string' },
+                            label: { type: 'string' },
+                            handle: { type: 'string', nullable: true },
+                            depth: {
+                              type: 'integer',
+                              description: 'Longest-path depth — the merge rank.',
+                            },
+                            type: { type: 'string', description: 'The inferred field type.' },
+                          },
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+          summary: {
+            type: 'object',
+            properties: {
+              joins: { type: 'integer' },
+              collisions: { type: 'integer' },
+              tieBroken: {
+                type: 'integer',
+                description: 'The ones nobody can resolve by reading the canvas. Gate on this.',
+              },
+              dataflow: { type: 'integer', description: 'The ones the graph settles.' },
+              typeChanging: { type: 'integer' },
             },
           },
         },

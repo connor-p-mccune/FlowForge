@@ -22,6 +22,7 @@ const { describeLineage, analyzeLineage, traceProvenance, traceImpact } = requir
 const { verifyGuarantees, parseGuarantees } = require('../services/guarantees')
 const { parseWorkflow, formatWorkflow, DslError } = require('../services/workflowDsl')
 const { analyzeEffects } = require('../services/effects')
+const { analyzeConvergence } = require('../services/convergence')
 
 // Every endpoint that takes a workflow *document* accepts it in either form: as
 // the JSON export, or as `.flow` text under `flow`. Resolving it in one place
@@ -1198,6 +1199,34 @@ router.get('/workflows/:id/effects', tokenAuth('read'), (req, res) => {
       /* unparseable stored graph — describe an empty effect set */
     }
     res.json({ workflowId: workflow.id, ...analyzeEffects(graph) })
+  } catch (err) {
+    console.error(err)
+    res.status(500).json({ error: 'Internal server error' })
+  }
+})
+
+// GET /api/v1/workflows/:id/convergence — where parallel branches collide.
+//
+// The CI-shaped question is narrower than the report: "does this graph contain
+// a value that nothing decides?" A collision the graph settles is not a
+// finding — the deeper contributor ran later and wins predictably — so what a
+// pipeline gates on is `summary.tieBroken`, and the joins are there to say
+// where. Read-only and pure, so `read` is the whole authorisation story.
+router.get('/workflows/:id/convergence', tokenAuth('read'), (req, res) => {
+  try {
+    const workflow = getWorkflowForMember(req.params.id, req.user.id)
+    if (!workflow) return res.status(404).json({ error: 'Workflow not found' })
+    let graph = { nodes: [], edges: [] }
+    try {
+      const parsed = JSON.parse(workflow.graph_json)
+      graph = {
+        nodes: Array.isArray(parsed.nodes) ? parsed.nodes : [],
+        edges: Array.isArray(parsed.edges) ? parsed.edges : [],
+      }
+    } catch {
+      /* unparseable stored graph — describe an empty report */
+    }
+    res.json({ workflowId: workflow.id, ...analyzeConvergence(graph) })
   } catch (err) {
     console.error(err)
     res.status(500).json({ error: 'Internal server error' })
