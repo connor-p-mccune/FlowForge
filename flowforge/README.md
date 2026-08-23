@@ -243,6 +243,28 @@ status completed
   always ride the high lane (someone is watching), replays and resumes keep
   their original's lane, and a run deferred at a concurrency cap re-parks
   without being demoted.
+- **Fair queueing between workflows** — priority orders runs *between* lanes;
+  within a lane the queue is FIFO, and that is a hole one workflow can drive
+  through. Five thousand runs from a webhook sender caught in a retry loop, or a
+  for-each fan-out over a list that grew, puts five thousand jobs at the head of
+  the lane — and every other workflow's **next** run waits behind all of them.
+  Nothing is broken: the concurrency cap, the rate limit and the priority are
+  all respected. One tenant simply has the queue, and everybody else's
+  automation has stopped. Priority and fairness are different questions and only
+  the first was answered. The rule for the second is **max-min fairness** (what
+  deficit round robin approximates), and it is one sentence: *you may start a
+  run unless you are already more than a burst ahead of the workflow that has
+  had the fewest, in which case you wait for them.* Judged **within a lane** —
+  the load-bearing decision, because a high-priority run must never wait on a
+  normal-priority one, they aren't competing for the same thing. It costs
+  **nothing when uncontended** (the comparison is against workflows actually
+  deferred recently; with one workflow running there are none, and a fairness
+  control that taxed an idle system would be a latency regression sold as a
+  feature), it **never drops work** (an unfair job re-parks through the same
+  mechanism the concurrency cap uses, carrying its lane so it can't be silently
+  demoted), and it **never becomes starvation** — a job deferred past a bound is
+  admitted regardless, because a queue that is perfectly fair and never runs
+  your job is worse than one that is unfair.
 - **Concurrency limits** — cap how many runs of a workflow execute at once
   (singleton deploys, non-overlapping syncs) and choose the at-limit behavior:
   **queue** parks the run until a slot frees, **reject** refuses it with a
@@ -1272,6 +1294,10 @@ Copy `.env.example` to `.env` before running. **Never commit `.env`.**
 | `RETRY_BUDGET_MIN` | no | Retries always allowed regardless of the ratio, so a low-traffic host can still retry (default 10) |
 | `RETRY_BUDGET_WINDOW_MS` | no | Rolling window the retry ratio is measured over (default 60000) |
 | `DISABLE_RETRY_BUDGET` | no | `true` turns the retry budget off entirely |
+| `FAIR_SHARE_BURST` | no | How many runs ahead of the least-served waiting workflow one may get before it yields (default 4) |
+| `FAIR_SHARE_WINDOW_MS` | no | Rolling window fair-share admissions are counted over (default 10000) |
+| `FAIR_SHARE_MAX_DEFERRALS` | no | Deferrals after which a job is admitted regardless — fairness must not become starvation (default 20) |
+| `DISABLE_FAIR_SHARE` | no | `true` turns fair queueing off entirely |
 | `WEBHOOK_DISPATCH_INTERVAL_MS` | no | Outbound webhook delivery-queue poll interval (default 5000) |
 | `EXECUTION_RETENTION_DAYS` | no | Prune terminal runs older than this many days (default: keep forever) |
 | `SLA_SUCCESS_RATE_WINDOW` | no | Runs in the rolling success-rate window for SLA monitoring (default 20) |

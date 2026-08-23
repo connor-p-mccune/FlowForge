@@ -820,6 +820,52 @@ deferral never silently demotes a high-lane run. An invalid explicit lane is
 a 400 at the door, while an invalid *stored* default quietly resolves to
 `normal` — a corrupt row must not break runs.
 
+### Fairness between workflows
+
+Priority orders runs *between* lanes. Within a lane Bull is FIFO, and that is
+a hole a single workflow can drive through: five thousand runs from one
+webhook sender caught in a retry loop, or a for-each fan-out over a list that
+grew, puts five thousand jobs at the head of the lane, and every other
+workflow's **next** run waits behind all of them. Nothing is broken — the
+concurrency cap, the rate limit and the priority are all respected. One tenant
+simply has the queue.
+
+`services/fairShare.js` answers the second question, and it is a different
+question. The rule is **max-min fairness** — what deficit round robin
+approximates — expressible in a sentence:
+
+> You may start a run unless you are already more than `burst` runs ahead of
+> the workflow that has had the fewest, in which case you wait for them.
+
+- **Judged within a lane.** The load-bearing scoping decision: a high-priority
+  run must never wait on a normal-priority one, because they are not competing
+  for the same thing. The worker recovers the lane from the Bull priority the
+  job was enqueued with (`runPriority.levelOf`), since by pickup time that is
+  the only place it survives.
+- **Free when uncontended.** The comparison is against workflows *actually
+  deferred recently*. With one workflow running, that set is empty and the
+  check passes trivially. A fairness control that taxed an idle system would
+  be a latency regression sold as a feature — and a contender set that only
+  grew would eventually make every workflow look starved by one that went
+  home, so entries age out with the window.
+- **Never drops work.** An unfair job is re-parked through exactly the
+  mechanism the concurrency cap uses, carrying its lane forward.
+- **Never becomes starvation.** A job deferred past `FAIR_SHARE_MAX_DEFERRALS`
+  is admitted regardless. A queue that is perfectly fair and never runs your
+  job is worse than one that is unfair; the bound makes the worst case a delay
+  rather than a hang.
+
+Two ordering details. The fairness check runs **before** the concurrency cap,
+because it is the cheaper refusal and a job held for fairness has not taken a
+slot it would then have to give back. And a start is recorded only once the
+run is genuinely starting, so a run turned away by the cap does not spend its
+workflow's share of a queue it never entered.
+
+In-memory per process, like the metrics registry and the retry budget. A
+fair-share counter that needed consensus between workers would be a
+distributed systems problem bolted onto a scheduling heuristic; each worker is
+fair about the traffic it is deciding. `DISABLE_FAIR_SHARE=true` turns it off.
+
 ---
 
 ## Outbound webhooks
