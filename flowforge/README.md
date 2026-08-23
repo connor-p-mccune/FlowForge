@@ -42,8 +42,13 @@ problem sounds familiar.
 | **Governance** | The linter asks "will this run?"; a policy asks "is this *allowed* here?". Rules are type-checked when saved, so one reading a misspelled field is refused rather than reporting every workflow compliant forever. | [POLICIES.md](./docs/POLICIES.md) |
 
 Everything above is covered by tests: **161 server suites (2282 tests)**, 62
-client files (586), 231 CLI tests, and 84 pytest tests for the AI service — lint
+client files (591), 231 CLI tests, and 84 pytest tests for the AI service — lint
 and all four run on every push.
+
+Each of those links is a design record, written the same way: what the obvious
+implementation gets wrong, the design that fixes it, and the limits stated
+rather than oversold. [**docs/README.md**](./docs/README.md) maps all twenty by
+the problem they solve.
 
 ---
 
