@@ -949,3 +949,107 @@ describe('approval gates', () => {
     expect(codes(gate({ quorum: 40 }))).toEqual([])
   })
 })
+
+// Two branches converging on one node, both supplying the same field. The
+// engine assigns them over each other, so one wins — and the finding exists
+// only where the *graph* does not say which.
+describe('converging branches', () => {
+  const at = (graph) => lintGraph(graph).filter((i) => i.code === 'converging-field')
+
+  const diamond = (extra = {}) => ({
+    nodes: [
+      node('t1', 'trigger-manual'),
+      node('alpha', 'action-http', { url: 'https://a.example.com' }, 'Fetch A'),
+      node('beta', 'action-http', { url: 'https://b.example.com' }, 'Fetch B'),
+      node('join', 'output-log', { message: 'x' }, 'Log'),
+      ...(extra.nodes || []),
+    ],
+    edges: [
+      edge('t1', 'alpha'),
+      edge('t1', 'beta'),
+      edge('alpha', 'join'),
+      edge('beta', 'join'),
+      ...(extra.edges || []),
+    ],
+  })
+
+  it('warns when nothing in the graph decides which branch wins', () => {
+    const found = at(diamond())
+    expect(found.length).toBeGreaterThan(0)
+    expect(found[0].severity).toBe('warning')
+    expect(found[0].nodeId).toBe('join')
+  })
+
+  it('names both contributors and the field they collide on', () => {
+    const found = at(diamond()).find((i) => i.message.includes('"status"'))
+    expect(found.message).toMatch(/Fetch A and Fetch B both supply "status"/)
+  })
+
+  it('says the winner was picked alphabetically, because that is the whole point', () => {
+    const found = at(diamond()).find((i) => i.message.includes('"status"'))
+    expect(found.message).toMatch(/Fetch B does, on alphabetical order alone/)
+  })
+
+  it('stays silent when the graph does decide', () => {
+    // `early → late → join` and `early → join`: late ran after early and saw
+    // its value. Predictable from the canvas, so there is nothing to report.
+    const graph = {
+      nodes: [
+        node('t1', 'trigger-manual'),
+        node('early', 'action-http', { url: 'https://a.dev' }, 'Early'),
+        node('late', 'action-http', { url: 'https://b.dev' }, 'Late'),
+        node('join', 'output-log', { message: 'x' }, 'Log'),
+      ],
+      edges: [
+        edge('t1', 'early'),
+        edge('early', 'late'),
+        edge('early', 'join'),
+        edge('late', 'join'),
+      ],
+    }
+    expect(at(graph)).toEqual([])
+  })
+
+  it('stays silent on the join every canvas has', () => {
+    // A condition with both handles wired into one node. Exactly one activates,
+    // so nothing is ever assigned over anything.
+    const graph = {
+      nodes: [
+        node('t1', 'trigger-manual'),
+        node('check', 'condition', { expression: 'amount > 100' }, 'Large?'),
+        node('big', 'action-http', { url: 'https://a.dev' }, 'Big'),
+        node('small', 'action-http', { url: 'https://b.dev' }, 'Small'),
+        node('join', 'output-log', { message: 'x' }, 'Log'),
+      ],
+      edges: [
+        edge('t1', 'check'),
+        edge('check', 'big', 'true'),
+        edge('check', 'small', 'false'),
+        edge('big', 'join'),
+        edge('small', 'join'),
+      ],
+    }
+    expect(at(graph)).toEqual([])
+  })
+
+  it('calls out contributors that are differently shaped', () => {
+    const graph = {
+      nodes: [
+        node('t1', 'trigger-manual'),
+        node('alpha', 'transform', { template: '{"id": "abc"}' }, 'A'),
+        node('beta', 'transform', { template: '{"id": 7}' }, 'B'),
+        node('join', 'output-log', { message: 'x' }, 'Log'),
+      ],
+      edges: [edge('t1', 'alpha'), edge('t1', 'beta'), edge('alpha', 'join'), edge('beta', 'join')],
+    }
+    expect(at(graph)[0].message).toMatch(/differently shaped/)
+  })
+
+  it('leaves a graph with no joins completely alone', () => {
+    const graph = {
+      nodes: [node('t1', 'trigger-manual'), node('a', 'action-http', { url: 'https://x.dev' })],
+      edges: [edge('t1', 'a')],
+    }
+    expect(at(graph)).toEqual([])
+  })
+})

@@ -24,6 +24,7 @@ const { compensationPlan } = require('./compensation')
 const { analyzeLineage } = require('./lineage')
 const { guaranteeIssues } = require('./guarantees')
 const { pathIssues } = require('./pathConstraints')
+const { analyzeConvergence } = require('./convergence')
 
 const PLACEHOLDER = /\{\{\s*([\w-]+(?:\.[\w-]+)*)\s*\}\}/g
 
@@ -1077,6 +1078,45 @@ function lintGraph({ nodes: rawNodes = [], edges: rawEdges = [] } = {}, { secret
     issues.push(...pathIssues({ nodes: rawNodes, edges: rawEdges }))
   } catch (err) {
     console.error(`Path feasibility analysis failed: ${err.message}`)
+  }
+
+  // Converging branches (services/convergence.js). Every pass above reasons
+  // about one node's config or about the graph's shape; this one reasons about
+  // what happens when several branches arrive at the same node and their
+  // outputs are assigned over each other.
+  //
+  // Reported only where the *graph* does not decide it. Two contributors at
+  // different dataflow depths are settled — the deeper one ran later and saw
+  // the shallower one's value, and a reader can predict that from the canvas.
+  // Two at the same depth are genuinely concurrent, so the canonical edge sort
+  // breaks the tie alphabetically, which is deterministic and is not an opinion
+  // about the workflow. Only a human can say which branch should win.
+  //
+  // A warning, not an error: two branches converging on a shared field is a
+  // legitimate shape when the author knows one of them supersedes the other.
+  // The finding says the graph does not record which.
+  try {
+    const report = analyzeConvergence({ nodes: rawNodes, edges: rawEdges }, { resolveWorkflow })
+    for (const join of report.joins || []) {
+      for (const found of join.collisions) {
+        if (found.resolution !== 'tie-break') continue
+        const names = found.contributors.map((c) => c.label).join(' and ')
+        const winner = found.contributors.find((c) => c.nodeId === found.decidedBy)
+        issues.push(
+          issue(
+            'warning',
+            'converging-field',
+            `${join.label}: ${names} both supply "${found.key}", and nothing in the graph says ` +
+              `which should win` +
+              (winner ? ` — ${winner.label} does, on alphabetical order alone` : '') +
+              (found.sameType ? '' : `. They are differently shaped`),
+            join.nodeId
+          )
+        )
+      }
+    }
+  } catch (err) {
+    console.error(`Convergence analysis failed: ${err.message}`)
   }
 
   const rank = { error: 0, warning: 1 }

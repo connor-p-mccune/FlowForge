@@ -654,7 +654,11 @@ function inferGraphTypes(
     checkReferences(node, { outputs, nodeIds, diagnostics })
   }
 
-  return { order, inputs, outputs, diagnostics }
+  // `outputs` is what a `{{node.field}}` reference sees; `normalOutputs` is what
+  // a non-error edge actually carries, and the two differ on a catching node.
+  // Convergence analysis needs the second — a phantom collision on `failed`
+  // between two nodes that both merely *could* fail is not a collision at all.
+  return { order, inputs, outputs, normalOutputs, diagnostics }
 }
 
 // The engine reads a node's on-error policy from its *raw* config (upstream
