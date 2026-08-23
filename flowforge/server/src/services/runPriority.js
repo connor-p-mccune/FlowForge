@@ -42,4 +42,17 @@ function enqueueOpts(level) {
   return { priority: BULL_PRIORITY[level] ?? BULL_PRIORITY.normal }
 }
 
-module.exports = { LEVELS, isValidPriority, resolvePriority, enqueueOpts }
+// The level a Bull job's numeric priority came from — the inverse of
+// enqueueOpts. The worker needs it because fairness between workflows is judged
+// *within* a lane (services/fairShare.js), and by the time a job is picked up
+// the level exists only as the number it was enqueued with. Unknown numbers map
+// to 'normal', so a job enqueued by an older build is grouped rather than given
+// a lane of its own.
+function levelOf(bullPriority) {
+  for (const [level, value] of Object.entries(BULL_PRIORITY)) {
+    if (value === bullPriority) return level
+  }
+  return 'normal'
+}
+
+module.exports = { LEVELS, isValidPriority, resolvePriority, enqueueOpts, levelOf }

@@ -4,6 +4,8 @@ const { runExecution } = require('../services/executionEngine')
 const { createNotification } = require('../services/notificationService')
 const { acquireSlot, releaseSlot } = require('../services/concurrencyGate')
 const { recordRunDeferred } = require('../services/metrics')
+const fairShare = require('../services/fairShare')
+const { levelOf } = require('../services/runPriority')
 const { evaluateRun } = require('../services/slaMonitor')
 const { triggerErrorHandler } = require('../services/errorHandler')
 const db = require('../config/database')
@@ -78,6 +80,32 @@ function startWorker() {
     // the job's Bull priority forward — deferral must not silently demote a
     // high-lane run to the back of the normal queue.
     const gated = !dryRun && Boolean(workflowId)
+
+    // Fair queueing between workflows (services/fairShare.js), checked first
+    // because it is the cheaper refusal and because a run held for fairness has
+    // not consumed a concurrency slot it would then have to give back.
+    //
+    // Priority lanes order runs *between* lanes; within a lane the queue is
+    // FIFO, so a workflow that submits five thousand runs is ahead of
+    // everybody else's next one for as long as that takes. Fairness is judged
+    // within the lane for exactly that reason — a high-priority run must never
+    // wait on a normal-priority one.
+    const lane = levelOf(job.opts?.priority)
+    if (gated) {
+      const share = fairShare.admit(workflowId, { lane, deferrals: job.data.fairDeferrals || 0 })
+      if (!share.allowed) {
+        fairShare.recordDeferred(workflowId, lane)
+        await queue.add(
+          { ...job.data, fairDeferrals: (job.data.fairDeferrals || 0) + 1 },
+          {
+            delay: DEFER_DELAY_MS,
+            ...(job.opts?.priority != null ? { priority: job.opts.priority } : {}),
+          }
+        )
+        return
+      }
+    }
+
     if (gated && !acquireSlot(workflowId)) {
       recordRunDeferred()
       await queue.add(job.data, {
@@ -86,6 +114,10 @@ function startWorker() {
       })
       return
     }
+    // Counted only once the run is genuinely starting, so a run turned away by
+    // the concurrency cap does not spend its workflow's share of a queue it
+    // never entered.
+    if (gated) fairShare.recordStart(workflowId, lane)
 
     try {
       await runExecution(executionId, { payload, dryRun })
