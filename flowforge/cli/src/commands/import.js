@@ -16,20 +16,77 @@
 // approved?". The server reports its verdict and this prints it.
 
 const fs = require('fs')
-const { bold, gray, green, yellow, cyan } = require('../format')
+const { bold, gray, green, yellow, cyan, red } = require('../format')
+
+// Report what the server made of the import, shared by both file forms.
+function reportImport(ctx, { workflow, provenance }) {
+  ctx.log(`Imported ${bold(workflow.name)} as a draft.`)
+  ctx.log(gray(`id: ${workflow.id} — review and deploy it in the app.`))
+  if (!provenance) return 0
+  if (provenance.status === 'trusted') {
+    ctx.log(
+      green(
+        `✓ signed by ${provenance.signedBy?.name || 'a trusted key'} ` +
+          `(${provenance.signedBy?.fingerprint})`
+      )
+    )
+  } else {
+    ctx.log(gray(`signature: ${provenance.status}`))
+  }
+  ctx.log(gray(`digest: ${cyan(provenance.digest)}`))
+  return 0
+}
+
+// A `.flow` file: the text goes over as-is. --name is not offered here because
+// the name is a line in the file — editing it there is the diff a reviewer
+// wants to see, rather than a flag nothing records.
+async function importFlow(args, ctx, { workspaceId, raw }) {
+  if (args.flags.name) {
+    ctx.log(yellow('--name is ignored for a .flow file — edit the `workflow "…"` line instead.'))
+  }
+  try {
+    const response = await ctx.api.post(`/api/v1/workspaces/${workspaceId}/workflows/import`, {
+      flow: raw,
+    })
+    return reportImport(ctx, response)
+  } catch (err) {
+    // A syntax error arrives as "Line 12: …". Surfacing it verbatim keeps the
+    // position the parser found, which is the whole reason the format is text.
+    ctx.log(red(err.message))
+    return 1
+  }
+}
 
 module.exports = async function importWorkflow(args, ctx) {
   const [workspaceId, file] = args.positionals
   if (!workspaceId || !file) {
-    ctx.log('Usage: flowforge import <workspace-id> <file.json> [--name "New name"]')
+    ctx.log('Usage: flowforge import <workspace-id> <file.json|file.flow> [--name "New name"]')
     return 1
+  }
+
+  let raw
+  try {
+    raw = fs.readFileSync(file, 'utf8')
+  } catch (err) {
+    ctx.log(`Could not read "${file}": ${err.message}`)
+    return 1
+  }
+
+  // A `.flow` file is sent as text and parsed server-side, so the CLI never
+  // needs a second copy of the grammar — and a syntax error comes back with the
+  // line number the server found it on rather than one this had to re-derive.
+  // Detected by extension, then by content, so a file named anything at all
+  // still imports if it is obviously one or the other.
+  const isFlow = /\.flow$/i.test(file) || (!raw.trimStart().startsWith('{') && /^\s*workflow\s+"/m.test(raw))
+  if (isFlow) {
+    return importFlow(args, ctx, { workspaceId, raw })
   }
 
   let doc
   try {
-    doc = JSON.parse(fs.readFileSync(file, 'utf8'))
+    doc = JSON.parse(raw)
   } catch (err) {
-    ctx.log(`Could not read "${file}": ${err.message}`)
+    ctx.log(`Could not parse "${file}": ${err.message}`)
     return 1
   }
   const name = args.flags.name || doc.name
@@ -56,22 +113,5 @@ module.exports = async function importWorkflow(args, ctx) {
     ...(doc.signature ? { signature: doc.signature } : {}),
   })
 
-  const { workflow, provenance } = response
-  ctx.log(`Imported ${bold(workflow.name)} as a draft.`)
-  ctx.log(gray(`id: ${workflow.id} — review and deploy it in the app.`))
-
-  if (provenance) {
-    if (provenance.status === 'trusted') {
-      ctx.log(
-        green(
-          `✓ signed by ${provenance.signedBy?.name || 'a trusted key'} ` +
-            `(${provenance.signedBy?.fingerprint})`
-        )
-      )
-    } else {
-      ctx.log(gray(`signature: ${provenance.status}`))
-    }
-    ctx.log(gray(`digest: ${cyan(provenance.digest)}`))
-  }
-  return 0
+  return reportImport(ctx, response)
 }

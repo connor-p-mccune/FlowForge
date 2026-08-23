@@ -49,8 +49,33 @@ function createClient({ baseUrl, token }) {
     return data
   }
 
+  // A plain-text GET, for the endpoints whose body is a document rather than a
+  // record — `?format=flow` is the only one so far. Kept separate from `get`
+  // rather than sniffing the content type, so a caller expecting an object
+  // never silently receives a string.
+  async function requestText(path) {
+    let res
+    try {
+      res = await fetch(`${baseUrl}${path}`, { headers: { Authorization: `Bearer ${token}` } })
+    } catch (err) {
+      throw new ApiError(`Could not reach ${baseUrl}: ${err.cause?.message || err.message}`)
+    }
+    const text = await res.text()
+    if (!res.ok) {
+      let message = `Request failed with HTTP ${res.status}`
+      try {
+        message = JSON.parse(text).error || message
+      } catch {
+        /* the body was not the usual { error } shape */
+      }
+      throw new ApiError(message, res.status)
+    }
+    return text
+  }
+
   return {
     get: (path) => request('GET', path),
+    getText: requestText,
     post: (path, body, headers) => request('POST', path, body, headers),
   }
 }
