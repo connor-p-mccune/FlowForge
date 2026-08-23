@@ -33,6 +33,7 @@ const nodePriority = require('./nodePriority')
 const stepTimings = require('./stepTimings')
 const scheduleSim = require('./scheduleSim')
 const retryBudget = require('./retryBudget')
+const convergence = require('./convergence')
 
 const runners = {
   'action-http': require('./nodeRunners/httpRequest'),
@@ -760,6 +761,24 @@ async function runLeasedExecution(
   for (const e of edges) {
     if (incomingByNode[e.target]) incomingByNode[e.target].push(e)
   }
+
+  // Sorted once, here, because a node's input is `Object.assign` over these and
+  // that is last-writer-wins: the order of this array decides which of two
+  // converging branches supplies a colliding field.
+  //
+  // Left as insertion order, that would be the order the author drew the
+  // connections — invisible on the canvas, and rewritten differently by every
+  // storage path the graph can take (a collab session sorts edges by id, the
+  // `.flow` format and the artifact signature by source/target, a plain save
+  // keeps the array). The same graph would then compute a different value
+  // depending on how it was last written, with every check still green.
+  //
+  // `contributionOrder` derives the order from the graph instead: deeper
+  // contributor wins, since it ran later and saw the shallower one's value.
+  // Everything else that reads these lists asks `.every` or `.length`, so this
+  // is the only place the order is observable.
+  const mergeOrder = convergence.contributionOrder(nodes, edges)
+  for (const nodeId of order) incomingByNode[nodeId].sort(mergeOrder)
 
   // Upstream edges whose source succeeded and — for condition sources — whose
   // handle matches the branch the condition took. Only meaningful once every
