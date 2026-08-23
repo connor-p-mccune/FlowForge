@@ -10,6 +10,7 @@ const crypto = require('crypto')
 const bcrypt = require('bcrypt')
 const speakeasy = require('speakeasy')
 const QRCode = require('qrcode')
+const { rounds: bcryptRounds } = require('./passwordHash')
 
 const ISSUER = process.env.TOTP_ISSUER || 'FlowForge'
 const BACKUP_CODE_COUNT = 8
@@ -17,7 +18,6 @@ const BACKUP_CODE_LENGTH = 10
 // Uppercase letters + digits. Generated codes are uppercase, and verification
 // upper-cases user input, so the codes are effectively case-insensitive to type.
 const BACKUP_CODE_CHARS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'
-const BCRYPT_ROUNDS = 10
 // Allow ±1 time step (±30s) so a code entered near a step boundary still verifies.
 const VERIFY_WINDOW = 1
 
@@ -69,7 +69,7 @@ function generateBackupCodes() {
 async function hashBackupCodes(codes) {
   const hashed = []
   for (const code of codes) {
-    hashed.push({ hash: await bcrypt.hash(code, BCRYPT_ROUNDS), used: false })
+    hashed.push({ hash: await bcrypt.hash(code, bcryptRounds()), used: false })
   }
   return hashed
 }

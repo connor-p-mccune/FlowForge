@@ -5,6 +5,7 @@ const { v4: uuidv4 } = require('uuid')
 const db = require('../config/database')
 const auth = require('../middleware/auth')
 const twoFactor = require('../services/twoFactor')
+const { rounds: bcryptRounds } = require('../services/passwordHash')
 const { validate, EMAIL_PATTERN } = require('../middleware/validate')
 const { loginLimiter, registerLimiter } = require('../middleware/rateLimit')
 
@@ -61,7 +62,7 @@ router.post(
       return res.status(409).json({ error: 'Email already in use' })
     }
 
-    const passwordHash = await bcrypt.hash(password, 10)
+    const passwordHash = await bcrypt.hash(password, bcryptRounds())
     const userId = uuidv4()
     const now = new Date().toISOString()
 
