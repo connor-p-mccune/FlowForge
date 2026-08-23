@@ -851,6 +851,51 @@ gates a build on it. See [docs/DRIFT.md](./DRIFT.md).
 
 Requires the `read` scope.
 
+### What a run can do
+
+```bash
+curl -s https://your-flowforge-host/api/v1/workflows/6f0c…/effects   -H "Authorization: Bearer $FLOWFORGE_TOKEN"
+```
+
+Every node that reaches outside FlowForge or costs money, with the **decisions
+it is control-dependent on** — the question a promotion review opens with.
+
+```json
+{
+  "workflowId": "6f0c…",
+  "available": true,
+  "effects": [
+    { "nodeId": "score", "label": "Fraud score", "kind": "model",
+      "target": "gpt-4o-mini", "always": true, "conditions": [] },
+    { "nodeId": "charge", "label": "Charge card", "kind": "http",
+      "target": "api.acme.com", "always": false,
+      "conditions": [
+        { "nodeId": "risky", "label": "High risk?", "type": "condition", "outcome": "false" },
+        { "nodeId": "approve", "label": "Approve", "type": "approval", "outcome": "true" }
+      ] }
+  ],
+  "decisions": [
+    { "nodeId": "approve", "label": "Approve", "type": "approval",
+      "outcomes": [ { "name": "true", "gates": ["charge"] }, { "name": "false", "gates": [] } ] }
+  ],
+  "summary": { "total": 2, "unconditional": 1, "gated": 1, "dynamicTargets": 0 }
+}
+```
+
+An effect requires outcome `o` of decision `D` when `D` **dominates** it *and*
+exactly one of `D`'s outcomes leads to it. Both halves matter: without the
+first, a gate that a second trigger routes around would still be reported as a
+gate. `always: true` means no decision gates it — which is a legitimate design
+*and* what a routed-around gate looks like, so `flowforge effects --ungated` is
+opt-in rather than a default.
+
+`decisions` is the same analysis backwards: for each outcome, which effects it
+gates — *if this approval rejects, what can still happen?* `target` is `null`
+when the graph does not determine the destination (a templated *authority*,
+not merely a templated path). See [docs/EFFECTS.md](./EFFECTS.md).
+
+Requires the `read` scope.
+
 ### Workflow dependencies (impact analysis)
 
 ```bash

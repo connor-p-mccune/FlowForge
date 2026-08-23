@@ -23,6 +23,7 @@ problem sounds familiar.
 | **Path invariants** | Every static check asks about a *place* — this node's config, this value's shape. None could answer *"can this ever charge a card without the approval having run?"*, which is about a **path**. Turns out the engine's activation rule makes that question identical to graph dominance, so it's a solved compiler problem. Violations report the counterexample path. | [GUARANTEES.md](./docs/GUARANTEES.md) |
 | **Reaching a branch** | Every check here reasons about the *graph*, so a switch case sitting under a condition that already ruled it out is wired, typed, reachable and dead — and nothing says so. Asking whether an input exists is a solver question: difference logic, finite domains, DPLL(T). The solver returns a *model*, so the answer is also the payload that drives the branch — which is how the test suite gets generated. | [PATHS.md](./docs/PATHS.md) |
 | **Collaborative editing** | Last-write-wins on `Date.now()` meant whose laptop was fast decided whose edit survived, edits collided per *element* so two people editing different fields of one node lost half the work, and a dropped connection diverged **permanently**. Now a CRDT — commutative and idempotent, tested by applying every permutation of an operation set and asserting one document. | [ARCHITECTURE.md](./docs/ARCHITECTURE.md#real-time-collaboration) |
+| **What can this thing do?** | Every static check here answers half of it. The linter is about a node's config, lineage about where a value came from, guarantees about a property somebody thought to declare, feasibility about the data. None answers what a security review opens with: *what can this reach, and what has to be true first?* That is control dependence, and the interesting half is (1) — a gate a second trigger routes around must report as **no gate at all**. | [EFFECTS.md](./docs/EFFECTS.md) |
 | **Reviewing a definition** | The GitOps loop — drift detection, three-way merge, Ed25519 signing — is all built around a document a human reviews, and the document is JSON. Renaming a node is a diff nobody reads, the connections live in a flat array at the bottom of the file, and `exportedAt` means `git diff` on an *unchanged* workflow is never empty. A line-oriented text format fixes all three, and its emit order is the signature's canonical order, so re-formatting can't break a signature. | [DSL.md](./docs/DSL.md) |
 | **Approving a run** | "The run pauses until *a* member responds" is the right default and the wrong one for what people put gates in front of: a refund, a migration, a payout. The requirement is the right humans, enough of them, and not the person who asked. Quorum, owner-only, separation of duties — plus the parts that are easy to get wrong: one rejection settles it, one person counts once (a `UNIQUE` index, not a check), and the linter refuses a gate the workspace can never satisfy, because an unsatisfiable gate doesn't fail — it *waits*. | [APPROVALS.md](./docs/APPROVALS.md) |
 | **Watching the data** | Every monitor here watches *time* (percentiles, trend, change point) or *outcome* (success rate, error budget, heartbeat). None looks at a value. So a workflow whose upstream quietly starts returning `null` for 40% of the emails is green on every dashboard — every run completes, every step succeeds, nothing is slower. Profiling what nodes produce and comparing this month against last is a solved problem (KS, PSI); making it *quiet enough to read* is the work. | [DRIFT.md](./docs/DRIFT.md) |
@@ -525,6 +526,36 @@ status completed
   **secret reach** ("who can read `STRIPE_KEY`?" was otherwise a manual grep). On
   the canvas as 🔗 Lineage, in `flowforge lineage --node <id>`, and on the public
   API. See [docs/LINEAGE.md](./docs/LINEAGE.md).
+- **Effect reachability** — every static check above answers half of one
+  question and none answers it whole. The linter is about a node's *config* and
+  has no opinion on whether the node runs; lineage names the *sinks* and says
+  nothing about which a given run reaches; guarantees check a property somebody
+  thought to *declare*; path feasibility is about the *data*, not the effect at
+  the end. So nobody could ask the thing a security review opens with: **what
+  can this workflow do to the outside world, and for each of those things, what
+  has to have happened first?** Today that is answered by a person reading the
+  canvas and tracing backwards — which is exactly the work a graph algorithm
+  should be doing, and the answer is classical: an effect's preconditions are
+  the decisions it is **control-dependent** on. The rule is a conjunction and
+  both halves matter: `N` requires outcome `o` of decision `D` iff **`D`
+  dominates `N`** *and* **exactly one of `D`'s outcomes reaches `N`**. Drop the
+  second and a decision that leads to the effect whichever way it goes counts as
+  a gate, sending somebody to check a branch that doesn't matter. Drop the first
+  and you miss the case the whole thing exists for: the manual trigger somebody
+  wired straight at the charge so they could test it, which lints perfectly and
+  makes the approval optional — that charge has to report as running **always**,
+  not as gated by a gate that's still on the canvas and no longer holds.
+  Ambiguity always yields *fewer* conditions, never more, because a missing one
+  makes somebody investigate and a false one makes them sign off. It reads both
+  ways — every effect with its gates, and every outcome with what it rules out
+  (*if this approval rejects, what can still happen?*) — and it's ~40 lines on
+  top of machinery that already existed: the guarantees' **outcome partition**
+  (which is why a condition, a nine-case switch, a validate gate, an approval, a
+  callback and an error branch all work without this knowing what any of them
+  are) and the same dominator tree. `flowforge effects --ungated` gates a build
+  on it — opt-in, because a workflow that calls a payments API every run is
+  legitimate *and* is what a routed-around gate looks like, and only the
+  pipeline knows which. See [docs/EFFECTS.md](./docs/EFFECTS.md).
 - **Path invariants (workflow guarantees)** — every static check above asks a
   question about a *place*: the linter about a node's config, the type checker
   about a value's shape here, lineage about where that value came from. None of
@@ -1512,7 +1543,7 @@ flowforge/
 ├── docs/          API reference, architecture deep dive, and one design record per hard part
 │                 (FXL, types, guarantees, paths, lineage, policies, merge, releases,
 │                  preview, provenance, rollback, durability, insights, scheduling,
-│                  drift, approvals, the .flow format)
+│                  drift, approvals, the .flow format, effects)
 ├── docker-compose.yml
 ├── .env.example
 ├── .env.production.example

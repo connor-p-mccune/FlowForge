@@ -72,6 +72,7 @@ export FLOWFORGE_TOKEN=ffp_…
 | `flowforge test <id> [--junit <file>]` | Run the workflow's test scenarios (FXL assertions over a dry-run) — exits non-zero on any failure; `--junit` writes a report CI renders natively |
 | `flowforge run <exec-id> [--watch]` | One run with its steps |
 | `flowforge compare <exec-id> <exec-id>` | Diff two runs of a workflow node by node — status changes, duration deltas, output changes ([docs](../docs/INSIGHTS.md#comparing-two-runs)) |
+| `flowforge effects <id> [--ungated]` | **What a run can do to the outside world, and what has to be true first** — every HTTP call, email, Slack post, sub-workflow and model call, each with the decisions it is control-dependent on. The question a promotion review opens with, and the one no other command here answers. An effect with no conditions runs on *every* run — including one whose gate a second trigger routes around; `--ungated` fails the build on those ([docs](../docs/EFFECTS.md)) |
 | `flowforge lineage <id> [--node <id>] [--strict]` | Where data comes from and where it leaves — provenance, impact, and caller-controlled sinks; `--strict` gates CI ([docs](../docs/LINEAGE.md)) |
 | `flowforge cancel <exec-id>` | Stop a queued or running run (cooperative) |
 | `flowforge resume <exec-id> [--watch]` | Continue a failed/cancelled run — succeeded steps are reused, only the failed part re-runs |
