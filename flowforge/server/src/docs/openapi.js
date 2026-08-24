@@ -1537,6 +1537,96 @@ const spec = {
         },
       },
     },
+    '/workflows/{workflowId}/contract': {
+      get: {
+        tags: ['workflows'],
+        summary: 'What this workflow promises its callers',
+        description:
+          'A workflow’s return type is a promise to the workflows that call ' +
+          'it as a sub-workflow. This reports that shape and who depends on ' +
+          'it.\n\nThe read form compares the deployed graph with itself, so ' +
+          '`change.verdict` is always `compatible`; the value is `before.fields` ' +
+          'and the `callers` list. Requires the `read` scope.',
+        operationId: 'getWorkflowContract',
+        parameters: [{ $ref: '#/components/parameters/WorkflowId' }],
+        responses: {
+          200: {
+            description: 'The contract report.',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ContractReport' },
+              },
+            },
+          },
+          401: { $ref: '#/components/responses/Unauthorized' },
+          403: { $ref: '#/components/responses/Forbidden' },
+          404: { $ref: '#/components/responses/NotFound' },
+          429: { $ref: '#/components/responses/RateLimited' },
+        },
+      },
+      post: {
+        tags: ['workflows'],
+        summary: 'Would this definition break anybody?',
+        description:
+          'The promotion gate. Judges a candidate definition against the ' +
+          '**target** workspace, so the callers it names are the real ones.\n\n' +
+          'The rule is covariance of return types: a change keeps the promise ' +
+          'when every value the workflow can now return is one its callers were ' +
+          'already prepared to handle. So **narrowing a type is safe and ' +
+          'widening it is breaking** — the opposite of the intuition from ' +
+          'function arguments, because a return value is something the caller ' +
+          'consumes rather than supplies. Optionality flips with it: required → ' +
+          'optional breaks a caller that read the field unconditionally.\n\n' +
+          'Two levels, and only one is a gate. `change.verdict` describes the ' +
+          'shape: `breaking`, `additive` or `compatible`. `summary.broken` ' +
+          'counts callers that have a reference which **stops resolving** — a ' +
+          'contract that narrowed with nobody currently relying on the part ' +
+          'that went is worth knowing and is not a deployment to stop. Gate on ' +
+          '`summary.broken`.\n\nBody is `graph_data` or a `flow` string, the ' +
+          'same document contract as lint and preview. Requires the `read` ' +
+          'scope: it reads graphs and returns an analysis.',
+        operationId: 'checkWorkflowContract',
+        parameters: [{ $ref: '#/components/parameters/WorkflowId' }],
+        requestBody: {
+          required: false,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                properties: {
+                  graph_data: {
+                    type: 'object',
+                    properties: {
+                      nodes: { type: 'array', items: { type: 'object' } },
+                      edges: { type: 'array', items: { type: 'object' } },
+                    },
+                  },
+                  flow: {
+                    type: 'string',
+                    description: 'The `.flow` text form, parsed server-side.',
+                  },
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          200: {
+            description: 'The contract report for the candidate.',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ContractReport' },
+              },
+            },
+          },
+          400: { $ref: '#/components/responses/BadRequest' },
+          401: { $ref: '#/components/responses/Unauthorized' },
+          403: { $ref: '#/components/responses/Forbidden' },
+          404: { $ref: '#/components/responses/NotFound' },
+          429: { $ref: '#/components/responses/RateLimited' },
+        },
+      },
+    },
     '/workflows/{workflowId}/convergence': {
       get: {
         tags: ['workflows'],
@@ -3281,6 +3371,120 @@ const spec = {
                 nullable: true,
                 description: 'What M/M/c would have said, for comparison.',
               },
+            },
+          },
+        },
+      },
+      ContractReport: {
+        type: 'object',
+        properties: {
+          available: { type: 'boolean' },
+          reason: { type: 'string', nullable: true, enum: ['not-found', 'unreadable'] },
+          workflowId: { type: 'string' },
+          name: { type: 'string' },
+          before: {
+            type: 'object',
+            description: 'The promise the deployed graph makes today.',
+            properties: {
+              describe: { type: 'string', example: '{ orderId: string, total: number }' },
+              fields: { type: 'array', items: { type: 'string' } },
+            },
+          },
+          after: {
+            type: 'object',
+            description: 'The promise the candidate would make. Identical to `before` on a GET.',
+            properties: {
+              describe: { type: 'string' },
+              fields: { type: 'array', items: { type: 'string' } },
+            },
+          },
+          change: {
+            type: 'object',
+            properties: {
+              verdict: {
+                type: 'string',
+                enum: ['breaking', 'additive', 'compatible'],
+                description: 'Semantic versioning for the shape: major, minor, patch.',
+              },
+              removed: {
+                type: 'array',
+                items: {
+                  type: 'object',
+                  properties: { path: { type: 'string' }, was: { type: 'string' } },
+                },
+              },
+              widened: {
+                type: 'array',
+                description:
+                  'Types that grew past what callers were written against — breaking, ' +
+                  'because a return value is consumed rather than supplied.',
+                items: {
+                  type: 'object',
+                  properties: {
+                    path: { type: 'string' },
+                    was: { type: 'string' },
+                    now: { type: 'string' },
+                  },
+                },
+              },
+              weakened: {
+                type: 'array',
+                description: 'Required fields that became optional.',
+                items: { type: 'object', properties: { path: { type: 'string' } } },
+              },
+              added: {
+                type: 'array',
+                items: {
+                  type: 'object',
+                  properties: { path: { type: 'string' }, now: { type: 'string' } },
+                },
+              },
+            },
+          },
+          callers: {
+            type: 'array',
+            description:
+              'Workflows in the same workspace that call this one. A `for-each` caller is ' +
+              'listed with no breaks: its output wraps the contract in an array, which a ' +
+              'template path cannot index, so no specific reference can be named.',
+            items: {
+              type: 'object',
+              properties: {
+                workflowId: { type: 'string' },
+                name: { type: 'string' },
+                status: { type: 'string' },
+                breaks: {
+                  type: 'array',
+                  items: {
+                    type: 'object',
+                    properties: {
+                      nodeId: { type: 'string' },
+                      label: { type: 'string' },
+                      reference: { type: 'string', example: 'call.orderId' },
+                      path: { type: 'string' },
+                      missing: { type: 'string' },
+                      reason: { type: 'string', enum: ['removed'] },
+                      suggestion: {
+                        type: 'string',
+                        nullable: true,
+                        description: 'The field they probably meant, if one is close enough.',
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+          summary: {
+            type: 'object',
+            properties: {
+              verdict: { type: 'string', enum: ['breaking', 'additive', 'compatible'] },
+              callers: { type: 'integer' },
+              broken: {
+                type: 'integer',
+                description: 'Callers with a reference that stops resolving. Gate on this.',
+              },
+              references: { type: 'integer' },
             },
           },
         },

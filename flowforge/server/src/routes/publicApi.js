@@ -24,6 +24,7 @@ const { parseWorkflow, formatWorkflow, DslError } = require('../services/workflo
 const { analyzeEffects } = require('../services/effects')
 const { analyzeConvergence } = require('../services/convergence')
 const { analyzeCapacity } = require('../services/capacity')
+const { analyzeContract } = require('../services/contractCheck')
 
 // Every endpoint that takes a workflow *document* accepts it in either form: as
 // the JSON export, or as `.flow` text under `flow`. Resolving it in one place
@@ -1236,6 +1237,65 @@ router.get('/workflows/:id/effects', tokenAuth('read'), (req, res) => {
       /* unparseable stored graph — describe an empty effect set */
     }
     res.json({ workflowId: workflow.id, ...analyzeEffects(graph) })
+  } catch (err) {
+    console.error(err)
+    res.status(500).json({ error: 'Internal server error' })
+  }
+})
+
+// GET /api/v1/workflows/:id/contract — what this workflow promises its callers,
+// and whether anyone is currently broken (services/contractCheck.js).
+//
+// The read-only form compares the deployed graph with itself, so `verdict` is
+// always `compatible` and the value is `before.fields` plus the caller list:
+// *who depends on this shape?* The breaking-change question needs a candidate
+// graph, which is what the session route and `flowforge contract <id> <file>`
+// are for.
+//
+// Read-only and derived from stored graphs, so `read` is the whole
+// authorisation story.
+router.get('/workflows/:id/contract', tokenAuth('read'), (req, res) => {
+  try {
+    const workflow = getWorkflowForMember(req.params.id, req.user.id)
+    if (!workflow) return res.status(404).json({ error: 'Workflow not found' })
+    res.json(analyzeContract(workflow.id))
+  } catch (err) {
+    console.error(err)
+    res.status(500).json({ error: 'Internal server error' })
+  }
+})
+
+// POST /api/v1/workflows/:id/contract — would importing this file break
+// anybody?
+//
+// Same document contract as lint and preview: a `graph_data` object or a `flow`
+// string, judged against the *target* workspace so the callers it names are the
+// real ones. This is the promotion gate — `flowforge contract <id> <file>
+// --strict` fails a build when the definition about to be imported stops
+// somebody else's reference from resolving.
+//
+// `read` scope: it reads graphs and returns an analysis. Nothing is written.
+router.post('/workflows/:id/contract', tokenAuth('read'), (req, res) => {
+  try {
+    const workflow = getWorkflowForMember(req.params.id, req.user.id)
+    if (!workflow) return res.status(404).json({ error: 'Workflow not found' })
+
+    const body = resolveDocument(req, res)
+    if (!body) return
+
+    let candidate = null
+    const graphData = body.graph_data
+    if (graphData !== undefined) {
+      if (!graphData || !Array.isArray(graphData.nodes) || !Array.isArray(graphData.edges)) {
+        return res.status(400).json({ error: 'graph_data must include nodes and edges arrays' })
+      }
+      if (graphData.nodes.length > 2000 || graphData.edges.length > 5000) {
+        return res.status(400).json({ error: 'Graph too large to analyse' })
+      }
+      candidate = { nodes: graphData.nodes, edges: graphData.edges }
+    }
+
+    res.json(analyzeContract(workflow.id, candidate))
   } catch (err) {
     console.error(err)
     res.status(500).json({ error: 'Internal server error' })
