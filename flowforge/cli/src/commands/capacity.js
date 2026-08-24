@@ -1,0 +1,195 @@
+// flowforge capacity <workflow-id> [--target <ms>] [--cap N] [--days N]
+//
+// Is this workflow's concurrency cap the right number? `forecast` answers a
+// question about one run's makespan; this one is about the queue in front of
+// it. At the measured arrival rate and service time, how long does a run wait
+// before it starts, and what cap would meet a target?
+//
+// The output leads with the calibration rather than the prediction, and that
+// ordering is the point. The wait this model predicts is also *recorded* —
+// `started_at − created_at` per run — so the report can be checked against the
+// window it was measured from. A number that has been checked and a number that
+// has not are different kinds of number, and printing them the same way would
+// be the dishonest part.
+//
+// Exits non-zero when the queue is unstable at the current cap, or when
+// `--target` is given and the cap cannot meet it. Those are the two states
+// somebody wants a pipeline to notice.
+
+const { bold, gray, green, red, yellow, cyan, table } = require('../format')
+
+const ms = (value) => {
+  if (value == null) return '—'
+  if (value < 1000) return `${Math.round(value)}ms`
+  if (value < 60000) return `${(value / 1000).toFixed(1)}s`
+  return `${(value / 60000).toFixed(1)}m`
+}
+
+const pct = (value) => (value == null ? '—' : `${(value * 100).toFixed(0)}%`)
+
+// How the model did against the window it was measured from. This is the line
+// that says whether the rest of the output is worth acting on.
+const VERDICT = {
+  agrees: (c) =>
+    green(`the model matches the measured wait (predicted ${ms(c.predictedMs)}, saw ${ms(c.observedMs)})`),
+  'over-predicts': (c) =>
+    yellow(
+      `the model predicts ${ms(c.predictedMs)} but runs actually waited ${ms(c.observedMs)} — ` +
+        'sizing from it will be generous'
+    ),
+  'under-predicts': (c) =>
+    red(
+      `the model predicts ${ms(c.predictedMs)} but runs actually waited ${ms(c.observedMs)} — ` +
+        'something it cannot see is holding runs up'
+    ),
+  'no-queue-to-check': () =>
+    gray('nothing queued over the window, so there is no measured wait to check against'),
+  'not-enough-history': () => gray('not enough recorded waits to check the model against'),
+}
+
+function unavailable(report, ctx) {
+  switch (report.reason) {
+    case 'no-cap':
+      ctx.log(
+        'This workflow has no concurrency cap, so its runs never queue behind each other.\n' +
+          gray('  Set max_concurrent_runs to have something to size.')
+      )
+      return 0
+    case 'not-enough-runs':
+      ctx.log(
+        `Not enough history: ${report.runs} run(s) in the last ${report.windowDays} days, ` +
+          `${report.needed} needed.\n` +
+          gray('  An arrival rate measured from a handful of runs is a rumour, not a rate.')
+      )
+      return 0
+    case 'no-service-time':
+      ctx.log('No run in the window recorded a start and a finish, so there is no service time.')
+      return 0
+    default:
+      ctx.log('Workflow not found.')
+      return 1
+  }
+}
+
+module.exports = async function capacity(args, ctx) {
+  const workflowId = args.positionals[0]
+  if (!workflowId) {
+    ctx.log('Usage: flowforge capacity <workflow-id> [--target <ms>] [--cap N] [--days N]')
+    return 1
+  }
+
+  const query = []
+  if (args.flags.target != null) query.push(`target=${encodeURIComponent(args.flags.target)}`)
+  if (args.flags.cap != null) query.push(`cap=${encodeURIComponent(args.flags.cap)}`)
+  if (args.flags.days != null) query.push(`days=${encodeURIComponent(args.flags.days)}`)
+  const suffix = query.length ? `?${query.join('&')}` : ''
+
+  const report = await ctx.api.get(`/api/v1/workflows/${workflowId}/capacity${suffix}`)
+  if (!report.available) return unavailable(report, ctx)
+
+  const { measured, current, calibration, curve, recommendation, model, cap } = report
+
+  ctx.log(bold(`Capacity for ${report.name}`) + gray(`  ·  cap ${cap}`))
+  ctx.log(
+    gray(
+      `  ${measured.runs} runs over ${measured.windowDays} days · ` +
+        `${measured.arrivalsPerHour.toFixed(2)}/hour arriving · ` +
+        `${ms(measured.serviceMeanMs)} mean service time`
+    )
+  )
+
+  // Leads, because everything below is worth exactly as much as this says.
+  ctx.log('')
+  ctx.log(`${bold('Model check:')} ${(VERDICT[calibration.verdict] || VERDICT['not-enough-history'])(calibration)}`)
+
+  ctx.log('')
+  if (!current.stable) {
+    ctx.log(
+      red(`At ${cap} slot(s) this workflow is over capacity.`) +
+        '\n' +
+        gray(
+          `  ${pct(current.utilisation)} utilised — the backlog grows without bound, so there is ` +
+            'no steady-state wait to quote.'
+        )
+    )
+  } else {
+    ctx.log(
+      `At ${bold(String(cap))} slot(s): ${cyan(ms(current.waitMeanMs))} mean wait, ` +
+        `${cyan(ms(current.waitP95Ms))} at p95, ${pct(current.utilisation)} utilised.`
+    )
+    ctx.log(
+      gray(
+        `  Room for ${current.headroom.toFixed(2)}× today's traffic before the queue diverges.`
+      )
+    )
+  }
+
+  // The variability correction, stated because a wait quoted without it is the
+  // number that under-provisions.
+  if (measured.cvSquaredService != null && model.variabilityFactor > 1.2) {
+    ctx.log(
+      gray(
+        `  Service time CV² is ${measured.cvSquaredService.toFixed(1)} (1 = exponential), so the ` +
+          `wait is ${model.variabilityFactor.toFixed(1)}× what M/M/c would predict ` +
+          `(${ms(model.mmcWaitMeanMs)}).`
+      )
+    )
+  }
+
+  ctx.log('')
+  ctx.log(bold('What each cap buys'))
+  ctx.log(
+    table(
+      curve.map((p) => ({
+        slots: p.servers === cap ? `${p.servers} ${gray('(now)')}` : String(p.servers),
+        used: pct(p.utilisation),
+        wait: p.stable ? ms(p.waitMeanMs) : red('unstable'),
+        p95: p.stable ? ms(p.waitP95Ms) : red('—'),
+        headroom: p.stable ? `${p.headroom.toFixed(2)}×` : gray('—'),
+      })),
+      [
+        { key: 'slots', label: 'SLOTS' },
+        { key: 'used', label: 'USED' },
+        { key: 'wait', label: 'MEAN WAIT' },
+        { key: 'p95', label: 'P95' },
+        { key: 'headroom', label: 'HEADROOM' },
+      ]
+    )
+  )
+
+  if (!recommendation) {
+    return current.stable ? 0 : 1
+  }
+
+  ctx.log('')
+  if (recommendation.servers == null) {
+    ctx.log(
+      red(`No cap reaches a mean wait of ${ms(recommendation.targetWaitMs)}.`) +
+        '\n' +
+        gray('  Adding slots drives the wait towards zero but never below it.')
+    )
+    return 1
+  }
+
+  const change = recommendation.change
+  const line =
+    change === 0
+      ? green(`The current cap of ${cap} already meets ${ms(recommendation.targetWaitMs)}.`)
+      : change > 0
+        ? red(`Raise the cap to ${recommendation.servers} (+${change}) for ${ms(recommendation.targetWaitMs)}.`)
+        : green(
+            `A cap of ${recommendation.servers} (${change}) would still meet ` +
+              `${ms(recommendation.targetWaitMs)}.`
+          )
+  ctx.log(line)
+  if (!recommendation.confident) {
+    ctx.log(
+      yellow('  Treat this as a suggestion: the model does not match the measured window.')
+    )
+  }
+
+  // A cap that has to grow, or a queue that is already diverging, is what a
+  // pipeline wants to hear about. A cap that could shrink is a saving, not a
+  // failure.
+  return change > 0 || !current.stable ? 1 : 0
+}
