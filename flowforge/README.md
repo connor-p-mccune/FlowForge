@@ -34,6 +34,7 @@ problem sounds familiar.
 | **Taint analysis** | Untrusted data deciding where a request goes is SSRF with a drag-and-drop interface. Precision is the whole design: taint stops at external boundaries, and a pinned host is not a finding — a checker nobody reads is worse than none. | [LINEAGE.md](./docs/LINEAGE.md) |
 | **Surviving the worker** | Every reliability control here bounds a *running* system; all of them assume the process lives. A `kill -9` leaves a row saying `running` forever, and the queue's redelivery would re-run the whole graph — re-charging the card. A lease renewed by a timer (not by progress, or an approval gate would look like a crash), fenced by a token, and a recovery that records an in-flight step as **indeterminate** rather than guessing which lie to tell. | [DURABILITY.md](./docs/DURABILITY.md) |
 | **Prompt injection** | An AI node classifies a webhook body — text an outsider wrote — and text reads as instructions. The finding isn't "untrusted data in a prompt" (that is every AI node); it is the *composition*: they write the instructions **and** the answer decides where a request goes. Bounded at the boundary by a per-call random fence and a classification confined to the declared labels. | [SECURITY.md](./SECURITY.md) |
+| **Erasure vs. an append-only log** | Somebody exercises their right to erasure, and the audit log is a hash chain with `BEFORE DELETE` triggers that abort — built precisely so nobody can quietly remove things from it. Delete the rows: the chain breaks at the join and leaves a `seq` gap, so honouring one request destroys the evidentiary value of every unrelated entry. Rewrite the chain: it verifies again, which proves it *can* be rewritten by anyone with write access. So erasure never touches the log — it empties the run data and **appends** a SHA-256 commitment to what was removed. The chain grows, nothing in it changes, `verifyChain` still passes. A hash of data you've destroyed is a receipt, not personal data. | [PRIVACY.md](./docs/PRIVACY.md) |
 | **A wait nothing can satisfy** | A `wait-callback` node parks the run until an external system POSTs to a one-time URL, which some node has to send — and, as the runner's own comment already said, an *upstream* one. Nothing checked the "upstream". Nothing sends it; only a node *after* the wait sends it (the wait blocks on the send, the send blocks on the wait); or it only ever reaches a log node, and stdout is not a delivery mechanism. It times out eventually, so it isn't a hang — it's worse in one way: **the graph becomes indistinguishable from a partner that never replied**, so the investigation starts at the partner. Treated as dataflow, not a string search, because the commonest *correct* shape is a transform building the body and an HTTP node referencing it. | [ARCHITECTURE.md](./docs/ARCHITECTURE.md#callback-liveness) |
 | **A contract nobody declared** | A workflow's return type is a promise to every workflow that calls it as a sub-workflow — and **the author who breaks it is not the author who finds out**. Rename a field in the return node: the callee still lints, the dependency graph still resolves (the *workflow* is still there; the *shape* changed, and a reference check can't see a shape), and somebody else's `{{sub.orderId}}` quietly arrives `undefined` at run time. The rule is covariance of return types, which `types.js` already had the subtyping test for — so **narrowing is safe and widening is breaking**, the opposite of the intuition from function arguments, because a return value is consumed rather than supplied. Names the caller, the node, the reference, and the field they probably meant. | [CONTRACTS.md](./docs/CONTRACTS.md) |
 | **Sizing the concurrency cap** | `max_concurrent_runs` is a number somebody typed once, and the usual dashboard divides running runs by it and alerts at 80%. Utilisation is not wait: at ρ = 0.8 a one-slot pool waits **4.00×** its own service time and a ten-slot pool waits **0.20×** — twenty times the experience at the same number. M/M/c would be the textbook fix and is still wrong, because a run waiting on a human approval is nothing like exponentially distributed. So: Allen–Cunneen G/G/c over the *measured* variability, Erlang C by recurrence rather than the factorial form that overflows at c ≈ 170 — and, unusually, the model **grades itself**, because `started_at − created_at` is the wait it predicts, already recorded. | [CAPACITY.md](./docs/CAPACITY.md) |
@@ -535,6 +536,30 @@ status completed
   **secret reach** ("who can read `STRIPE_KEY`?" was otherwise a manual grep). On
   the canvas as 🔗 Lineage, in `flowforge lineage --node <id>`, and on the public
   API. See [docs/LINEAGE.md](./docs/LINEAGE.md).
+- **Data subject requests (access & erasure)** — somebody exercises their right
+  to erasure, and this system holds their payload in a hundred execution rows
+  *and* holds a hash-chained, trigger-enforced append-only audit log built
+  precisely so nobody can quietly remove things. Direct conflict, and the three
+  obvious answers are each wrong: **delete the rows** — the trigger refuses, and
+  removing an entry breaks the chain at the join and leaves a `seq` gap, so
+  honouring one person's request would destroy the evidentiary value of every
+  unrelated entry in the workspace; **rewrite the chain** — it verifies again,
+  which demonstrates the chain *can* be rewritten by anyone with write access,
+  which is exactly the property it exists to deny; **log nothing sensitive** —
+  then there's no audit trail and the request can't be proved honoured either.
+  The resolution: erasure never touches the log. It empties the run data and
+  **appends** — the chain grows, nothing in it changes, `verifyChain` still
+  passes (there's a test asserting that through the same `audit/verify` route an
+  auditor would use). What the entry carries is a **SHA-256 commitment per run to
+  what was removed**, not the content: a hash of data you've destroyed is a
+  receipt, not personal data, and it can confirm a later claim without retaining
+  anything readable. Finding the runs at all needs an index, and the index is
+  `HMAC(pepper, workspace ‖ identifier)` — keyed rather than plain, because a
+  plain hash of an email is a dictionary attack; per-workspace, because a shared
+  key would let one tenant confirm an address appears in another's. The rows
+  survive, emptied, with a tombstone rather than a null — deleting them would
+  take the proof of the erasure with the thing erased. Backups are stated as out
+  of scope rather than quietly claimed. See [docs/PRIVACY.md](./docs/PRIVACY.md).
 - **Cross-workflow contracts** — FlowForge already types a caller against its
   callee: the sub-workflow rule walks into the target workflow and checks
   `{{sub.orderId}}` against what it really returns. That's the right direction

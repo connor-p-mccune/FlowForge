@@ -896,6 +896,65 @@ not merely a templated path). See [docs/EFFECTS.md](./EFFECTS.md).
 
 Requires the `read` scope.
 
+### Data subject requests
+
+```bash
+# Everything held about one person (Art. 15)
+curl -s -X POST https://your-flowforge-host/api/v1/subjects/access \
+  -H "Authorization: Bearer $FLOWFORGE_TOKEN" -H 'Content-Type: application/json' \
+  -d '{"identifier": "alice@example.com"}'
+
+# Erase it (Art. 17)
+curl -s -X POST https://your-flowforge-host/api/v1/subjects/erasure \
+  -H "Authorization: Bearer $FLOWFORGE_TOKEN" -H 'Content-Type: application/json' \
+  -d '{"identifier": "alice@example.com", "reason": "Ticket 4821"}'
+```
+
+Runs are found through a **pseudonymous index**. A workflow names the trigger
+field identifying its data subject (`subject_path`, e.g. `customer.email`) and
+the engine stamps each run with `HMAC(pepper, workspace ‖ identifier)` — so the
+database never holds the address, and an operator who holds it can still derive
+the key. Both endpoints take the identifier in a **body, never a URL**: it is
+personal data, and a URL ends up in query logs and proxy logs.
+
+```json
+{
+  "workspaceId": "b21f…",
+  "available": true,
+  "certificate": "5f8c1e2a-0b3d-4c5e-8a9f-1b2c3d4e5f60",
+  "subjectId": "a1b2c3d4e5f60718293a4b5c6d7e8f90",
+  "erasedAt": "2026-08-22T12:00:00.000Z",
+  "runs": ["ex-1", "ex-2"],
+  "commitments": [
+    { "executionId": "ex-1", "digest": "a3f1c9e20b4d5768…" },
+    { "executionId": "ex-2", "digest": "7b2e4d81f0a6c395…" }
+  ],
+  "summary": { "erased": 2, "alreadyErased": 0 }
+}
+```
+
+Erasure has to coexist with an audit log that is a hash chain and append-only in
+the schema. Deleting entries breaks the chain and leaves a `seq` gap — honouring
+one request would destroy the evidentiary value of every unrelated entry;
+rewriting it proves the chain *can* be rewritten, which is the property it exists
+to deny. So erasure **never touches the log**. It empties the run data and
+appends, and `GET /api/workspaces/{id}/audit/verify` still returns `ok: true`
+afterwards.
+
+The appended entry carries a SHA-256 `commitment` per run to what was removed,
+not the content: a hash of data you have destroyed is a receipt, not personal
+data. Execution rows survive with a tombstone rather than a `NULL`, because
+deleting them would take the proof of the erasure with the thing erased — and
+because every reader of those columns should be able to tell *erased on request*
+from *never recorded*.
+
+One transaction and idempotent. **Backups are out of scope** — this reaches the
+live database, and a snapshot taken yesterday still holds the payload.
+`flowforge subject <identifier>` previews; `--erase --yes` does it. See
+[docs/PRIVACY.md](./PRIVACY.md).
+
+Requires the `manage` scope.
+
 ### What this workflow promises its callers
 
 ```bash

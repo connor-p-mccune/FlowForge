@@ -1,6 +1,6 @@
 # FlowForge design records
 
-Twenty-three documents is too many to read in order, so this is a map rather than
+Twenty-four documents is too many to read in order, so this is a map rather than
 a table of contents. Each record covers one part that was hard, and each is
 organised the same way: **what the obvious implementation gets wrong**, the
 design that fixes it, and the limits stated rather than oversold.
@@ -50,6 +50,7 @@ most familiar.
 |---|---|
 | [POLICIES.md](./POLICIES.md) | The linter asks "will this run?"; a policy asks "is this *allowed* here?". Rules type-checked when saved, so one reading a misspelled field is refused rather than reporting every workflow compliant forever. |
 | [APPROVALS.md](./APPROVALS.md) | "Until *a* member responds" is the right default and the wrong one for a refund. Quorum, owner-only gates, separation of duties — and a linter that refuses a gate the workspace can never satisfy. |
+| [PRIVACY.md](./PRIVACY.md) | A right to erasure, over a hash-chained log built so nobody can quietly remove things from it. Delete the rows and the chain breaks; rewrite the chain and it proves nothing. |
 | [PROVENANCE.md](./PROVENANCE.md) | `export → git → review → CI → import` passes a definition through four systems that can change it. An Ed25519 signature over the graph's *semantics*, not its bytes. |
 | [CONTRACTS.md](./CONTRACTS.md) | A workflow's return type is a promise to the workflows that call it — and the author who breaks it is not the author who finds out. Covariance of return types, where narrowing is safe and widening breaks. |
 | [MERGE.md](./MERGE.md) | Drift detection tells you git and production diverged, then makes you pick a side to throw away. A real three-way merge, per config field, that produces **no graph at all** on conflict. |
