@@ -34,6 +34,7 @@ const stepTimings = require('./stepTimings')
 const scheduleSim = require('./scheduleSim')
 const retryBudget = require('./retryBudget')
 const convergence = require('./convergence')
+const subjectIndex = require('./subjectIndex')
 
 const runners = {
   'action-http': require('./nodeRunners/httpRequest'),
@@ -388,6 +389,29 @@ async function runLeasedExecution(
   // replayed run's stored trigger_data) flow into the graph (e.g.
   // {{triggerNodeId.field}}). Manual runs start from {}.
   const triggerPayload = resolveTriggerPayload(payload, execution.trigger_data)
+
+  // Data subject index (services/subjectIndex.js). A workflow that processes
+  // personal data names the trigger field identifying whose it is; this stamps
+  // the run with a pseudonymous key for that value, so a subject request is an
+  // index lookup rather than a scan of every payload ever recorded.
+  //
+  // Never fatal. A run that cannot be attributed to a subject is a run with no
+  // subject — which is the normal case — and failing one over a missing field
+  // would be the indexing wagging the workflow.
+  if (workflow.subject_path) {
+    try {
+      const subjectId = subjectIndex.subjectOf(
+        workflow.workspace_id,
+        workflow.subject_path,
+        triggerPayload
+      )
+      if (subjectId) {
+        db.prepare('UPDATE executions SET subject_id = ? WHERE id = ?').run(subjectId, executionId)
+      }
+    } catch (err) {
+      console.error(`Subject indexing failed for execution ${executionId}: ${err.message}`)
+    }
+  }
 
   const workflowId = workflow.id
   // Workflow ids on the current call stack, including this run's own. Handed to

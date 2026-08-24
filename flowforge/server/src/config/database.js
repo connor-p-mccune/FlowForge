@@ -60,6 +60,26 @@ ensureColumn('executions', 'parent_node_id', 'TEXT')
 ensureColumn('executions', 'trigger_data', 'TEXT')
 ensureColumn('executions', 'trigger_type', 'TEXT')
 
+// Data subject requests (services/subjectIndex.js). A workflow that processes
+// personal data names the trigger field identifying whose data it is —
+// `customer.email`, `user.id` — and the engine stores a *pseudonymous* key for
+// that value on each run, so "every run about this person" is an index lookup
+// rather than a scan of every payload.
+//
+// The key is HMAC(pepper, workspace || identifier), never the identifier: the
+// artefact that must survive an erasure is the proof it happened, and a row
+// keyed on the address would make that proof a copy of the thing deleted.
+// NULL is the normal case — most workflows are not about a person.
+ensureColumn('workflows', 'subject_path', 'TEXT')
+ensureColumn('executions', 'subject_id', 'TEXT')
+// Set when a run's recorded data has been erased on request. The row survives:
+// deleting it would destroy the audit trail of the erasure along with the data.
+ensureColumn('executions', 'erased_at', 'TEXT')
+db.exec(`
+  CREATE INDEX IF NOT EXISTS idx_executions_subject
+    ON executions (subject_id) WHERE subject_id IS NOT NULL;
+`)
+
 // Webhook HMAC signing (SECURITY.md T3): optional per-webhook shared secret.
 // NULL = unsigned webhook (key-only auth, unchanged behavior); set = every
 // delivery must carry a valid timestamped HMAC (services/webhookSignature.js).
