@@ -1,7 +1,7 @@
 # FlowForge design records
 
-Twenty documents is too many to read in order, so this is a map rather than a
-table of contents. Each record covers one part that was hard, and each is
+Twenty-one documents is too many to read in order, so this is a map rather than
+a table of contents. Each record covers one part that was hard, and each is
 organised the same way: **what the obvious implementation gets wrong**, the
 design that fixes it, and the limits stated rather than oversold.
 
@@ -26,6 +26,7 @@ most familiar.
 | [EXPRESSIONS.md](./EXPRESSIONS.md) | Users need real logic in a config field, and `eval` is not an option. A hand-written lexer → Pratt parser → tree-walking evaluator. |
 | [TYPES.md](./TYPES.md) | A visual builder normally finds out its data doesn't line up by running it. A real type lattice over the canvas instead — where `any` and `unknown` are kept as different facts. |
 | [SCHEDULING.md](./SCHEDULING.md) | The engine runs branches in parallel up to a cap, and every other analysis pretended the cap didn't exist. Ordering the ready set by upward rank, and measuring what the cap costs a run. |
+| [CONVERGENCE.md](./CONVERGENCE.md) | Where parallel branches meet, their outputs are assigned over each other and one silently wins — decided, until recently, by the order the edges sat in the array. Which three parts of the product rewrite differently. |
 | [DURABILITY.md](./DURABILITY.md) | Every reliability control assumes the process survives the run. What happens when it doesn't: leases, fencing tokens, and a step recorded as *indeterminate* rather than guessed at. |
 | [ROLLBACK.md](./ROLLBACK.md) | Every other control bounds *whether* something runs. None undoes what already ran. Compensations, unwound in reverse completion order. |
 

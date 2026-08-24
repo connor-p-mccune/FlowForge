@@ -896,6 +896,55 @@ not merely a templated path). See [docs/EFFECTS.md](./EFFECTS.md).
 
 Requires the `read` scope.
 
+### Where parallel branches collide
+
+```bash
+curl -s https://your-flowforge-host/api/v1/workflows/6f0c…/convergence \
+  -H "Authorization: Bearer $FLOWFORGE_TOKEN"
+```
+
+A node with several incoming edges gets its input from `Object.assign` over the
+upstream outputs, so when two branches both produce a `status`, exactly one
+survives.
+
+```json
+{
+  "workflowId": "6f0c…",
+  "available": true,
+  "joins": [
+    { "nodeId": "merge", "label": "Combine", "type": "output-log", "arity": 2,
+      "mergeOrder": ["billing", "crm"],
+      "collisions": [
+        { "key": "status", "resolution": "tie-break", "decidedBy": "crm", "sameType": true,
+          "contributors": [
+            { "nodeId": "billing", "label": "Billing lookup", "handle": null, "depth": 1, "type": "number" },
+            { "nodeId": "crm", "label": "CRM lookup", "handle": null, "depth": 1, "type": "number" }
+          ] }
+      ] }
+  ],
+  "summary": { "joins": 1, "collisions": 1, "tieBroken": 1, "dataflow": 0, "typeChanging": 0 }
+}
+```
+
+Merge order is derived from the graph rather than from how it was stored:
+contributors are ranked by **longest-path depth**, so a node downstream of
+another overrides it — it ran later and saw that value — and no storage layer
+can change the answer.
+
+`resolution` is the whole report in one field. `dataflow` means the contributors
+sit at different depths and the deeper one wins predictably, which a reader can
+work out from the canvas. `tie-break` means they are at the same depth,
+genuinely concurrent, the graph is silent, and the canonical edge sort decides —
+alphabetically, which is deterministic and is not an opinion about the workflow.
+Gate a pipeline on `summary.tieBroken` alone; `flowforge converge --strict` does.
+
+Branches that can never both run — a condition's `true` and `false` handles
+wired into one join — are not collisions and are never reported. `decidedBy` is
+`null` when which contributor survives itself depends on which branch ran. See
+[docs/CONVERGENCE.md](./CONVERGENCE.md).
+
+Requires the `read` scope.
+
 ### Workflow dependencies (impact analysis)
 
 ```bash

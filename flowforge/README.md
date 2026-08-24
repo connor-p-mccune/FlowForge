@@ -34,6 +34,7 @@ problem sounds familiar.
 | **Taint analysis** | Untrusted data deciding where a request goes is SSRF with a drag-and-drop interface. Precision is the whole design: taint stops at external boundaries, and a pinned host is not a finding — a checker nobody reads is worse than none. | [LINEAGE.md](./docs/LINEAGE.md) |
 | **Surviving the worker** | Every reliability control here bounds a *running* system; all of them assume the process lives. A `kill -9` leaves a row saying `running` forever, and the queue's redelivery would re-run the whole graph — re-charging the card. A lease renewed by a timer (not by progress, or an approval gate would look like a crash), fenced by a token, and a recovery that records an in-flight step as **indeterminate** rather than guessing which lie to tell. | [DURABILITY.md](./docs/DURABILITY.md) |
 | **Prompt injection** | An AI node classifies a webhook body — text an outsider wrote — and text reads as instructions. The finding isn't "untrusted data in a prompt" (that is every AI node); it is the *composition*: they write the instructions **and** the answer decides where a request goes. Bounded at the boundary by a per-call random fence and a classification confined to the declared labels. | [SECURITY.md](./SECURITY.md) |
+| **A silent nondeterminism** | Branches run in parallel, and where they converge the engine assigns their outputs over each other — so two branches both producing a `status` meant one silently won, decided by the order the edges sat in the array. Which three parts of the product rewrite, differently: a collab session sorts edges by id, the `.flow` format and the signature by source/target, a plain save keeps the array. **The same graph computed a different value depending on how it was last saved**, with every check green — the type checker least able to see it, because joining the two field types into a union is the sound thing to do and is exactly what discards *which one you get*. Merge order now comes from the graph. | [CONVERGENCE.md](./docs/CONVERGENCE.md) |
 | **Undoing side effects** | Every other control bounds *whether* something runs; none undoes what already ran. Compensations unwind in **reverse completion order** (the DAG doesn't know what finished first), and a step that did no work this run is never compensated. | [ROLLBACK.md](./docs/ROLLBACK.md) |
 | **Reviewing a change** | Every deploy gate here is static — well-formed, typed, permitted, invariant-preserving, reachable. None says what the change *does*. So replay last week's runs against the candidate graph, with every step that reaches outside settled from that run's own recording — a routing difference is then attributable to the edit rather than to test mode inventing a response. | [PREVIEW.md](./docs/PREVIEW.md) |
 | **Deciding a release** | A canary is a small sample, and a threshold on a small sample is a coin flip with a UI. Two-proportion z-test on failures, Mann-Whitney U on durations, Wilson intervals so "0 failures in 12" isn't reported as certainty. | [RELEASES.md](./docs/RELEASES.md) |
@@ -47,7 +48,7 @@ and all four run on every push.
 
 Each of those links is a design record, written the same way: what the obvious
 implementation gets wrong, the design that fixes it, and the limits stated
-rather than oversold. [**docs/README.md**](./docs/README.md) maps all twenty by
+rather than oversold. [**docs/README.md**](./docs/README.md) maps them all by
 the problem they solve.
 
 ---
@@ -531,6 +532,37 @@ status completed
   **secret reach** ("who can read `STRIPE_KEY`?" was otherwise a manual grep). On
   the canvas as 🔗 Lineage, in `flowforge lineage --node <id>`, and on the public
   API. See [docs/LINEAGE.md](./docs/LINEAGE.md).
+- **Convergence (where parallel branches collide)** — when several edges arrive
+  at one node, the engine builds that node's input with `Object.assign` over the
+  upstream outputs, which is last-writer-wins. So two branches both producing a
+  `status` meant exactly one silently survived — and which one was decided by
+  **the order the edges happened to sit in the array**. That order is not a
+  property of the workflow: it's the order the author drew the connections, it's
+  invisible on the canvas, and three parts of the product rewrite it differently
+  — a collab session persists `materialize()`, which sorts edges by **id**; the
+  `.flow` format and the artifact signature sort by **(source, target)**; a plain
+  save keeps the array. **The same graph computed a different value depending on
+  which door it was last written through**, with the linter, the types, the
+  guarantees, the policies and the signature all still green — and the signature
+  is the sharpest of those, since canonicalising the edges is exactly what makes
+  it survive somebody dragging a node. The type checker could not catch it, and
+  that's not a gap: `mergeAssign` **joins** the two colliding field types into a
+  union, which is the sound answer, and being sound is precisely what discards
+  *which one you get*. Merge order now comes from the graph — contributors
+  ranked by **longest-path depth**, so a node downstream of another overrides it
+  (it ran later and saw that value), and since any path of length L forces
+  `depth(B) ≥ depth(A) + L`, an ancestor is *guaranteed* to sort before its
+  descendant. The permutation test is the one that matters: all 24 orderings of
+  a diamond's four edges, one merged input; before, two. What no order can fix
+  is then the finding — two branches at the *same* depth are genuinely
+  concurrent, so the canonical sort breaks the tie **alphabetically**, which is
+  deterministic and is not an opinion about the workflow. Reported as a linter
+  warning, on the canvas, and by `flowforge converge --strict`; a collision the
+  graph settles is counted separately and never gated on. The precision work is
+  the quiet part: a condition with `true` and `false` wired into one join is on
+  every canvas and can never assign anything over anything, which needs the
+  guarantees' **outcome partition** rather than a reach test, since a decision
+  isn't in its own reach set. See [docs/CONVERGENCE.md](./docs/CONVERGENCE.md).
 - **Effect reachability** — every static check above answers half of one
   question and none answers it whole. The linter is about a node's *config* and
   has no opinion on whether the node runs; lineage names the *sinks* and says
