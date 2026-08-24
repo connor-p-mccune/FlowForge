@@ -8604,3 +8604,48 @@ html, body, #root {
   line-height: 1.45;
   color: #b45309;
 }
+
+/* — Capacity hint ——————————————————————————————————————————————————— */
+/* Sits under the concurrency field and answers what the number buys. Styled as
+   a hint rather than a finding: it is information for a decision somebody is
+   already making, not something that went wrong. */
+
+.capacity-hint {
+  font-size: 12px;
+  line-height: 1.55;
+  color: #334155;
+  background: #f8fafc;
+  border-left: 3px solid #cbd5e1;
+  border-radius: 0 5px 5px 0;
+  padding: 7px 10px;
+  margin: -2px 0 12px;
+}
+
+.capacity-hint strong { color: #0f172a; }
+
+/* Under 1.5× headroom the cap is one busy week from not draining. */
+.capacity-hint--tight {
+  background: #fffbeb;
+  border-left-color: #d97706;
+}
+
+/* No steady state at all: the honest answer is that this cap cannot keep up. */
+.capacity-hint--over {
+  background: #fef2f2;
+  border-left-color: #dc2626;
+  color: #991b1b;
+}
+
+.capacity-hint--over strong { color: #991b1b; }
+
+.capacity-hint--quiet {
+  color: var(--text-muted, #64748b);
+  background: transparent;
+  border-left-color: #e2e8f0;
+}
+
+.capacity-hint__caveat {
+  display: block;
+  margin-top: 4px;
+  color: #b45309;
+}

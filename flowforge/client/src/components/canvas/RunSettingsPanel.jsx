@@ -3,6 +3,7 @@ import { apiFetch } from '../../services/api'
 import { useToast } from '../../hooks/useToast'
 import StatusBadgeSection from './StatusBadgeSection'
 import ChaosSection from './ChaosSection'
+import CapacityHint from './CapacityHint'
 import { listTimeZones } from '../../utils/timezones'
 
 // Rate-limit window units, in seconds. The panel stores a window in seconds
@@ -316,6 +317,11 @@ export default function RunSettingsPanel({ workflowId, open, onClose }) {
                   ? 'Submissions at the cap fail immediately (409) — callers find out now instead of watching a run sit queued. Scheduled ticks are skipped, which is exactly “don’t overlap” for cron workflows.'
                   : 'Runs at the cap wait and start automatically once a slot frees. Order across waiting runs is not guaranteed.'}
               </p>
+              {/* What that cap actually buys, from this workflow's own arrival
+                  rate and service time. Beside the field rather than in a panel
+                  of its own: the moment somebody is choosing the number is the
+                  moment the answer is worth having. */}
+              <CapacityHint workflowId={workflowId} cap={limitInput} />
 
               <div className="run-settings__section">Rate limit</div>
               <p className="webhook-panel__hint">
