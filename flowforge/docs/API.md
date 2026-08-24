@@ -896,6 +896,67 @@ not merely a templated path). See [docs/EFFECTS.md](./EFFECTS.md).
 
 Requires the `read` scope.
 
+### What this workflow promises its callers
+
+```bash
+# What is the promise, and who depends on it?
+curl -s https://your-flowforge-host/api/v1/workflows/6f0c…/contract \
+  -H "Authorization: Bearer $FLOWFORGE_TOKEN"
+
+# Would importing this file break anybody?
+curl -s -X POST https://your-flowforge-host/api/v1/workflows/6f0c…/contract \
+  -H "Authorization: Bearer $FLOWFORGE_TOKEN" -H 'Content-Type: application/json' \
+  --data-binary @candidate.json
+```
+
+A workflow's return type is a promise to every workflow that calls it as a
+sub-workflow — and the author who breaks it is not the author who finds out.
+
+```json
+{
+  "available": true,
+  "workflowId": "6f0c…",
+  "name": "Fulfilment",
+  "before": { "describe": "{ orderId: string, total: number }", "fields": ["orderId", "total"] },
+  "after":  { "describe": "{ total: number }", "fields": ["total"] },
+  "change": {
+    "verdict": "breaking",
+    "removed": [{ "path": "orderId", "was": "string" }],
+    "widened": [], "weakened": [], "added": []
+  },
+  "callers": [
+    { "workflowId": "a91e…", "name": "Orders", "status": "deployed",
+      "breaks": [
+        { "nodeId": "call", "label": "Fulfil order", "reference": "call.orderId",
+          "missing": "orderId", "reason": "removed", "suggestion": "order_id" }
+      ] }
+  ],
+  "summary": { "verdict": "breaking", "callers": 3, "broken": 1, "references": 1 }
+}
+```
+
+The rule is **covariance of return types**: a change keeps the promise when
+every value the workflow can now return is one its callers were already
+prepared to handle. So **narrowing a type is safe and widening it is breaking**,
+and a required field going optional is breaking while an optional one becoming
+required is not — both the opposite of the intuition from function arguments,
+because a return value is something the caller *consumes* rather than supplies.
+
+**Gate on `summary.broken`, not on `change.verdict`.** The verdict describes the
+shape; `broken` counts callers with a reference that *stops resolving*. A
+contract can narrow with nobody relying on the part that went, and failing a
+build for that is how a check earns its way out of a pipeline. `flowforge
+contract <id> <file>` exits non-zero on `broken`; `--strict` also fails the
+verdict.
+
+The POST body is `graph_data` or a `flow` string, the same document contract as
+lint and preview, judged against the **target** workspace so the callers named
+are the real ones. A `for-each` caller is listed with no breaks — its output
+wraps the contract in an array, which a template path cannot index, so no
+specific reference can be named. See [docs/CONTRACTS.md](./CONTRACTS.md).
+
+Requires the `read` scope.
+
 ### Is the concurrency cap the right number?
 
 ```bash

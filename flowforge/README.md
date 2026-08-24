@@ -34,6 +34,7 @@ problem sounds familiar.
 | **Taint analysis** | Untrusted data deciding where a request goes is SSRF with a drag-and-drop interface. Precision is the whole design: taint stops at external boundaries, and a pinned host is not a finding — a checker nobody reads is worse than none. | [LINEAGE.md](./docs/LINEAGE.md) |
 | **Surviving the worker** | Every reliability control here bounds a *running* system; all of them assume the process lives. A `kill -9` leaves a row saying `running` forever, and the queue's redelivery would re-run the whole graph — re-charging the card. A lease renewed by a timer (not by progress, or an approval gate would look like a crash), fenced by a token, and a recovery that records an in-flight step as **indeterminate** rather than guessing which lie to tell. | [DURABILITY.md](./docs/DURABILITY.md) |
 | **Prompt injection** | An AI node classifies a webhook body — text an outsider wrote — and text reads as instructions. The finding isn't "untrusted data in a prompt" (that is every AI node); it is the *composition*: they write the instructions **and** the answer decides where a request goes. Bounded at the boundary by a per-call random fence and a classification confined to the declared labels. | [SECURITY.md](./SECURITY.md) |
+| **A contract nobody declared** | A workflow's return type is a promise to every workflow that calls it as a sub-workflow — and **the author who breaks it is not the author who finds out**. Rename a field in the return node: the callee still lints, the dependency graph still resolves (the *workflow* is still there; the *shape* changed, and a reference check can't see a shape), and somebody else's `{{sub.orderId}}` quietly arrives `undefined` at run time. The rule is covariance of return types, which `types.js` already had the subtyping test for — so **narrowing is safe and widening is breaking**, the opposite of the intuition from function arguments, because a return value is consumed rather than supplied. Names the caller, the node, the reference, and the field they probably meant. | [CONTRACTS.md](./docs/CONTRACTS.md) |
 | **Sizing the concurrency cap** | `max_concurrent_runs` is a number somebody typed once, and the usual dashboard divides running runs by it and alerts at 80%. Utilisation is not wait: at ρ = 0.8 a one-slot pool waits **4.00×** its own service time and a ten-slot pool waits **0.20×** — twenty times the experience at the same number. M/M/c would be the textbook fix and is still wrong, because a run waiting on a human approval is nothing like exponentially distributed. So: Allen–Cunneen G/G/c over the *measured* variability, Erlang C by recurrence rather than the factorial form that overflows at c ≈ 170 — and, unusually, the model **grades itself**, because `started_at − created_at` is the wait it predicts, already recorded. | [CAPACITY.md](./docs/CAPACITY.md) |
 | **A silent nondeterminism** | Branches run in parallel, and where they converge the engine assigns their outputs over each other — so two branches both producing a `status` meant one silently won, decided by the order the edges sat in the array. Which three parts of the product rewrite, differently: a collab session sorts edges by id, the `.flow` format and the signature by source/target, a plain save keeps the array. **The same graph computed a different value depending on how it was last saved**, with every check green — the type checker least able to see it, because joining the two field types into a union is the sound thing to do and is exactly what discards *which one you get*. Merge order now comes from the graph. | [CONVERGENCE.md](./docs/CONVERGENCE.md) |
 | **Undoing side effects** | Every other control bounds *whether* something runs; none undoes what already ran. Compensations unwind in **reverse completion order** (the DAG doesn't know what finished first), and a step that did no work this run is never compensated. | [ROLLBACK.md](./docs/ROLLBACK.md) |
@@ -533,6 +534,32 @@ status completed
   **secret reach** ("who can read `STRIPE_KEY`?" was otherwise a manual grep). On
   the canvas as 🔗 Lineage, in `flowforge lineage --node <id>`, and on the public
   API. See [docs/LINEAGE.md](./docs/LINEAGE.md).
+- **Cross-workflow contracts** — FlowForge already types a caller against its
+  callee: the sub-workflow rule walks into the target workflow and checks
+  `{{sub.orderId}}` against what it really returns. That's the right direction
+  for one half of the problem and the wrong one for the half that hurts —
+  **the author who breaks the contract is not the author who finds out.** Rename
+  a field in a sub-workflow's return node and the callee still lints (nothing
+  about *its* graph is wrong), every caller keeps referencing the old name, the
+  callee's author sees no error because the broken reference is in somebody
+  else's workflow — possibly one they can't see — and the caller's author finds
+  out at run time when a field arrives `undefined` and an HTTP body goes out
+  with a hole in it. The dependency graph doesn't help: it asks whether the
+  reference to the *workflow* resolves, and it does; what changed is a shape,
+  and a reference check can't see a shape. The rule is **covariance of return
+  types**, and `types.js` already had the subtyping test — a change keeps the
+  promise when every value the callee can now return is one the caller was
+  prepared for, so **narrowing is safe and widening is breaking**, and
+  required → optional breaks while optional → required can't. Both are the
+  opposite of the argument intuition, for one reason worth stating: a return
+  value is *consumed*, not supplied, so the permissive direction flips. There's
+  no declared interface to compare against — nobody writes a workflow's return
+  shape down — so the contract is whatever the deployed version returns today,
+  which is what lets a finding name the exact reference that stops resolving.
+  Two levels, one gate: a contract that narrowed with nobody relying on the part
+  that went is worth knowing, not worth stopping a deploy for. `flowforge
+  contract <id> <file>` fails on a broken reference; `--strict` on the shape.
+  See [docs/CONTRACTS.md](./docs/CONTRACTS.md).
 - **Capacity planning** — `max_concurrent_runs` is a number somebody typed once,
   and everything downstream of it follows: whether a run starts now or queues,
   whether a burst drains or accumulates. It's answerable in closed form from
