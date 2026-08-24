@@ -54,6 +54,8 @@ export default function RunSettingsPanel({ workflowId, open, onClose }) {
   const [rollbackPolicy, setRollbackPolicy] = useState('failure')
   const [recoveryPolicy, setRecoveryPolicy] = useState('safe')
   const [redact, setRedact] = useState('')
+  // The trigger field naming whose data a run is about. '' = not declared.
+  const [subjectPath, setSubjectPath] = useState('')
   // Cross-workflow dependencies (read-only impact analysis). null while
   // loading; a fetch failure just hides the section — it's informational.
   const [deps, setDeps] = useState(null)
@@ -108,6 +110,7 @@ export default function RunSettingsPanel({ workflowId, open, onClose }) {
         } catch {
           setRedact('')
         }
+        setSubjectPath(wf.subject_path || '')
         // Stored in ms / as a 0..1 fraction; shown in the friendlier seconds / %.
         setSlaDurationInput(wf.sla_max_duration_ms ? String(wf.sla_max_duration_ms / 1000) : '')
         setSlaSuccessInput(
@@ -252,6 +255,7 @@ export default function RunSettingsPanel({ workflowId, open, onClose }) {
           rollback_policy: rollbackPolicy,
           recovery_policy: recoveryPolicy,
           redact: redact.split('\n').map((line) => line.trim()).filter(Boolean),
+          subject_path: subjectPath.trim() || null,
         },
       })
       toast.success('Run settings saved')
@@ -562,7 +566,33 @@ export default function RunSettingsPanel({ workflowId, open, onClose }) {
                 Lineage shows where trigger data travels.
               </p>
 
-              <div className="run-settings__section">Crash recovery</div>
+              <div className="run-settings__section">Data subject field</div>
+              <p className="webhook-panel__hint">
+                Which trigger field says <em>whose</em> data a run is about —
+                <code>customer.email</code>, <code>user.id</code>. Runs are then
+                indexed by it, so &ldquo;show me everything you hold about this
+                person&rdquo; and &ldquo;erase it&rdquo; are one lookup instead of
+                a search through every payload ever recorded.
+              </p>
+              <label className="run-settings__field">
+                <span className="run-settings__label">Identifying field</span>
+                <input
+                  type="text"
+                  value={subjectPath}
+                  placeholder="customer.email"
+                  onChange={(e) => setSubjectPath(e.target.value)}
+                />
+              </label>
+              <p className="webhook-panel__hint">
+                What gets stored is <strong>not the value</strong> — it is a keyed
+                hash of it, scoped to this workspace. The database never holds the
+                address; somebody who has the address can still find the runs. That
+                is deliberate: the record that has to survive an erasure is the
+                proof it happened, and keying it on the address would make that
+                proof a copy of the thing deleted.
+              </p>
+
+              <div className="run-settings__section">Crash recovery</div>              <div className="run-settings__section">Crash recovery</div>
               <p className="webhook-panel__hint">
                 If the worker running this workflow stops existing — an eviction,
                 an out-of-memory kill — the run is picked up and{' '}

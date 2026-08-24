@@ -546,3 +546,68 @@ describe('RunSettingsPanel', () => {
     expect(onClose).not.toHaveBeenCalled()
   })
 })
+
+// Which trigger field says whose data a run is about. Declared beside the
+// redaction settings because both are about personal data — and the copy has to
+// carry a claim the field itself cannot: what gets stored is a keyed hash, not
+// the value.
+describe('RunSettingsPanel — data subject field', () => {
+  const field = () => screen.getByPlaceholderText('customer.email')
+
+  it('loads the declared field', async () => {
+    apiFetch.mockImplementation((path, opts) => {
+      if (path === '/api/workflows/wf1' && !opts) {
+        return Promise.resolve({ workflow: { ...WORKFLOW, subject_path: 'user.id' } })
+      }
+      if (path === '/api/workspaces/ws1/workflows') {
+        return Promise.resolve({ workflows: WORKSPACE_WORKFLOWS })
+      }
+      if (path === '/api/workflows/wf1/cache') {
+        return Promise.resolve({ cache: { entries: 0, hits: 0, nextExpiry: null } })
+      }
+      return Promise.reject(new Error(`unexpected request: ${path}`))
+    })
+    setup()
+    await waitFor(() => expect(field()).toHaveValue('user.id'))
+  })
+
+  it('shows an empty field when nothing is declared', async () => {
+    setup()
+    await waitFor(() => expect(field()).toHaveValue(''))
+  })
+
+  it('saves what was typed', async () => {
+    setup()
+    await waitFor(() => expect(field()).toBeInTheDocument())
+    fireEvent.change(field(), { target: { value: 'customer.email' } })
+    fireEvent.click(screen.getByRole('button', { name: /save settings/i }))
+    await waitFor(() =>
+      expect(apiFetch).toHaveBeenCalledWith(
+        '/api/workflows/wf1',
+        expect.objectContaining({ body: expect.objectContaining({ subject_path: 'customer.email' }) })
+      )
+    )
+  })
+
+  it('clears it with an empty field rather than saving a blank string', async () => {
+    setup()
+    await waitFor(() => expect(field()).toBeInTheDocument())
+    fireEvent.change(field(), { target: { value: '   ' } })
+    fireEvent.click(screen.getByRole('button', { name: /save settings/i }))
+    await waitFor(() =>
+      expect(apiFetch).toHaveBeenCalledWith(
+        '/api/workflows/wf1',
+        expect.objectContaining({ body: expect.objectContaining({ subject_path: null }) })
+      )
+    )
+  })
+
+  it('says the value itself is not what gets stored', async () => {
+    // The one claim somebody typing an email field into a form needs to see,
+    // and the reason the index is worth having at all.
+    setup()
+    await waitFor(() => expect(field()).toBeInTheDocument())
+    expect(screen.getByText(/is a keyed\s+hash of it/)).toBeInTheDocument()
+    expect(screen.getByText(/The database never holds the/)).toBeInTheDocument()
+  })
+})
