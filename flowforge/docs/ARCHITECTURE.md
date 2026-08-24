@@ -32,6 +32,7 @@ public API).
 - [The type system](#the-type-system)
 - [Policy as code](#policy-as-code)
 - [Static analysis (the linter)](#static-analysis-the-linter)
+  - [Callback liveness](#callback-liveness)
   - [Path invariants (workflow guarantees)](#path-invariants-workflow-guarantees)
   - [Path feasibility (the branch nothing can reach)](#path-feasibility-the-branch-nothing-can-reach)
 - [Run cost accounting and budgets](#run-cost-accounting-and-budgets)
@@ -1480,6 +1481,49 @@ a topological pass, so the linter's idea of "upstream" and the engine's idea
 of "resolvable" cannot drift apart. The lint route accepts the canvas's
 live, unsaved graph and enriches it with real workspace context (secret
 names, sub-workflow target status).
+
+### Callback liveness
+
+Every check above asks whether the graph is *well formed*.
+`services/callbackLiveness.js` asks whether a run of it can make **progress**.
+
+A `wait-callback` node parks the run until an external system POSTs to a
+one-time URL. The engine mints that URL at run start and exposes it as
+`{{callbacks.<node-id>}}`, so some node has to send it — and, as the runner's
+own comment says, an **upstream** node. Nothing checked the "upstream".
+
+Three ways to get it wrong:
+
+| | `code` | |
+|---|---|---|
+| Nothing sends the URL at all | `callback-never-sent` | error |
+| Only a node *downstream* of the wait sends it | `callback-deadlock` | error |
+| The URL is only ever logged | `callback-never-sent` | error |
+| A sender exists but does not run on every path there | `callback-may-not-be-sent` | warning |
+
+The wait times out eventually — an hour by default, up to a week — so this is
+not a hang. It is worse than a hang in one specific way: **the graph becomes
+indistinguishable at run time from a partner system that never replied.** The
+investigation starts at the partner, and the answer was on the canvas.
+
+Two things make it precise rather than noisy:
+
+- **Sending is a dataflow question, not a string search.** The commonest
+  *correct* shape is a `transform` that builds the request body and an HTTP node
+  that references it — the URL goes out and no HTTP node mentions `callbacks`
+  anywhere. So the URL is followed forward through references, and the question
+  is whether anything that reaches outside FlowForge carries it. That is the
+  same node-type set the [effect report](./EFFECTS.md) is built on, reused
+  rather than re-listed, which is also why a node that merely *logs* the URL
+  does not count.
+- **The path check is not dominance.** Dominance asks whether every path to the
+  wait goes through the sender, which is the right question for a sequential
+  engine and the wrong one here: independent branches run in parallel, so
+  `t1 → send` beside `t1 → wait` executes both, and a dominance test would send
+  somebody to fix a correct graph. What decides it is whether a **decision** can
+  route away from the sender while still arriving at the wait — the same outcome
+  partition [guarantees](./GUARANTEES.md) and
+  [convergence](./CONVERGENCE.md) use.
 
 ### Dataflow analysis
 
