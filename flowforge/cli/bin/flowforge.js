@@ -29,6 +29,7 @@ const COMMANDS = {
   types: require('../src/commands/types'),
   lineage: require('../src/commands/lineage'),
   effects: require('../src/commands/effects'),
+  converge: require('../src/commands/converge'),
   release: require('../src/commands/release'),
   trigger: require('../src/commands/trigger'),
   pause: require('../src/commands/pause'),
@@ -78,6 +79,7 @@ Usage:
   flowforge types <workflow-id> [--node <id>]      Inferred data schema per node — what each one produces (exits non-zero on a type error)
   flowforge lineage <id> [--node <id>] [--strict]  Where data comes from and where it leaves — provenance, impact, and taint
   flowforge effects <id> [--ungated]               What a run can do to the outside world, and what has to be true first (--ungated fails on an effect with no gate)
+  flowforge converge <id> [--strict]               Where parallel branches collide and which value survives (--strict fails on a tie nothing in the graph decides)
   flowforge release <id> [--promote|--rollback]   Canary release status — exits 0 promote, 1 roll back, 2 keep waiting
   flowforge trigger <workflow-id> [--data <json>] [--key <idempotency-key>] [--priority high|normal|low] [--watch]
   flowforge pause <workflow-id>                    Hold all new runs (kill switch) — needs a manage token
