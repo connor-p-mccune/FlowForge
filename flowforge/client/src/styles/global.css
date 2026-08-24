@@ -8649,3 +8649,113 @@ html, body, #root {
   margin-top: 4px;
   color: #b45309;
 }
+
+/* — Contract gate ——————————————————————————————————————————————————— */
+/* The confirmation shown when deploying would break the workflows that call
+   this one. Reuses the import-modal shell; everything below is what a list of
+   somebody else's broken references needs. */
+
+.contract-gate {
+  max-width: 520px;
+}
+
+.contract-gate__body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  max-height: 55vh;
+  overflow-y: auto;
+}
+
+.contract-gate__intro {
+  font-size: 13px;
+  line-height: 1.55;
+  color: #334155;
+  margin: 0;
+}
+
+.contract-gate__callers {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+}
+
+.contract-gate__caller {
+  display: block;
+  font-size: 13px;
+  font-weight: 600;
+  color: #991b1b;
+}
+
+.contract-gate__breaks {
+  list-style: none;
+  margin: 4px 0 0;
+  padding: 0 0 0 12px;
+  border-left: 2px solid #fecaca;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: #475569;
+}
+
+.contract-gate__breaks code {
+  font-family: var(--mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: 11px;
+  background: #f1f5f9;
+  border-radius: 4px;
+  padding: 1px 4px;
+  color: #0f172a;
+}
+
+.contract-gate__where { color: var(--text-muted, #64748b); }
+.contract-gate__hint { color: #b45309; }
+
+.contract-gate__change {
+  font-size: 12px;
+  color: var(--text-muted, #64748b);
+  margin: 0;
+  padding-top: 8px;
+  border-top: 1px solid #e2e8f0;
+}
+
+.contract-gate__footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 12px 16px;
+  border-top: 1px solid #e2e8f0;
+  background: #f8fafc;
+}
+
+.contract-gate__cancel,
+.contract-gate__confirm {
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  border-radius: 6px;
+  padding: 7px 14px;
+  cursor: pointer;
+  border: 1px solid transparent;
+}
+
+/* The safe choice reads as the default one: deploying anyway is a decision, not
+   a dismissal. */
+.contract-gate__cancel {
+  background: #fff;
+  border-color: #cbd5e1;
+  color: #0f172a;
+}
+
+.contract-gate__cancel:hover { background: #f1f5f9; }
+
+.contract-gate__confirm {
+  background: #dc2626;
+  color: #fff;
+}
+
+.contract-gate__confirm:hover { background: #b91c1c; }

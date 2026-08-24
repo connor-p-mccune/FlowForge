@@ -11,7 +11,7 @@ import ReactFlow, {
   useReactFlow,
 } from 'reactflow'
 import 'reactflow/dist/style.css'
-import { useWorkflow } from '../../hooks/useWorkflow'
+import { useWorkflow, serializeGraph } from '../../hooks/useWorkflow'
 import { useUndoRedo } from '../../hooks/useUndoRedo'
 import { useSocket } from '../../hooks/useSocket'
 import { useAuth } from '../../hooks/useAuth'
@@ -40,6 +40,7 @@ import {
 import IssuesPanel from './IssuesPanel'
 import LineagePanel from './LineagePanel'
 import ConvergencePanel from './ConvergencePanel'
+import ContractGate from './ContractGate'
 import GuaranteesPanel from './GuaranteesPanel'
 import FlowTextPanel from './FlowTextPanel'
 import PathsPanel from './PathsPanel'
@@ -132,6 +133,9 @@ function CanvasInner({ workflowId }) {
   // Held here rather than in the panel because it decorates the *canvas*: the
   // panel owns the fetch, the edges own the drawing.
   const [convergence, setConvergence] = useState(null)
+  // The contract report that stopped a deploy, or null. Cleared either way once
+  // the author has answered.
+  const [contractGate, setContractGate] = useState(null)
   const [previewOpen, setPreviewOpen] = useState(false)
   // The pause this run is currently sitting at, or null. Driven by the
   // `debug` exec-update, which is why a collaborator watching the same run sees
@@ -671,7 +675,7 @@ function CanvasInner({ workflowId }) {
 
   // Deploy the current canvas as a new version, then nudge the history drawer to
   // refresh if it's open so the new version appears.
-  const handleDeploy = useCallback(async () => {
+  const runDeploy = useCallback(async () => {
     setDeploying(true)
     try {
       const version = await deploy(nodes, edges)
@@ -684,6 +688,36 @@ function CanvasInner({ workflowId }) {
       setDeploying(false)
     }
   }, [deploy, nodes, edges])
+
+  // Deploying is the moment a broken contract starts costing somebody else:
+  // the version other workflows resolve against changes, and the runs that go
+  // wrong afterwards belong to people who did not make this edit and cannot see
+  // this canvas. So the check happens here rather than as a banner somebody
+  // scrolls past — and it is a confirmation rather than a refusal, because
+  // sometimes the right answer is to deploy and go fix the callers.
+  //
+  // Best-effort by construction: if the check itself fails, the deploy proceeds.
+  // A contract analysis that could block a deploy by being unavailable would be
+  // a worse failure than the one it exists to prevent.
+  const handleDeploy = useCallback(async () => {
+    setDeploying(true)
+    let report = null
+    try {
+      report = await apiFetch(`/api/workflows/${workflowId}/contract`, {
+        method: 'POST',
+        body: serializeGraph(nodes, edges),
+      })
+    } catch {
+      /* the gate never blocks on its own failure */
+    } finally {
+      setDeploying(false)
+    }
+    if (report?.available && report.summary.broken > 0) {
+      setContractGate(report)
+      return
+    }
+    await runDeploy()
+  }, [workflowId, nodes, edges, runDeploy])
 
   // Flip the kill switch. Idempotent server-side, so a stale UI can't wedge;
   // the toast names the resulting state. On success the hook has already folded
@@ -1352,6 +1386,16 @@ function CanvasInner({ workflowId }) {
           selectedNodeId={selectedNode?.id || null}
           onClose={() => setLineageOpen(false)}
           onSelectNode={handleSelectIssueNode}
+        />
+      )}
+      {contractGate && (
+        <ContractGate
+          report={contractGate}
+          onCancel={() => setContractGate(null)}
+          onConfirm={() => {
+            setContractGate(null)
+            runDeploy()
+          }}
         />
       )}
       {/* Sixth on the same side, and the only one whose answer the *canvas*
