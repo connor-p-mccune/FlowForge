@@ -20,6 +20,8 @@ const REPORT = {
     cvSquaredArrival: 1,
     observedWaitMeanMs: 4200,
     sampled: { service: 336, wait: 336 },
+    peakHour: { ratePerMs: 2 / 3600000, perHour: 2, runs: 2, startedAt: '2026-08-18T09:00:00.000Z' },
+    peakDay: { ratePerMs: 2 / 3600000, perHour: 2, runs: 48, startedAt: '2026-08-18T00:00:00.000Z' },
   },
   current: {
     servers: 4,
@@ -30,6 +32,11 @@ const REPORT = {
     waitP95Ms: 15000,
   },
   calibration: { comparable: true, ratio: 0.95, verdict: 'agrees' },
+  peak: {
+    hour: { servers: 4, stable: true, utilisation: 0.5, headroom: 2, waitMeanMs: 4000, waitP95Ms: 15000 },
+    day: { servers: 4, stable: true, utilisation: 0.5, headroom: 2, waitMeanMs: 4000, waitP95Ms: 15000 },
+  },
+  peakRecommendation: null,
   curve: [],
   recommendation: null,
   model: { name: 'Allen–Cunneen G/G/c', variabilityFactor: 1.05, mmcWaitMeanMs: 3800 },
@@ -136,5 +143,52 @@ describe('CapacityHint', () => {
     vi.advanceTimersByTime(600)
     await waitFor(() => expect(apiFetch).toHaveBeenCalled())
     expect(container.querySelector('.capacity-hint')).toBeNull()
+  })
+})
+
+// The mean is what the field is usually chosen against, and the peak is what
+// actually breaks. Worth a sentence only when it says something the mean did
+// not — a hint that always printed two numbers would train somebody to read one.
+describe('CapacityHint — the busiest hour', () => {
+  const bursty = (over = {}) => ({
+    ...REPORT,
+    measured: {
+      ...REPORT.measured,
+      peakHour: { ratePerMs: 60 / 3600000, perHour: 60, runs: 60, startedAt: '2026-08-18T09:00:00.000Z' },
+    },
+    peak: {
+      ...REPORT.peak,
+      hour: {
+        servers: 4, stable: false, utilisation: 7.5, headroom: 0.13,
+        waitMeanMs: null, waitP95Ms: null, ...over,
+      },
+    },
+  })
+
+  it('warns when a cap that is fine on average cannot absorb the peak', async () => {
+    apiFetch.mockResolvedValue(bursty())
+    hint()
+    vi.advanceTimersByTime(600)
+    expect(await screen.findByText(/mean wait/)).toBeInTheDocument()
+    expect(screen.getByText(/At its busiest hour \(60 runs\/hour\) this cap cannot keep up/))
+      .toBeInTheDocument()
+  })
+
+  it('quotes the wait at a peak the cap does survive', async () => {
+    apiFetch.mockResolvedValue(
+      bursty({ stable: true, utilisation: 0.9, headroom: 1.11, waitMeanMs: 45000 })
+    )
+    hint()
+    vi.advanceTimersByTime(600)
+    expect(await screen.findByText(/At its busiest hour \(60 runs\/hour\) that becomes a 45.0s wait/))
+      .toBeInTheDocument()
+  })
+
+  it('stays quiet when the peak barely differs from the mean', async () => {
+    apiFetch.mockResolvedValue(REPORT)
+    hint()
+    vi.advanceTimersByTime(600)
+    await screen.findByText(/mean wait/)
+    expect(screen.queryByText(/busiest hour/)).not.toBeInTheDocument()
   })
 })

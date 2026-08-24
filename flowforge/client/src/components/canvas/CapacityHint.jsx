@@ -69,7 +69,14 @@ export default function CapacityHint({ workflowId, cap }) {
     )
   }
 
-  const { measured, current, calibration } = report
+  const { measured, current, peak, calibration } = report
+
+  // The peak is worth a sentence only when it says something the mean did not.
+  // A hint that always printed two numbers would train somebody to read one.
+  const burst =
+    peak?.hour && measured.peakHour && measured.peakHour.perHour > measured.arrivalsPerHour * 1.5
+      ? peak.hour
+      : null
 
   if (!current.stable) {
     return (
@@ -89,6 +96,18 @@ export default function CapacityHint({ workflowId, cap }) {
       <strong>{ms(current.waitMeanMs)}</strong> mean wait ({ms(current.waitP95Ms)} at p95), with
       room for <strong>{current.headroom.toFixed(1)}×</strong> today&rsquo;s traffic before the
       queue stops draining.
+      {burst && !burst.stable && (
+        <span className="capacity-hint__caveat">
+          {' '}At its busiest hour ({measured.peakHour.perHour.toFixed(0)} runs/hour) this cap
+          cannot keep up — the queue grows through the burst and drains afterwards.
+        </span>
+      )}
+      {burst && burst.stable && (
+        <span className="capacity-hint__caveat">
+          {' '}At its busiest hour ({measured.peakHour.perHour.toFixed(0)} runs/hour) that becomes
+          a {ms(burst.waitMeanMs)} wait.
+        </span>
+      )}
       {CAVEAT[calibration.verdict] && (
         <span className="capacity-hint__caveat"> {CAVEAT[calibration.verdict]}</span>
       )}
