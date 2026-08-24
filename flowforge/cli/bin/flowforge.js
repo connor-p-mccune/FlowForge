@@ -32,6 +32,7 @@ const COMMANDS = {
   converge: require('../src/commands/converge'),
   capacity: require('../src/commands/capacity'),
   contract: require('../src/commands/contract'),
+  subject: require('../src/commands/subject'),
   release: require('../src/commands/release'),
   trigger: require('../src/commands/trigger'),
   pause: require('../src/commands/pause'),
@@ -82,6 +83,7 @@ Usage:
   flowforge lineage <id> [--node <id>] [--strict]  Where data comes from and where it leaves — provenance, impact, and taint
   flowforge effects <id> [--ungated]               What a run can do to the outside world, and what has to be true first (--ungated fails on an effect with no gate)
   flowforge converge <id> [--strict]               Where parallel branches collide and which value survives (--strict fails on a tie nothing in the graph decides)
+  flowforge subject <identifier> [--erase] [--yes]  Data subject request — everything held about one person, and erasing it (previews unless --yes)
   flowforge contract <id> [file] [--strict]        What this workflow promises its callers, and whose references a change would break
   flowforge capacity <id> [--target <ms>] [--cap N] Is the concurrency cap right? Queueing analysis from measured arrivals and service times
   flowforge release <id> [--promote|--rollback]   Canary release status — exits 0 promote, 1 roll back, 2 keep waiting
