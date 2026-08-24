@@ -215,6 +215,40 @@ function interArrivalGaps(timestampsMs) {
   return gaps
 }
 
+// The busiest window of a given length, as an arrival rate.
+//
+// The mean rate is the wrong statistic for deciding a cap, and it is wrong in
+// the direction that matters. A workflow taking 20 runs an hour on average and
+// 200 every Monday at nine is *unstable every Monday at nine*, and a report
+// averaging over the week says 80% utilised and looks fine. The queue does not
+// experience the average.
+//
+// Directly measured rather than modelled: no seasonality decomposition, no
+// hour-of-week bucketing, no minimum-samples-per-bucket problem to reason
+// about. A rolling window over the actual arrivals answers the operational
+// question as asked — *what is the worst hour this has really had?* — and a
+// week of history gives it 168 candidate positions rather than one sample.
+//
+// Two pointers, so it is one pass. Returns the rate and when it occurred, since
+// "Monday 09:00" is what makes somebody recognise their own traffic.
+function peakRate(timestampsMs, windowMs) {
+  const sorted = [...timestampsMs].sort((a, b) => a - b)
+  if (sorted.length === 0 || !(windowMs > 0)) return { ratePerMs: 0, count: 0, startedAtMs: null }
+
+  let best = 0
+  let bestStart = sorted[0]
+  let left = 0
+  for (let right = 0; right < sorted.length; right += 1) {
+    while (sorted[right] - sorted[left] >= windowMs) left += 1
+    const count = right - left + 1
+    if (count > best) {
+      best = count
+      bestStart = sorted[left]
+    }
+  }
+  return { ratePerMs: best / windowMs, count: best, startedAtMs: bestStart }
+}
+
 module.exports = {
   erlangB,
   erlangC,
@@ -226,4 +260,5 @@ module.exports = {
   stability,
   squaredCv,
   interArrivalGaps,
+  peakRate,
 }

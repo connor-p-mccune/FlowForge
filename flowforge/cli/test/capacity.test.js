@@ -40,6 +40,8 @@ const HEALTHY = {
     observedWaitP50Ms: 1000,
     observedWaitP95Ms: 16000,
     sampled: { service: 336, wait: 336 },
+    peakHour: { ratePerMs: 2 / 3600000, perHour: 2, runs: 2, startedAt: '2026-08-18T09:00:00.000Z' },
+    peakDay: { ratePerMs: 2 / 3600000, perHour: 2, runs: 48, startedAt: '2026-08-18T00:00:00.000Z' },
   },
   current: prediction(4),
   calibration: {
@@ -49,6 +51,11 @@ const HEALTHY = {
     observedMs: 4200,
     predictedMs: 4000,
   },
+  peak: {
+    hour: { ...prediction(4), perHour: 2, runs: 2, startedAt: '2026-08-18T09:00:00.000Z' },
+    day: { ...prediction(4), perHour: 2, runs: 48, startedAt: '2026-08-18T00:00:00.000Z' },
+  },
+  peakRecommendation: null,
   curve: [
     // A cap the load would saturate: no steady state, so no wait to quote.
     prediction(2, { stable: false, utilisation: 1.1, headroom: 0.9, waitMeanMs: null, waitP95Ms: null }),
@@ -220,4 +227,83 @@ test('without a workflow id prints usage and fails', async () => {
   const code = await capacity({ positionals: [], flags: {} }, ctx)
   assert.equal(code, 1)
   assert.match(ctx.output(), /Usage: flowforge capacity/)
+})
+
+// The mean rate is the wrong statistic for deciding a cap, and the CLI has to
+// say so where it matters — a report that only ever quoted the average is the
+// report this section was added to fix.
+const BURSTY = {
+  ...HEALTHY,
+  measured: {
+    ...HEALTHY.measured,
+    arrivalsPerHour: 2,
+    peakHour: { ratePerMs: 60 / 3600000, perHour: 60, runs: 60, startedAt: '2026-08-18T09:00:00.000Z' },
+    peakDay: { ratePerMs: 3 / 3600000, perHour: 3, runs: 72, startedAt: '2026-08-18T00:00:00.000Z' },
+  },
+  peak: {
+    hour: {
+      ...prediction(4, { stable: false, utilisation: 7.5, headroom: 0.13, waitMeanMs: null, waitP95Ms: null }),
+      perHour: 60, runs: 60, startedAt: '2026-08-18T09:00:00.000Z',
+    },
+    day: {
+      ...prediction(4, { utilisation: 0.75, headroom: 1.33, waitMeanMs: 9000 }),
+      perHour: 3, runs: 72, startedAt: '2026-08-18T00:00:00.000Z',
+    },
+  },
+}
+
+test('reports the busiest hour beside the average one', async () => {
+  const { out } = await run(BURSTY)
+  assert.match(out, /At the busiest hour \(60 runs from 2026-08-18 09:00, 60\.0\/hour\)/)
+})
+
+test('says plainly when the cap cannot absorb the peak it is comfortable with on average', async () => {
+  const { out } = await run(BURSTY)
+  // Comfortable on the mean, over capacity at the peak — the exact failure a
+  // report built on the average cannot see.
+  assert.match(out, /At 4 slot\(s\): 4\.0s mean wait/)
+  assert.match(out, /4 slot\(s\) cannot absorb that/)
+  assert.match(out, /grows for the duration of the burst and drains afterwards/)
+})
+
+test('stays quiet about the peak when it barely differs from the mean', async () => {
+  const { out } = await run(HEALTHY)
+  assert.doesNotMatch(out, /At the busiest hour/)
+})
+
+test('quotes the wait at a peak the cap does survive', async () => {
+  const survivable = {
+    ...BURSTY,
+    peak: {
+      ...BURSTY.peak,
+      hour: { ...BURSTY.peak.hour, stable: true, utilisation: 0.9, headroom: 1.11, waitMeanMs: 45000 },
+    },
+  }
+  const { out } = await run(survivable)
+  assert.match(out, /45\.0s mean wait, 90% utilised, 1\.11× headroom/)
+})
+
+test('sizes the peak separately from the average, since that is a cost decision', async () => {
+  const { out } = await run(
+    {
+      ...BURSTY,
+      recommendation: { targetWaitMs: 5000, servers: 5, change: 1, confident: true },
+      peakRecommendation: { targetWaitMs: 5000, servers: 14, change: 10, basis: 'busiest-hour', confident: true },
+    },
+    { target: 5000 }
+  )
+  assert.match(out, /Raise the cap to 5 \(\+1\)/)
+  assert.match(out, /14 would meet it during the busiest hour too \(\+10 on today's cap\)/)
+})
+
+test('does not repeat the peak sizing when it matches the average one', async () => {
+  const { out } = await run(
+    {
+      ...HEALTHY,
+      recommendation: { targetWaitMs: 5000, servers: 5, change: 1, confident: true },
+      peakRecommendation: { targetWaitMs: 5000, servers: 5, change: 1, basis: 'busiest-hour', confident: true },
+    },
+    { target: 5000 }
+  )
+  assert.doesNotMatch(out, /during the busiest hour too/)
 })

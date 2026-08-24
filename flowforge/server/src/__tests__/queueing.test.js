@@ -15,6 +15,7 @@ const {
   stability,
   squaredCv,
   interArrivalGaps,
+  peakRate,
 } = require('../services/queueing')
 
 const close = (actual, expected, tolerance = 1e-4) =>
@@ -228,5 +229,46 @@ describe('interArrivalGaps', () => {
   it('has no gaps to report from a single arrival', () => {
     expect(interArrivalGaps([42])).toEqual([])
     expect(interArrivalGaps([])).toEqual([])
+  })
+})
+
+describe('peakRate', () => {
+  const HOUR = 3600000
+
+  it('finds the busiest window rather than averaging over the quiet ones', () => {
+    // Ten arrivals in one minute, then nothing for the rest of the day. The
+    // mean is 10/day; the busiest hour is 10/hour — and it is the second number
+    // that decides whether the queue survives.
+    const burst = Array.from({ length: 10 }, (_, i) => i * 6000)
+    const { count, ratePerMs } = peakRate([...burst, 20 * HOUR], HOUR)
+    expect(count).toBe(10)
+    close(ratePerMs * HOUR, 10, 1e-9)
+  })
+
+  it('says when the peak was, so somebody recognises their own traffic', () => {
+    const quiet = [0, HOUR, 2 * HOUR]
+    const burst = [10 * HOUR, 10 * HOUR + 1000, 10 * HOUR + 2000, 10 * HOUR + 3000]
+    expect(peakRate([...quiet, ...burst], HOUR).startedAtMs).toBe(10 * HOUR)
+  })
+
+  it('is the overall rate when the window covers everything', () => {
+    const stamps = [0, HOUR, 2 * HOUR, 3 * HOUR]
+    expect(peakRate(stamps, 100 * HOUR).count).toBe(4)
+  })
+
+  it('equals the mean for perfectly even arrivals', () => {
+    // The property that makes it safe to report unconditionally: with no bursts
+    // it agrees with the average and says nothing alarming.
+    const even = Array.from({ length: 24 }, (_, i) => i * HOUR)
+    close(peakRate(even, HOUR).ratePerMs * HOUR, 1, 1e-9)
+  })
+
+  it('sorts first, so an unordered query result is still correct', () => {
+    const shuffled = [3 * HOUR, 0, 2 * HOUR, HOUR]
+    expect(peakRate(shuffled, 100 * HOUR).startedAtMs).toBe(0)
+  })
+
+  it('has no peak to report from no arrivals', () => {
+    expect(peakRate([], HOUR)).toEqual({ ratePerMs: 0, count: 0, startedAtMs: null })
   })
 })

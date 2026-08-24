@@ -237,3 +237,105 @@ describe('measure', () => {
     expect(m.cvSquaredService).toBeNull()
   })
 })
+
+// The mean rate is the wrong statistic for deciding a cap, and it is wrong in
+// the direction that matters. These tests pin the case the original report got
+// wrong: comfortable on the average, diverging every Monday.
+describe('analyzeCapacity — peak load', () => {
+  // Steady background traffic plus one hour a week of ten times the volume.
+  function seedBursty(wfId, userId) {
+    const windowMs = 7 * 86400000
+    const now = Date.now()
+    const insert = db.prepare(
+      `INSERT INTO executions (id, workflow_id, status, triggered_by, created_at, started_at, finished_at)
+       VALUES (?, ?, 'completed', ?, ?, ?, ?)`
+    )
+    const service = 10 * 60000 // ten minutes in a slot
+    // 168 background runs — one an hour.
+    for (let i = 0; i < 168; i += 1) {
+      const created = now - windowMs + i * 3600000
+      insert.run(uuidv4(), wfId, userId, iso(created), iso(created), iso(created + service))
+    }
+    // Plus 60 in a single hour, three days in.
+    const burstStart = now - windowMs + 72 * 3600000
+    for (let i = 0; i < 60; i += 1) {
+      const created = burstStart + i * 55000
+      insert.run(uuidv4(), wfId, userId, iso(created), iso(created), iso(created + service))
+    }
+  }
+
+  it('measures the busiest hour, not just the average one', () => {
+    const { wfId, userId } = seedWorkflow({ cap: 4 })
+    seedBursty(wfId, userId)
+    const { measured } = analyzeCapacity(wfId)
+    expect(measured.arrivalsPerHour).toBeCloseTo(1.36, 1)
+    expect(measured.peakHour.perHour).toBeGreaterThan(50)
+  })
+
+  it('says when the peak was, so somebody recognises their own traffic', () => {
+    const { wfId, userId } = seedWorkflow({ cap: 4 })
+    seedBursty(wfId, userId)
+    expect(analyzeCapacity(wfId).measured.peakHour.startedAt).toMatch(/^\d{4}-/)
+  })
+
+  it('finds a cap that is comfortable on the mean and diverging at the peak', () => {
+    // The whole point. 1.36 runs/hour × 10 minutes is 0.23 erlangs into 4 slots
+    // — 6% utilised, nothing to see. 61 runs/hour × 10 minutes is 10 erlangs,
+    // which four slots cannot absorb at all.
+    const { wfId, userId } = seedWorkflow({ cap: 4 })
+    seedBursty(wfId, userId)
+    const { current, peak } = analyzeCapacity(wfId)
+    expect(current.stable).toBe(true)
+    expect(current.utilisation).toBeLessThan(0.3)
+    expect(peak.hour.stable).toBe(false)
+  })
+
+  it('separates a burst from sustained load', () => {
+    // The busiest hour is about whether the queue absorbs a spike; the busiest
+    // day is about what actually diverges. One burst does not move the day.
+    const { wfId, userId } = seedWorkflow({ cap: 4 })
+    seedBursty(wfId, userId)
+    const { peak } = analyzeCapacity(wfId)
+    expect(peak.hour.utilisation).toBeGreaterThan(peak.day.utilisation)
+    expect(peak.day.stable).toBe(true)
+  })
+
+  it('sizes the peak separately, because provisioning for it is a cost decision', () => {
+    const { wfId, userId } = seedWorkflow({ cap: 4 })
+    seedBursty(wfId, userId)
+    const { recommendation, peakRecommendation } = analyzeCapacity(wfId, { targetWaitMs: 30000 })
+    expect(peakRecommendation.basis).toBe('busiest-hour')
+    expect(peakRecommendation.servers).toBeGreaterThan(recommendation.servers)
+  })
+
+  it('agrees with the mean when traffic is exactly even', () => {
+    // The property that makes it safe to report unconditionally: with no bursts
+    // the peak says nothing the average did not.
+    //
+    // Seeded on the hour rather than reusing seedRuns, and the difference is
+    // instructive. seedRuns spaces 168 runs over a week at 59.7-minute
+    // intervals, so some one-hour windows genuinely contain two arrivals and the
+    // peak is 2/hour against a mean of 1. That is not a defect — a rolling
+    // maximum over an interval that does not divide the spacing really is above
+    // the average — but it is not the property being asserted here.
+    const { wfId, userId } = seedWorkflow({ cap: 4 })
+    const now = Date.now()
+    const insert = db.prepare(
+      `INSERT INTO executions (id, workflow_id, status, triggered_by, created_at, started_at, finished_at)
+       VALUES (?, ?, 'completed', ?, ?, ?, ?)`
+    )
+    for (let i = 0; i < 168; i += 1) {
+      const created = now - 7 * 86400000 + i * 3600000
+      insert.run(uuidv4(), wfId, userId, iso(created), iso(created), iso(created + 60000))
+    }
+    const { measured } = analyzeCapacity(wfId)
+    expect(measured.peakHour.perHour).toBeCloseTo(1, 9)
+    expect(measured.arrivalsPerHour).toBeCloseTo(1, 1)
+  })
+
+  it('makes no peak recommendation when nobody asked for a target', () => {
+    const { wfId, userId } = seedWorkflow({ cap: 4 })
+    seedRuns(wfId, userId, { count: 168 })
+    expect(analyzeCapacity(wfId).peakRecommendation).toBeNull()
+  })
+})

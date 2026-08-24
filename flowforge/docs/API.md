@@ -1071,6 +1071,15 @@ counterfactual it is really being asked for (*what would a cap of 8 buy?*),
 which is the one question no measurement can answer. A model that disagrees
 still answers, with `recommendation.confident: false`.
 
+`peak` judges the same cap at the rates that actually happened rather than at
+the average of them — the busiest hour (does the queue absorb a burst?) and the
+busiest day (does it survive sustained load?), both measured directly as a
+rolling maximum over the real arrivals. A cap can be comfortable on the mean and
+diverging every Monday, and only one of those is worth being woken up about.
+`peakRecommendation` sizes for the busiest hour separately from
+`recommendation`, because provisioning for one hour a week is a cost decision
+the caller gets to make.
+
 `headroom` is the multiple of today's arrival rate at which the cap saturates —
 the number to read before anything is on fire. Past saturation `stable` is
 `false` and the waits are `null`: the backlog grows without bound, and a large

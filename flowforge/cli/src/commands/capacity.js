@@ -27,6 +27,8 @@ const ms = (value) => {
 
 const pct = (value) => (value == null ? '—' : `${(value * 100).toFixed(0)}%`)
 
+const when = (iso) => (iso ? String(iso).replace('T', ' ').slice(0, 16) : 'an unknown time')
+
 // How the model did against the window it was measured from. This is the line
 // that says whether the rest of the output is worth acting on.
 const VERDICT = {
@@ -87,7 +89,8 @@ module.exports = async function capacity(args, ctx) {
   const report = await ctx.api.get(`/api/v1/workflows/${workflowId}/capacity${suffix}`)
   if (!report.available) return unavailable(report, ctx)
 
-  const { measured, current, calibration, curve, recommendation, model, cap } = report
+  const { measured, current, peak, calibration, curve, recommendation, peakRecommendation, model, cap } =
+    report
 
   ctx.log(bold(`Capacity for ${report.name}`) + gray(`  ·  cap ${cap}`))
   ctx.log(
@@ -136,6 +139,33 @@ module.exports = async function capacity(args, ctx) {
     )
   }
 
+  // The peak, which is the number the mean was hiding. Printed whenever it
+  // differs materially, because a report that only ever quoted the average is
+  // the report this was added to fix.
+  const peakHour = peak?.hour
+  if (peakHour && measured.peakHour.perHour > measured.arrivalsPerHour * 1.2) {
+    ctx.log('')
+    ctx.log(
+      bold('At the busiest hour') +
+        gray(
+          ` (${measured.peakHour.runs} runs from ${when(measured.peakHour.startedAt)}, ` +
+            `${measured.peakHour.perHour.toFixed(1)}/hour)`
+        )
+    )
+    if (!peakHour.stable) {
+      ctx.log(
+        red(`  ${cap} slot(s) cannot absorb that.`) +
+          '\n' +
+          gray('  The queue grows for the duration of the burst and drains afterwards.')
+      )
+    } else {
+      ctx.log(
+        `  ${cyan(ms(peakHour.waitMeanMs))} mean wait, ${pct(peakHour.utilisation)} utilised, ` +
+          `${peakHour.headroom.toFixed(2)}× headroom.`
+      )
+    }
+  }
+
   ctx.log('')
   ctx.log(bold('What each cap buys'))
   ctx.log(
@@ -182,6 +212,17 @@ module.exports = async function capacity(args, ctx) {
               `${ms(recommendation.targetWaitMs)}.`
           )
   ctx.log(line)
+  // Sized separately rather than folded in, because provisioning for the
+  // busiest hour of the week is a cost decision somebody else gets to make.
+  // What this owes them is the number, not the choice.
+  if (peakRecommendation?.servers != null && peakRecommendation.servers > recommendation.servers) {
+    ctx.log(
+      gray(
+        `  ${peakRecommendation.servers} would meet it during the busiest hour too` +
+          ` (+${peakRecommendation.change} on today's cap).`
+      )
+    )
+  }
   if (!recommendation.confident) {
     ctx.log(
       yellow('  Treat this as a suggestion: the model does not match the measured window.')

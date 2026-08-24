@@ -100,6 +100,43 @@ agrees with its own implementation is not one to size a production cap on.
 
 ---
 
+## Peak, not mean
+
+The first version of this measured one arrival rate: total runs over the
+window. That is the wrong statistic for deciding a cap, and it is wrong in the
+direction that matters.
+
+A workflow taking 20 runs an hour on average and 200 every Monday at nine is
+**unstable every Monday at nine**. Averaged over the week it reports 80%
+utilised and looks fine. The queue does not experience the average.
+
+So the report also measures the **busiest window** — directly, as a rolling
+maximum over the actual arrivals:
+
+| | Answers |
+|---|---|
+| Busiest **hour** | Does the queue absorb a *burst*? |
+| Busiest **day** | Does it survive *sustained* load? |
+
+Directly measured rather than modelled, and that choice is deliberate. An
+hour-of-week decomposition would need several weeks of history before each of
+its 168 buckets held more than one observation, and would then be asserting a
+weekly seasonality the workflow may not have. A rolling window over the real
+arrivals needs no calendar assumption, gives a week of history 168 candidate
+positions instead of one sample per bucket, and answers the operational question
+as somebody actually asks it: *what is the worst hour this has really had?*
+
+One consequence worth stating, because it looks like a bug and is not: the
+peak-hour rate is above the mean even for perfectly regular traffic, whenever
+the spacing does not divide the window. Arrivals every 59.7 minutes really do
+put two in some one-hour windows.
+
+The peak is sized **separately**. `recommendation` covers the mean;
+`peakRecommendation` covers the busiest hour. Provisioning for one hour a week
+is a cost decision, and what this owes somebody is the number, not the choice.
+
+---
+
 ## The report grades itself
 
 Every capacity tool produces a model, and a model is a claim. This one is in the
@@ -119,6 +156,10 @@ Model check: the model matches the measured wait (predicted 4.0s, saw 4.2s)
 
 At 4 slot(s): 4.0s mean wait, 15.0s at p95, 50% utilised.
   Room for 2.00× today's traffic before the queue diverges.
+
+At the busiest hour (60 runs from 2026-08-18 09:00, 60.0/hour)
+  4 slot(s) cannot absorb that.
+  The queue grows for the duration of the burst and drains afterwards.
 
 What each cap buys
 SLOTS    USED  MEAN WAIT  P95    HEADROOM
@@ -201,3 +242,7 @@ queue. Dropping it from arrivals would be wrong in the same direction.
 - **It assumes the past predicts the future.** A cap sized on last week's
   traffic is sized for last week's traffic. `headroom` is the number that says
   how much slack that assumption has.
+- **The peak is a maximum, not a forecast.** It reports the worst window that
+  *has happened*, which is a fact. Whether a worse one is coming is a question
+  about the business, and a seasonality model fitted to one week of history
+  would be an opinion dressed as one.

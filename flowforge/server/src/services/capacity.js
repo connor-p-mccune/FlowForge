@@ -89,12 +89,37 @@ function measure(rows, windowDays) {
   }
 
   const windowMs = windowDays * 86400000
+
+  // The mean rate is the wrong statistic for deciding a cap, and it is wrong in
+  // the direction that matters: a workflow taking 20 runs an hour on average
+  // and 200 every Monday at nine is unstable every Monday at nine, and an
+  // average over the week says 80% utilised and looks fine. The queue does not
+  // experience the average.
+  //
+  // Two window lengths, because they answer different questions. The busiest
+  // hour is about *bursts* — whether the queue absorbs a spike. The busiest day
+  // is about *sustained* load, which is what actually diverges.
+  const peakHour = queueing.peakRate(arrivals, 3600000)
+  const peakDay = queueing.peakRate(arrivals, 86400000)
+
   return {
     runs: rows.length,
     windowDays,
     // Per millisecond, which is what queueing.js wants; the surfaces convert.
     arrivalRatePerMs: arrivals.length / windowMs,
     arrivalsPerHour: (arrivals.length / windowMs) * 3600000,
+    peakHour: {
+      ratePerMs: peakHour.ratePerMs,
+      perHour: peakHour.ratePerMs * 3600000,
+      runs: peakHour.count,
+      startedAt: peakHour.startedAtMs ? new Date(peakHour.startedAtMs).toISOString() : null,
+    },
+    peakDay: {
+      ratePerMs: peakDay.ratePerMs,
+      perHour: peakDay.ratePerMs * 3600000,
+      runs: peakDay.count,
+      startedAt: peakDay.startedAtMs ? new Date(peakDay.startedAtMs).toISOString() : null,
+    },
     serviceMeanMs: mean(serviceMs),
     serviceP50Ms: percentile(serviceMs, 50),
     serviceP95Ms: percentile(serviceMs, 95),
@@ -108,9 +133,13 @@ function measure(rows, windowDays) {
   }
 }
 
-// The model's prediction at one cap.
-function predict(measured, servers) {
-  const { arrivalRatePerMs, serviceMeanMs, cvSquaredArrival, cvSquaredService } = measured
+// The model's prediction at one cap, at a given arrival rate.
+//
+// `rate` defaults to the measured mean; passing a peak rate is how the report
+// answers the question the mean cannot — *and what about Monday morning?*
+function predict(measured, servers, rate = null) {
+  const { serviceMeanMs, cvSquaredArrival, cvSquaredService } = measured
+  const arrivalRatePerMs = rate ?? measured.arrivalRatePerMs
   const ca = cvSquaredArrival ?? 1
   const cs = cvSquaredService ?? 1
   const s = queueing.stability(arrivalRatePerMs, serviceMeanMs, servers)
@@ -208,22 +237,58 @@ function analyzeCapacity(
   const curve = []
   for (let c = lowest; c <= configured + CURVE_SPAN; c += 1) curve.push(predict(measured, c))
 
-  let recommendation = null
-  if (targetWaitMs != null && Number.isFinite(targetWaitMs)) {
-    const needed = queueing.serversFor(
-      measured.arrivalRatePerMs,
+  // The same cap judged at the rates that actually happened rather than at the
+  // average of them. A cap can be comfortable on the mean and diverging every
+  // Monday, and only one of those two facts is worth being woken up about.
+  const peak = {
+    hour: {
+      ...predict(measured, configured, measured.peakHour.ratePerMs),
+      perHour: measured.peakHour.perHour,
+      runs: measured.peakHour.runs,
+      startedAt: measured.peakHour.startedAt,
+    },
+    day: {
+      ...predict(measured, configured, measured.peakDay.ratePerMs),
+      perHour: measured.peakDay.perHour,
+      runs: measured.peakDay.runs,
+      startedAt: measured.peakDay.startedAt,
+    },
+  }
+
+  const confident =
+    calibration.verdict === 'agrees' || calibration.verdict === 'no-queue-to-check'
+
+  const sizeFor = (rate) =>
+    queueing.serversFor(
+      rate,
       measured.serviceMeanMs,
       targetWaitMs,
       measured.cvSquaredArrival ?? 1,
       measured.cvSquaredService ?? 1
     )
+
+  let recommendation = null
+  let peakRecommendation = null
+  if (targetWaitMs != null && Number.isFinite(targetWaitMs)) {
+    const needed = sizeFor(measured.arrivalRatePerMs)
     recommendation = {
       targetWaitMs,
       servers: needed,
       change: needed == null ? null : needed - configured,
       // A model that does not describe the past has not earned an instruction
       // about the future. Same number, weaker claim.
-      confident: calibration.verdict === 'agrees' || calibration.verdict === 'no-queue-to-check',
+      confident,
+    }
+    // Reported separately rather than folded into the recommendation, because
+    // provisioning for the busiest hour of the week is a cost decision somebody
+    // else gets to make. What this owes them is the number, not the choice.
+    const neededAtPeak = sizeFor(measured.peakHour.ratePerMs)
+    peakRecommendation = {
+      targetWaitMs,
+      servers: neededAtPeak,
+      change: neededAtPeak == null ? null : neededAtPeak - configured,
+      basis: 'busiest-hour',
+      confident,
     }
   }
 
@@ -234,9 +299,11 @@ function analyzeCapacity(
     cap: configured,
     measured,
     current,
+    peak,
     calibration,
     curve,
     recommendation,
+    peakRecommendation,
     // Stated in the payload rather than only in the docs: a consumer that
     // reports the wait without reporting what it assumed is doing the thing
     // this whole file exists to argue against.

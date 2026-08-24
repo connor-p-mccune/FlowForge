@@ -3466,6 +3466,19 @@ const spec = {
           },
         },
       },
+      PeakWindow: {
+        type: 'object',
+        description:
+          'The busiest window of this length in the measured history — directly measured, ' +
+          'not modelled: a rolling maximum over the actual arrivals, with no seasonality ' +
+          'decomposition and no minimum-samples-per-bucket problem.',
+        properties: {
+          ratePerMs: { type: 'number' },
+          perHour: { type: 'number' },
+          runs: { type: 'integer', description: 'Arrivals inside the window.' },
+          startedAt: { type: 'string', format: 'date-time', nullable: true },
+        },
+      },
       CapacityPrediction: {
         type: 'object',
         description: 'What the model says at one cap.',
@@ -3523,6 +3536,8 @@ const spec = {
                   'becomes the assumption it is meant to test.',
               },
               cvSquaredArrival: { type: 'number', nullable: true },
+              peakHour: { $ref: '#/components/schemas/PeakWindow' },
+              peakDay: { $ref: '#/components/schemas/PeakWindow' },
               observedWaitMeanMs: { type: 'number', nullable: true },
               observedWaitP50Ms: { type: 'number', nullable: true },
               observedWaitP95Ms: { type: 'number', nullable: true },
@@ -3533,6 +3548,17 @@ const spec = {
             },
           },
           current: { $ref: '#/components/schemas/CapacityPrediction' },
+          peak: {
+            type: 'object',
+            description:
+              'The same cap judged at the rates that actually happened rather than at the ' +
+              'average of them. A cap can be comfortable on the mean and diverging every ' +
+              'Monday, and only one of those is worth being woken up about.',
+            properties: {
+              hour: { $ref: '#/components/schemas/CapacityPrediction' },
+              day: { $ref: '#/components/schemas/CapacityPrediction' },
+            },
+          },
           calibration: {
             type: 'object',
             description: 'The model checked against the window it was measured from.',
@@ -3562,10 +3588,25 @@ const spec = {
             description: 'The same prediction across caps around the current one.',
             items: { $ref: '#/components/schemas/CapacityPrediction' },
           },
+          peakRecommendation: {
+            type: 'object',
+            nullable: true,
+            description:
+              'The cap that would meet the target during the **busiest hour**. Reported ' +
+              'separately rather than folded into `recommendation`, because provisioning ' +
+              'for a weekly peak is a cost decision the caller gets to make.',
+            properties: {
+              targetWaitMs: { type: 'integer' },
+              servers: { type: 'integer', nullable: true },
+              change: { type: 'integer', nullable: true },
+              basis: { type: 'string', enum: ['busiest-hour'] },
+              confident: { type: 'boolean' },
+            },
+          },
           recommendation: {
             type: 'object',
             nullable: true,
-            description: 'Present only when `target` was given.',
+            description: 'Present only when `target` was given. Sized against the *mean* rate.',
             properties: {
               targetWaitMs: { type: 'integer' },
               servers: {

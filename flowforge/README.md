@@ -612,7 +612,14 @@ status completed
   one that doesn't still answers, marked as a suggestion. Past saturation it
   quotes no number at all: the backlog grows without bound, and "40 minutes"
   there would be describing a transient on the way to infinity. `flowforge
-  capacity --target` gates a build. See [docs/CAPACITY.md](./docs/CAPACITY.md).
+  capacity --target` gates a build. And the mean rate is itself the wrong
+  statistic — a workflow taking 20 runs/hour on average and 200 every Monday at
+  nine is unstable every Monday at nine, while the weekly average reports 80%
+  utilised and looks fine. So the busiest hour and the busiest day are measured
+  directly, as a rolling maximum over the real arrivals: no seasonality model to
+  fit, no 168 buckets holding one sample each, and the peak is sized *separately*
+  because provisioning for one hour a week is somebody else's cost decision. See
+  [docs/CAPACITY.md](./docs/CAPACITY.md).
 - **Convergence (where parallel branches collide)** — when several edges arrive
   at one node, the engine builds that node's input with `Object.assign` over the
   upstream outputs, which is last-writer-wins. So two branches both producing a
