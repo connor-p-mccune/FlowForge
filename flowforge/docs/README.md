@@ -1,6 +1,6 @@
 # FlowForge design records
 
-Twenty-one documents is too many to read in order, so this is a map rather than
+Twenty-two documents is too many to read in order, so this is a map rather than
 a table of contents. Each record covers one part that was hard, and each is
 organised the same way: **what the obvious implementation gets wrong**, the
 design that fixes it, and the limits stated rather than oversold.
@@ -63,6 +63,7 @@ most familiar.
 | [INSIGHTS.md](./INSIGHTS.md) | Duration percentiles, a robust anomaly score, a monotonic trend — and Pettitt's test to say *when* a workflow got slower and which deploy did it. |
 | [RELEASES.md](./RELEASES.md) | A canary is a small sample, and a threshold on a small sample is a coin flip with a UI. Two-proportion z-test, Mann-Whitney U, Wilson intervals. |
 | [DRIFT.md](./DRIFT.md) | Every monitor here watches *time* or *outcome*. None watches the **data** — so a field that starts arriving null is green on every dashboard. |
+| [CAPACITY.md](./CAPACITY.md) | The concurrency cap is a number somebody typed once. Queueing theory says what it buys — and the model can be checked against the wait already recorded, so it grades itself. |
 
 ---
 

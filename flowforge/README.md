@@ -34,6 +34,7 @@ problem sounds familiar.
 | **Taint analysis** | Untrusted data deciding where a request goes is SSRF with a drag-and-drop interface. Precision is the whole design: taint stops at external boundaries, and a pinned host is not a finding — a checker nobody reads is worse than none. | [LINEAGE.md](./docs/LINEAGE.md) |
 | **Surviving the worker** | Every reliability control here bounds a *running* system; all of them assume the process lives. A `kill -9` leaves a row saying `running` forever, and the queue's redelivery would re-run the whole graph — re-charging the card. A lease renewed by a timer (not by progress, or an approval gate would look like a crash), fenced by a token, and a recovery that records an in-flight step as **indeterminate** rather than guessing which lie to tell. | [DURABILITY.md](./docs/DURABILITY.md) |
 | **Prompt injection** | An AI node classifies a webhook body — text an outsider wrote — and text reads as instructions. The finding isn't "untrusted data in a prompt" (that is every AI node); it is the *composition*: they write the instructions **and** the answer decides where a request goes. Bounded at the boundary by a per-call random fence and a classification confined to the declared labels. | [SECURITY.md](./SECURITY.md) |
+| **Sizing the concurrency cap** | `max_concurrent_runs` is a number somebody typed once, and the usual dashboard divides running runs by it and alerts at 80%. Utilisation is not wait: at ρ = 0.8 a one-slot pool waits **4.00×** its own service time and a ten-slot pool waits **0.20×** — twenty times the experience at the same number. M/M/c would be the textbook fix and is still wrong, because a run waiting on a human approval is nothing like exponentially distributed. So: Allen–Cunneen G/G/c over the *measured* variability, Erlang C by recurrence rather than the factorial form that overflows at c ≈ 170 — and, unusually, the model **grades itself**, because `started_at − created_at` is the wait it predicts, already recorded. | [CAPACITY.md](./docs/CAPACITY.md) |
 | **A silent nondeterminism** | Branches run in parallel, and where they converge the engine assigns their outputs over each other — so two branches both producing a `status` meant one silently won, decided by the order the edges sat in the array. Which three parts of the product rewrite, differently: a collab session sorts edges by id, the `.flow` format and the signature by source/target, a plain save keeps the array. **The same graph computed a different value depending on how it was last saved**, with every check green — the type checker least able to see it, because joining the two field types into a union is the sound thing to do and is exactly what discards *which one you get*. Merge order now comes from the graph. | [CONVERGENCE.md](./docs/CONVERGENCE.md) |
 | **Undoing side effects** | Every other control bounds *whether* something runs; none undoes what already ran. Compensations unwind in **reverse completion order** (the DAG doesn't know what finished first), and a step that did no work this run is never compensated. | [ROLLBACK.md](./docs/ROLLBACK.md) |
 | **Reviewing a change** | Every deploy gate here is static — well-formed, typed, permitted, invariant-preserving, reachable. None says what the change *does*. So replay last week's runs against the candidate graph, with every step that reaches outside settled from that run's own recording — a routing difference is then attributable to the edit rather than to test mode inventing a response. | [PREVIEW.md](./docs/PREVIEW.md) |
@@ -532,6 +533,33 @@ status completed
   **secret reach** ("who can read `STRIPE_KEY`?" was otherwise a manual grep). On
   the canvas as 🔗 Lineage, in `flowforge lineage --node <id>`, and on the public
   API. See [docs/LINEAGE.md](./docs/LINEAGE.md).
+- **Capacity planning** — `max_concurrent_runs` is a number somebody typed once,
+  and everything downstream of it follows: whether a run starts now or queues,
+  whether a burst drains or accumulates. It's answerable in closed form from
+  three things already in the database — arrival rate (`created_at`), how long a
+  run holds a slot (`finished_at − started_at`), and the cap. **Utilisation is
+  not wait**, which is what the usual "80% and alert" dashboard gets wrong: at
+  ρ = 0.8 a one-slot pool waits **4.00×** its own service time and a ten-slot
+  pool waits **0.20×** — twenty times the experience at the identical number a
+  dashboard would show, because the headroom a pool needs grows like √c, not
+  like c. M/M/c is the textbook fix and is *still* wrong here: it assumes
+  exponential service, and a run that waits on a human approval holds its slot
+  for however long the human takes. Service CV² in the tens is ordinary. So the
+  model is **Allen–Cunneen G/G/c**, scaling the wait by (CV²ₐ + CV²ₛ)/2 — exactly
+  1 under the M/M assumptions, so it's safe everywhere, and 2.5× at a measured
+  CV² of 4; both CVs are *measured*, and a missing one returns null rather than
+  the 1.0 that would silently reassert the assumption. Erlang C is computed by
+  the recurrence, not `a^c/c!`, which overflows a double at c ≈ 170 — and is
+  checked against published tables *and* direct summation, because a model that
+  only agrees with itself is not one to size production on. The unusual part:
+  **it grades itself.** The wait it predicts is also recorded, so the report
+  compares its own prediction at the current cap against what actually happened
+  and publishes the gap — a model that matches history has earned the
+  counterfactual it's really being asked for (*what would a cap of 8 buy?*), and
+  one that doesn't still answers, marked as a suggestion. Past saturation it
+  quotes no number at all: the backlog grows without bound, and "40 minutes"
+  there would be describing a transient on the way to infinity. `flowforge
+  capacity --target` gates a build. See [docs/CAPACITY.md](./docs/CAPACITY.md).
 - **Convergence (where parallel branches collide)** — when several edges arrive
   at one node, the engine builds that node's input with `Object.assign` over the
   upstream outputs, which is last-writer-wins. So two branches both producing a

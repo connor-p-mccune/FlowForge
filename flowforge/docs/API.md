@@ -896,6 +896,74 @@ not merely a templated path). See [docs/EFFECTS.md](./EFFECTS.md).
 
 Requires the `read` scope.
 
+### Is the concurrency cap the right number?
+
+```bash
+curl -s "https://your-flowforge-host/api/v1/workflows/6f0c…/capacity?target=5000" \
+  -H "Authorization: Bearer $FLOWFORGE_TOKEN"
+```
+
+Queueing analysis of `max_concurrent_runs`, from three measurements already in
+the database: how often runs arrive (`created_at`), how long each holds a slot
+(`finished_at − started_at`), and how many slots there are.
+
+```json
+{
+  "available": true,
+  "workflowId": "6f0c…",
+  "name": "Order processing",
+  "cap": 4,
+  "measured": {
+    "runs": 336, "windowDays": 7, "arrivalsPerHour": 2,
+    "serviceMeanMs": 1800000, "cvSquaredService": 4.1, "cvSquaredArrival": 1.0,
+    "observedWaitMeanMs": 4200, "observedWaitP95Ms": 16000,
+    "sampled": { "service": 336, "wait": 336 }
+  },
+  "current": {
+    "servers": 4, "stable": true, "utilisation": 0.5,
+    "headroom": 2.0, "waitMeanMs": 4000, "waitP95Ms": 15000
+  },
+  "calibration": {
+    "comparable": true, "ratio": 0.95, "verdict": "agrees",
+    "observedMs": 4200, "predictedMs": 4000
+  },
+  "curve": [ { "servers": 2, "stable": false, "utilisation": 1.0, "waitMeanMs": null } ],
+  "recommendation": { "targetWaitMs": 5000, "servers": 4, "change": 0, "confident": true },
+  "model": {
+    "name": "Allen–Cunneen G/G/c", "variabilityFactor": 2.55, "mmcWaitMeanMs": 1570
+  }
+}
+```
+
+The model is **Allen–Cunneen G/G/c**, not M/M/c. M/M/c assumes exponential
+service times, and a run that waits on a human approval or retries three times
+is nothing of the sort — service CV² in the tens is ordinary. Allen–Cunneen
+scales the wait by `(CV²ₐ + CV²ₛ)/2`, which is exactly 1 under the M/M
+assumptions and 2.55 in the example above. `model.mmcWaitMeanMs` is what M/M/c
+would have said, so the cost of the assumption is a number rather than an
+argument.
+
+**Read `calibration` first.** The wait this model predicts is also *recorded* —
+`started_at − created_at` is the queueing delay per run — so the report compares
+its own prediction at the current cap against what actually happened, and
+publishes the gap. A model that agrees with history has earned the
+counterfactual it is really being asked for (*what would a cap of 8 buy?*),
+which is the one question no measurement can answer. A model that disagrees
+still answers, with `recommendation.confident: false`.
+
+`headroom` is the multiple of today's arrival rate at which the cap saturates —
+the number to read before anything is on fire. Past saturation `stable` is
+`false` and the waits are `null`: the backlog grows without bound, and a large
+finite number there would be describing a transient on the way to infinity.
+
+`?target=<ms>` sizes a recommendation, `?cap=N` prices a hypothetical cap
+without changing the stored one, `?days=N` widens the window. Below 30 runs the
+report refuses (`reason: "not-enough-runs"`) rather than measuring an arrival
+rate from a handful of events. `flowforge capacity --target` gates a build on
+it. See [docs/CAPACITY.md](./CAPACITY.md).
+
+Requires the `read` scope.
+
 ### Where parallel branches collide
 
 ```bash
