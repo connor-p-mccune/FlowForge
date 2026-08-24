@@ -14,6 +14,7 @@ const { computeForecast } = require('../services/runForecast')
 const { analyzeRegressions } = require('../services/regressions')
 const stepTimings = require('../services/stepTimings')
 const { analyzeWorkflowDrift } = require('../services/driftMonitor')
+const { analyzeCapacity } = require('../services/capacity')
 
 // Minimum completed runs before a duration trend is reported. The Mann-Kendall
 // normal approximation is unreliable on a handful of points, and "getting
@@ -259,6 +260,33 @@ router.get('/workflows/:id/forecast', auth, (req, res) => {
     const workflow = getVisibleWorkflow(req.params.id, req.user.id)
     if (!workflow) return res.status(404).json({ error: 'Workflow not found' })
     res.json({ workflowId: workflow.id, ...forecastFor(workflow.id, { cap: parseCap(req.query.cap) }) })
+  } catch (err) {
+    console.error(err)
+    res.status(500).json({ error: 'Internal server error' })
+  }
+})
+
+// GET /api/workflows/:id/capacity — is this workflow's concurrency cap the
+// right number? (services/capacity.js)
+//
+// The forecast above is about one run's makespan. This is about the queue in
+// front of it: at the measured arrival rate and service time, how long a run
+// waits before it starts. `?target=<ms>` asks for a cap recommendation and
+// `?cap=N` prices a hypothetical one without changing the stored value.
+router.get('/workflows/:id/capacity', auth, (req, res) => {
+  try {
+    const workflow = getVisibleWorkflow(req.params.id, req.user.id)
+    if (!workflow) return res.status(404).json({ error: 'Workflow not found' })
+    const target = Number(req.query.target)
+    const cap = parseInt(req.query.cap, 10)
+    const days = parseInt(req.query.days, 10)
+    res.json(
+      analyzeCapacity(workflow.id, {
+        targetWaitMs: Number.isFinite(target) && target >= 0 ? target : null,
+        cap: Number.isFinite(cap) && cap > 0 ? Math.min(cap, 512) : null,
+        windowDays: Number.isFinite(days) && days > 0 ? Math.min(days, 90) : undefined,
+      })
+    )
   } catch (err) {
     console.error(err)
     res.status(500).json({ error: 'Internal server error' })

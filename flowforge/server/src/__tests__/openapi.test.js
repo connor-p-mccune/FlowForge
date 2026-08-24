@@ -41,6 +41,7 @@ describe('GET /api/v1/openapi.json', () => {
       '/workflows/{workflowId}/canary',
       '/workflows/{workflowId}/canary/promote',
       '/workflows/{workflowId}/canary/rollback',
+      '/workflows/{workflowId}/capacity',
       '/workflows/{workflowId}/convergence',
       '/workflows/{workflowId}/dependencies',
       '/workflows/{workflowId}/diff',

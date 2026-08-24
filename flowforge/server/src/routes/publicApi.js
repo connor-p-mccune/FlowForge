@@ -23,6 +23,7 @@ const { verifyGuarantees, parseGuarantees } = require('../services/guarantees')
 const { parseWorkflow, formatWorkflow, DslError } = require('../services/workflowDsl')
 const { analyzeEffects } = require('../services/effects')
 const { analyzeConvergence } = require('../services/convergence')
+const { analyzeCapacity } = require('../services/capacity')
 
 // Every endpoint that takes a workflow *document* accepts it in either form: as
 // the JSON export, or as `.flow` text under `flow`. Resolving it in one place
@@ -616,6 +617,42 @@ router.get('/workflows/:id/forecast', tokenAuth('read'), (req, res) => {
         cap: Number.isFinite(cap) && cap > 0 ? Math.min(cap, 64) : undefined,
       }),
     })
+  } catch (err) {
+    console.error(err)
+    res.status(500).json({ error: 'Internal server error' })
+  }
+})
+
+// GET /api/v1/workflows/:id/capacity — is this workflow's concurrency cap the
+// right number? (services/capacity.js)
+//
+// The forecast above is about one run's makespan. This is about the queue in
+// front of it: at the measured arrival rate and service time, how long does a
+// run wait before it starts, and what cap would meet a target?
+//
+// `?target=<ms>` asks for a recommendation; without it the curve is returned
+// for somebody to read. `?cap=N` prices a hypothetical cap without changing the
+// stored one, so "what would twelve buy?" is a query rather than a config
+// change. `?days=N` widens the measurement window.
+//
+// The `calibration` block is the part worth reading first: the model's
+// prediction at the *current* cap against the wait actually recorded over the
+// same window. Read-only and derived from history, so `read` is the whole
+// authorisation story.
+router.get('/workflows/:id/capacity', tokenAuth('read'), (req, res) => {
+  try {
+    const workflow = getWorkflowForMember(req.params.id, req.user.id)
+    if (!workflow) return res.status(404).json({ error: 'Workflow not found' })
+    const target = Number(req.query.target)
+    const cap = parseInt(req.query.cap, 10)
+    const days = parseInt(req.query.days, 10)
+    res.json(
+      analyzeCapacity(workflow.id, {
+        targetWaitMs: Number.isFinite(target) && target >= 0 ? target : null,
+        cap: Number.isFinite(cap) && cap > 0 ? Math.min(cap, 512) : null,
+        windowDays: Number.isFinite(days) && days > 0 ? Math.min(days, 90) : undefined,
+      })
+    )
   } catch (err) {
     console.error(err)
     res.status(500).json({ error: 'Internal server error' })

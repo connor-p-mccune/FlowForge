@@ -1466,6 +1466,77 @@ const spec = {
         },
       },
     },
+    '/workflows/{workflowId}/capacity': {
+      get: {
+        tags: ['workflows'],
+        summary: 'Is the concurrency cap the right number?',
+        description:
+          '`max_concurrent_runs` is a number somebody typed once. This answers ' +
+          'it from three measurements already in the database: how often runs ' +
+          'arrive (`created_at`), how long each occupies a slot ' +
+          '(`finished_at − started_at`), and how many slots there are.\n\n' +
+          'The model is **Allen–Cunneen G/G/c**, not M/M/c. M/M/c assumes ' +
+          'exponential service times, and a run that waits on a human approval ' +
+          'or retries three times is nothing of the sort — squared coefficients ' +
+          'of variation in the tens are ordinary. Allen–Cunneen scales the wait ' +
+          'by `(CV²ₐ + CV²ₛ)/2`, which is exactly 1 under the M/M assumptions ' +
+          'and 2.5× at a measured service CV² of 4. `model.mmcWaitMeanMs` is ' +
+          'what M/M/c would have said, so the cost of the assumption is visible ' +
+          'rather than argued about.\n\n' +
+          'Read `calibration` first. The wait this model predicts is also ' +
+          '*recorded* — `started_at − created_at` is the queueing delay per run ' +
+          '— so the report compares its own prediction at the current cap ' +
+          'against what actually happened, and publishes the gap. A model that ' +
+          'agrees with history has earned the counterfactual it is really being ' +
+          'asked for; one that does not still answers, with ' +
+          '`recommendation.confident: false`.\n\n' +
+          'Past saturation `current.stable` is false and the waits are null: ' +
+          'the backlog grows without bound, and a large finite number there ' +
+          'would be describing a transient on the way to infinity. ' +
+          'Requires the `read` scope.',
+        operationId: 'getWorkflowCapacity',
+        parameters: [
+          { $ref: '#/components/parameters/WorkflowId' },
+          {
+            name: 'target',
+            in: 'query',
+            schema: { type: 'integer', minimum: 0 },
+            description:
+              'Target mean queue wait in ms. Sizes `recommendation`; omit and no ' +
+              'recommendation is made, but `curve` is still returned.',
+          },
+          {
+            name: 'cap',
+            in: 'query',
+            schema: { type: 'integer', minimum: 1, maximum: 512 },
+            description:
+              'Price a hypothetical cap instead of the stored one. Changes nothing.',
+          },
+          {
+            name: 'days',
+            in: 'query',
+            schema: { type: 'integer', minimum: 1, maximum: 90, default: 7 },
+            description: 'Measurement window.',
+          },
+        ],
+        responses: {
+          200: {
+            description:
+              'The capacity report, or `available: false` with a reason ' +
+              '(`not-found`, `no-cap`, `not-enough-runs`, `no-service-time`).',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/CapacityReport' },
+              },
+            },
+          },
+          401: { $ref: '#/components/responses/Unauthorized' },
+          403: { $ref: '#/components/responses/Forbidden' },
+          404: { $ref: '#/components/responses/NotFound' },
+          429: { $ref: '#/components/responses/RateLimited' },
+        },
+      },
+    },
     '/workflows/{workflowId}/convergence': {
       get: {
         tags: ['workflows'],
@@ -3079,6 +3150,136 @@ const spec = {
                 nodeType: { type: 'string', nullable: true },
                 compared: { type: 'integer' },
                 findings: { type: 'array', items: { $ref: '#/components/schemas/DataDriftFinding' } },
+              },
+            },
+          },
+        },
+      },
+      CapacityPrediction: {
+        type: 'object',
+        description: 'What the model says at one cap.',
+        properties: {
+          servers: { type: 'integer' },
+          stable: {
+            type: 'boolean',
+            description: 'False past saturation, where the backlog grows without bound.',
+          },
+          utilisation: { type: 'number', description: 'Offered load ÷ servers (ρ).' },
+          headroom: {
+            type: 'number',
+            description:
+              'The multiple of today’s arrival rate at which this cap saturates. ' +
+              'Below 1 the queue is already diverging.',
+          },
+          waitMeanMs: { type: 'number', nullable: true },
+          waitP95Ms: {
+            type: 'number',
+            nullable: true,
+            description:
+              'Approximate: M/M/c has an exact wait tail and G/G/c does not, so the ' +
+              'exponential shape is kept and stretched to the corrected mean.',
+          },
+        },
+      },
+      CapacityReport: {
+        type: 'object',
+        properties: {
+          available: { type: 'boolean' },
+          reason: {
+            type: 'string',
+            nullable: true,
+            enum: ['not-found', 'no-cap', 'not-enough-runs', 'no-service-time'],
+          },
+          workflowId: { type: 'string' },
+          name: { type: 'string' },
+          cap: { type: 'integer', description: 'The cap the report was computed for.' },
+          measured: {
+            type: 'object',
+            description: 'What history says, before any model touches it.',
+            properties: {
+              runs: { type: 'integer' },
+              windowDays: { type: 'integer' },
+              arrivalsPerHour: { type: 'number' },
+              serviceMeanMs: { type: 'number', nullable: true },
+              serviceP50Ms: { type: 'number', nullable: true },
+              serviceP95Ms: { type: 'number', nullable: true },
+              cvSquaredService: {
+                type: 'number',
+                nullable: true,
+                description:
+                  'Var(S)/E[S]². 1 is exponential; higher is what makes M/M/c wrong ' +
+                  'here. Null rather than a default, so a missing measurement never ' +
+                  'becomes the assumption it is meant to test.',
+              },
+              cvSquaredArrival: { type: 'number', nullable: true },
+              observedWaitMeanMs: { type: 'number', nullable: true },
+              observedWaitP50Ms: { type: 'number', nullable: true },
+              observedWaitP95Ms: { type: 'number', nullable: true },
+              sampled: {
+                type: 'object',
+                properties: { service: { type: 'integer' }, wait: { type: 'integer' } },
+              },
+            },
+          },
+          current: { $ref: '#/components/schemas/CapacityPrediction' },
+          calibration: {
+            type: 'object',
+            description: 'The model checked against the window it was measured from.',
+            properties: {
+              comparable: { type: 'boolean' },
+              ratio: {
+                type: 'number',
+                nullable: true,
+                description: 'Predicted ÷ observed mean wait.',
+              },
+              verdict: {
+                type: 'string',
+                enum: [
+                  'agrees',
+                  'over-predicts',
+                  'under-predicts',
+                  'no-queue-to-check',
+                  'not-enough-history',
+                ],
+              },
+              observedMs: { type: 'number', nullable: true },
+              predictedMs: { type: 'number', nullable: true },
+            },
+          },
+          curve: {
+            type: 'array',
+            description: 'The same prediction across caps around the current one.',
+            items: { $ref: '#/components/schemas/CapacityPrediction' },
+          },
+          recommendation: {
+            type: 'object',
+            nullable: true,
+            description: 'Present only when `target` was given.',
+            properties: {
+              targetWaitMs: { type: 'integer' },
+              servers: {
+                type: 'integer',
+                nullable: true,
+                description: 'Null when no cap can meet the target.',
+              },
+              change: { type: 'integer', nullable: true },
+              confident: {
+                type: 'boolean',
+                description:
+                  'False when the model does not describe the measured window. Same ' +
+                  'number, weaker claim.',
+              },
+            },
+          },
+          model: {
+            type: 'object',
+            properties: {
+              name: { type: 'string', example: 'Allen–Cunneen G/G/c' },
+              variabilityFactor: { type: 'number', description: '(CV²ₐ + CV²ₛ)/2.' },
+              mmcWaitMeanMs: {
+                type: 'number',
+                nullable: true,
+                description: 'What M/M/c would have said, for comparison.',
               },
             },
           },
