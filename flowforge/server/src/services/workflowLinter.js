@@ -25,6 +25,7 @@ const { analyzeLineage } = require('./lineage')
 const { guaranteeIssues } = require('./guarantees')
 const { pathIssues } = require('./pathConstraints')
 const { analyzeConvergence } = require('./convergence')
+const { callbackIssues } = require('./callbackLiveness')
 
 const PLACEHOLDER = /\{\{\s*([\w-]+(?:\.[\w-]+)*)\s*\}\}/g
 
@@ -1078,6 +1079,28 @@ function lintGraph({ nodes: rawNodes = [], edges: rawEdges = [] } = {}, { secret
     issues.push(...pathIssues({ nodes: rawNodes, edges: rawEdges }))
   } catch (err) {
     console.error(`Path feasibility analysis failed: ${err.message}`)
+  }
+
+  // Callback liveness (services/callbackLiveness.js). Every pass above asks
+  // whether the graph is *well formed*; this one asks whether a run of it can
+  // make progress.
+  //
+  // A wait-callback node parks until an external system POSTs to a one-time
+  // URL, which some node has to send. Nothing checked that a node does, or that
+  // it runs before the wait rather than after it. All three failures — nothing
+  // sends it, only something downstream sends it, only a log node holds it —
+  // look identical at run time, and identical to a partner system that simply
+  // never replied. That is the expensive part: the investigation starts at the
+  // partner and the answer was on the canvas.
+  //
+  // Errors rather than warnings for the two provable cases, because neither is
+  // a matter of taste: the wait cannot be satisfied by anything, ever. The
+  // path-dependent case is a warning, since the graph is fine on the path where
+  // the URL does go out.
+  try {
+    issues.push(...callbackIssues({ nodes: rawNodes, edges: rawEdges }))
+  } catch (err) {
+    console.error(`Callback liveness analysis failed: ${err.message}`)
   }
 
   // Converging branches (services/convergence.js). Every pass above reasons

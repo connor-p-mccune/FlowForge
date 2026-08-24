@@ -1053,3 +1053,64 @@ describe('converging branches', () => {
     expect(at(graph)).toEqual([])
   })
 })
+
+// A wait-callback node parks until an external system POSTs to a one-time URL,
+// which some node has to send — and which the runner's own comment says has to
+// be an *upstream* node. Every way of getting that wrong looks identical at run
+// time, and identical to a partner that simply never replied.
+describe('callback liveness', () => {
+  const at = (graph, code) => lintGraph(graph).find((i) => i.code === code)
+
+  const live = {
+    nodes: [
+      node('t1', 'trigger-manual'),
+      node('send', 'action-http', { url: 'https://p.dev', body: '{{callbacks.wait}}' }, 'Ask partner'),
+      node('wait', 'wait-callback', {}, 'Wait for partner'),
+      node('done', 'output-log', { message: 'ok' }, 'Log'),
+    ],
+    edges: [edge('t1', 'send'), edge('send', 'wait'), edge('wait', 'done', 'received')],
+  }
+
+  it('passes a wait whose URL an upstream node sends', () => {
+    expect(lintGraph(live).filter((i) => i.code.startsWith('callback-'))).toEqual([])
+  })
+
+  it('errors when nothing in the workflow sends the URL', () => {
+    const graph = {
+      ...live,
+      nodes: live.nodes.map((n) =>
+        n.id === 'send' ? node('send', 'action-http', { url: 'https://p.dev' }, 'Ask partner') : n
+      ),
+    }
+    const found = at(graph, 'callback-never-sent')
+    expect(found.severity).toBe('error')
+    expect(found.nodeId).toBe('wait')
+  })
+
+  it('errors when the only sender runs after the wait', () => {
+    const graph = {
+      nodes: [
+        node('t1', 'trigger-manual'),
+        node('wait', 'wait-callback', {}, 'Wait for partner'),
+        node('send', 'action-http', { url: 'https://p.dev', body: '{{callbacks.wait}}' }, 'Ask partner'),
+      ],
+      edges: [edge('t1', 'wait'), edge('wait', 'send', 'received')],
+    }
+    expect(at(graph, 'callback-deadlock').severity).toBe('error')
+  })
+
+  it('reports it alongside everything else the linter found', () => {
+    // The pass is additive: it never suppresses or replaces another finding.
+    const graph = {
+      nodes: [
+        node('t1', 'trigger-manual'),
+        node('wait', 'wait-callback', {}, 'Wait'),
+        node('send', 'action-http', {}, 'No URL'),
+      ],
+      edges: [edge('t1', 'wait'), edge('wait', 'send', 'received')],
+    }
+    const found = codes(lintGraph(graph))
+    expect(found).toContain('callback-never-sent')
+    expect(found).toContain('missing-config')
+  })
+})
