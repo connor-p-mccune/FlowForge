@@ -109,6 +109,13 @@ const ACTIONS = new Set([
   'signing_key.added',
   'signing_key.revoked',
   'signing_key.enforcement_changed',
+  // Data subject erasure (services/subjectRequests.js). The one action here
+  // that *destroys* record rather than changing configuration, which makes the
+  // entry the only remaining proof it was done — and the reason the erasure
+  // appends to this chain instead of editing anything in it. The metadata
+  // carries a SHA-256 commitment per run, not the content: a hash of data you
+  // have destroyed is a receipt, not personal data.
+  'subject.erased',
   // Surfaces that publish workspace state to people without accounts.
   'status_page.enabled',
   'status_page.rotated',
