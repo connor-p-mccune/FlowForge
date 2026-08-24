@@ -39,6 +39,7 @@ import {
 } from '../../services/graphOps'
 import IssuesPanel from './IssuesPanel'
 import LineagePanel from './LineagePanel'
+import ConvergencePanel from './ConvergencePanel'
 import GuaranteesPanel from './GuaranteesPanel'
 import FlowTextPanel from './FlowTextPanel'
 import PathsPanel from './PathsPanel'
@@ -52,7 +53,7 @@ import PresenceBar from '../collaboration/PresenceBar'
 import { NODE_DEFS } from './nodeDefs'
 import { nodeTypes } from './nodeTypes'
 import { layoutGraph } from '../../utils/autoLayout'
-import { makeDuplicate, decorateConditionEdges } from '../../utils/nodeOps'
+import { makeDuplicate, decorateConditionEdges, decorateCollidingEdges } from '../../utils/nodeOps'
 
 // Shown for any generation failure — the model may have returned something
 // unusable, the prompt may be too vague, or the AI service may be unreachable.
@@ -127,6 +128,10 @@ function CanvasInner({ workflowId }) {
   const [guaranteesOpen, setGuaranteesOpen] = useState(false)
   const [flowTextOpen, setFlowTextOpen] = useState(false)
   const [pathsOpen, setPathsOpen] = useState(false)
+  const [convergenceOpen, setConvergenceOpen] = useState(false)
+  // Held here rather than in the panel because it decorates the *canvas*: the
+  // panel owns the fetch, the edges own the drawing.
+  const [convergence, setConvergence] = useState(null)
   const [previewOpen, setPreviewOpen] = useState(false)
   // The pause this run is currently sitting at, or null. Driven by the
   // `debug` exec-update, which is why a collaborator watching the same run sees
@@ -719,6 +724,7 @@ function CanvasInner({ workflowId }) {
 
   const handleToggleIssues = useCallback(() => setIssuesOpen((v) => !v), [])
   const handleToggleLineage = useCallback(() => setLineageOpen((v) => !v), [])
+  const handleToggleConvergence = useCallback(() => setConvergenceOpen((v) => !v), [])
   const handleToggleGuarantees = useCallback(() => setGuaranteesOpen((v) => !v), [])
   const handleTogglePaths = useCallback(() => setPathsOpen((v) => !v), [])
   const handleTogglePreview = useCallback(() => setPreviewOpen((v) => !v), [])
@@ -786,7 +792,14 @@ function CanvasInner({ workflowId }) {
   // Condition-branch edges get a true/false label for rendering only — the
   // `edges` state (what auto-save persists and collaboration broadcasts)
   // stays undecorated.
-  const displayEdges = useMemo(() => decorateConditionEdges(edges), [edges])
+  // Then the converging edges whose value does not survive the merge, drawn
+  // dashed and labelled with what they lose — the one place that ordering has
+  // ever been visible. Only while the Convergence panel is open, since it is
+  // the panel's report that says which they are.
+  const displayEdges = useMemo(
+    () => decorateCollidingEdges(decorateConditionEdges(edges), convergence),
+    [edges, convergence]
+  )
 
   // The test-mode banner shows only while a dry run is actively executing.
   const testBannerVisible =
@@ -1170,6 +1183,8 @@ function CanvasInner({ workflowId }) {
         issuesOpen={issuesOpen}
         onToggleLineage={handleToggleLineage}
         lineageOpen={lineageOpen}
+        onToggleConvergence={handleToggleConvergence}
+        convergenceOpen={convergenceOpen}
         onToggleGuarantees={handleToggleGuarantees}
         guaranteesOpen={guaranteesOpen}
         onTogglePaths={handleTogglePaths}
@@ -1337,6 +1352,20 @@ function CanvasInner({ workflowId }) {
           selectedNodeId={selectedNode?.id || null}
           onClose={() => setLineageOpen(false)}
           onSelectNode={handleSelectIssueNode}
+        />
+      )}
+      {/* Sixth on the same side, and the only one whose answer the *canvas*
+          draws: while it is open, every converging edge whose value does not
+          survive the merge is dashed and labelled with what it loses. That
+          ordering was always determined and has never been visible. */}
+      {convergenceOpen && (
+        <ConvergencePanel
+          workflowId={workflowId}
+          nodes={nodes}
+          edges={edges}
+          onClose={() => setConvergenceOpen(false)}
+          onSelectNode={handleSelectIssueNode}
+          onReport={setConvergence}
         />
       )}
       {/* Opens itself when a run stops, because a paused run is not going

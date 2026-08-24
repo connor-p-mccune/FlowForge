@@ -26,7 +26,9 @@ export default function CanvasToolbar({
   canRedo,
   onToggleIssues,
   onToggleLineage,
+  onToggleConvergence,
   lineageOpen,
+  convergenceOpen,
   onToggleGuarantees,
   onToggleFlowText,
   flowTextOpen,
@@ -180,6 +182,14 @@ export default function CanvasToolbar({
         aria-pressed={lineageOpen}
       >
         🔗 Lineage
+      </button>
+      <button
+        className={`toolbar-btn toolbar-btn--issues${convergenceOpen ? ' toolbar-btn--active' : ''}`}
+        title="Convergence — where two branches supply the same field, which value survives, and which is silently overridden"
+        onClick={onToggleConvergence}
+        aria-pressed={convergenceOpen}
+      >
+        ⤞ Convergence
       </button>
       <button
         className={`toolbar-btn toolbar-btn--issues${guaranteesOpen ? ' toolbar-btn--active' : ''}`}
