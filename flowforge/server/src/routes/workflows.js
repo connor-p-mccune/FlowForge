@@ -502,6 +502,22 @@ router.put('/workflows/:id', auth, validate(workflowRule), (req, res) => {
         error: 'rate_limit_max and rate_limit_window_seconds must be set together, or both cleared',
       })
     }
+    // The trigger field naming whose data a run is about (services/subjectIndex.js).
+    // Dotted path or null; validated for shape only, since whether the field is
+    // present in a given payload is a per-run fact and a run with no subject is
+    // the normal case rather than an error.
+    let subjectPath =
+      'subject_path' in req.body ? req.body.subject_path : workflow.subject_path
+    if (subjectPath != null) {
+      subjectPath = String(subjectPath).trim()
+      if (subjectPath === '') subjectPath = null
+      else if (!/^[\w-]+(\.[\w-]+)*$/.test(subjectPath)) {
+        return res.status(400).json({
+          error: 'subject_path must be a dotted field path, e.g. "customer.email"',
+        })
+      }
+    }
+
     const maintenanceCron =
       'maintenance_cron' in req.body ? req.body.maintenance_cron : workflow.maintenance_cron
     const maintenanceDuration =
@@ -576,8 +592,8 @@ router.put('/workflows/:id', auth, validate(workflowRule), (req, res) => {
          slo_target = ?, slo_window_days = ?,
          error_workflow_id = ?, default_priority = ?, rollback_policy = ?, recovery_policy = ?,
          drift_monitoring = ?, drift_alerted_at = ?, drift_fingerprint = ?,
-         redact_json = ?, updated_at = ? WHERE id = ?`
-    ).run(name, description ?? workflow.description, maxConcurrent, policy, rateMax, rateWindow, maintenanceCron, maintenanceDuration, maintenanceTimezone, slaMaxDuration, slaMinSuccess, heartbeatInterval, heartbeatAlertedAt, sloTarget, sloWindowDays, errorWorkflowId, defaultPriority, rollbackPolicyValue, recoveryPolicyValue, driftMonitoring, driftAlertedAt, driftFingerprint, redactions.length ? JSON.stringify(redactions) : null, now, req.params.id)
+         redact_json = ?, subject_path = ?, updated_at = ? WHERE id = ?`
+    ).run(name, description ?? workflow.description, maxConcurrent, policy, rateMax, rateWindow, maintenanceCron, maintenanceDuration, maintenanceTimezone, slaMaxDuration, slaMinSuccess, heartbeatInterval, heartbeatAlertedAt, sloTarget, sloWindowDays, errorWorkflowId, defaultPriority, rollbackPolicyValue, recoveryPolicyValue, driftMonitoring, driftAlertedAt, driftFingerprint, redactions.length ? JSON.stringify(redactions) : null, subjectPath, now, req.params.id)
 
     // Clearing (or removing) the window while it still holds a maintenance
     // pause would strand the workflow paused — the sweep no longer sees it to

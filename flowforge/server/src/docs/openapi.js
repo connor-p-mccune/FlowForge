@@ -274,6 +274,133 @@ const spec = {
         },
       },
     },
+    '/subjects/access': {
+      post: {
+        tags: ['workflows'],
+        summary: 'Everything held about one person',
+        description:
+          'A data subject access request (GDPR Art. 15). Returns every run ' +
+          'recorded against the identifier — the trigger payload and each ' +
+          'step’s input and output — because a list of run ids would be a ' +
+          'receipt rather than a disclosure.\n\n' +
+          'Runs are found through a **pseudonymous** index: a workflow names ' +
+          'the trigger field identifying its data subject (`subject_path`) and ' +
+          'the engine stamps each run with `HMAC(pepper, workspace ‖ ' +
+          'identifier)`. The database never holds the identifier, and an ' +
+          'operator holding it can still derive the key.\n\n' +
+          'A POST rather than a GET because the identifier is personal data ' +
+          'and has no business in a URL, a query log or a proxy access log. ' +
+          'Already-erased runs are listed with their data absent and their ' +
+          'erasure dated — *we held something and destroyed it on this date* is ' +
+          'part of the answer. Requires the `manage` scope.',
+        operationId: 'subjectAccess',
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                required: ['identifier'],
+                properties: {
+                  identifier: {
+                    type: 'string',
+                    description:
+                      'The person’s identifier as the workflow records it, e.g. an email. ' +
+                      'Case and surrounding whitespace are normalised.',
+                  },
+                  workspaceId: {
+                    type: 'string',
+                    description:
+                      'Required only when the token owner belongs to more than one ' +
+                      'workspace. A request whose scope was inferred is one nobody could ' +
+                      'attest to.',
+                  },
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          200: {
+            description: 'The access report.',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/SubjectAccessReport' },
+              },
+            },
+          },
+          400: { $ref: '#/components/responses/BadRequest' },
+          401: { $ref: '#/components/responses/Unauthorized' },
+          403: { $ref: '#/components/responses/Forbidden' },
+          404: { $ref: '#/components/responses/NotFound' },
+          429: { $ref: '#/components/responses/RateLimited' },
+        },
+      },
+    },
+    '/subjects/erasure': {
+      post: {
+        tags: ['workflows'],
+        summary: 'Erase everything held about one person',
+        description:
+          'A data subject erasure request (GDPR Art. 17), over a system built ' +
+          'to make deletion hard.\n\n' +
+          'The audit log is a hash chain and append-only in the schema, so the ' +
+          'obvious answers all fail: deleting entries breaks the chain and ' +
+          'leaves a `seq` gap, destroying the evidentiary value of every ' +
+          'unrelated entry; rewriting it proves the chain *can* be rewritten, ' +
+          'which is the property it exists to deny.\n\n' +
+          'So erasure never touches the log. It empties the **run data** — ' +
+          'trigger payload, step inputs and outputs — and then **appends**. The ' +
+          'chain grows, nothing in it changes, and ' +
+          '`GET /api/workspaces/{id}/audit/verify` still returns `ok: true`.\n\n' +
+          'The appended entry carries a SHA-256 `commitment` per run to what ' +
+          'was removed, not the content: the record can later confirm a claim ' +
+          'about the erased data if somebody independently produces it, while ' +
+          'retaining nothing readable. Execution rows survive with a tombstone ' +
+          'rather than a null — deleting them would take the proof of the ' +
+          'erasure with the thing erased.\n\n' +
+          'One transaction, and idempotent: a repeated request erases nothing ' +
+          'and still succeeds. **Backups are out of scope** — this reaches the ' +
+          'live database, and a snapshot taken yesterday still holds the ' +
+          'payload. Requires the `manage` scope.',
+        operationId: 'subjectErasure',
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                required: ['identifier'],
+                properties: {
+                  identifier: { type: 'string' },
+                  workspaceId: { type: 'string' },
+                  reason: {
+                    type: 'string',
+                    maxLength: 500,
+                    description: 'Recorded in the audit entry beside who asked.',
+                  },
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          200: {
+            description: 'The erasure certificate.',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/SubjectErasureCertificate' },
+              },
+            },
+          },
+          400: { $ref: '#/components/responses/BadRequest' },
+          401: { $ref: '#/components/responses/Unauthorized' },
+          403: { $ref: '#/components/responses/Forbidden' },
+          404: { $ref: '#/components/responses/NotFound' },
+          429: { $ref: '#/components/responses/RateLimited' },
+        },
+      },
+    },
     '/search': {
       get: {
         tags: ['workflows'],
@@ -3241,6 +3368,100 @@ const spec = {
                 compared: { type: 'integer' },
                 findings: { type: 'array', items: { $ref: '#/components/schemas/DataDriftFinding' } },
               },
+            },
+          },
+        },
+      },
+      SubjectAccessReport: {
+        type: 'object',
+        properties: {
+          available: { type: 'boolean' },
+          reason: { type: 'string', nullable: true, enum: ['no-identifier'] },
+          workspaceId: { type: 'string' },
+          subjectId: {
+            type: 'string',
+            description:
+              'The pseudonymous key the runs are indexed by. 32 hex characters, and not ' +
+              'reversible without the server-side pepper.',
+          },
+          runs: {
+            type: 'array',
+            items: {
+              type: 'object',
+              properties: {
+                executionId: { type: 'string' },
+                workflowId: { type: 'string' },
+                workflowName: { type: 'string' },
+                status: { type: 'string' },
+                triggerType: { type: 'string', nullable: true },
+                createdAt: { type: 'string', format: 'date-time' },
+                finishedAt: { type: 'string', format: 'date-time', nullable: true },
+                erasedAt: {
+                  type: 'string',
+                  format: 'date-time',
+                  nullable: true,
+                  description: 'Set when this run was already erased. Its data is then absent.',
+                },
+                trigger: { type: 'string', nullable: true, description: 'The recorded payload, as JSON.' },
+                steps: {
+                  type: 'array',
+                  items: {
+                    type: 'object',
+                    properties: {
+                      nodeId: { type: 'string' },
+                      nodeType: { type: 'string' },
+                      status: { type: 'string' },
+                      input: { type: 'string', nullable: true },
+                      output: { type: 'string', nullable: true },
+                    },
+                  },
+                },
+              },
+            },
+          },
+          summary: {
+            type: 'object',
+            properties: {
+              runs: { type: 'integer' },
+              erased: { type: 'integer' },
+              workflows: { type: 'integer' },
+              oldest: { type: 'string', format: 'date-time', nullable: true },
+            },
+          },
+        },
+      },
+      SubjectErasureCertificate: {
+        type: 'object',
+        properties: {
+          available: { type: 'boolean' },
+          reason: { type: 'string', nullable: true, enum: ['no-identifier'] },
+          workspaceId: { type: 'string' },
+          certificate: {
+            type: 'string',
+            description: 'Its id, recorded in the tombstone left on every erased row.',
+          },
+          subjectId: { type: 'string' },
+          erasedAt: { type: 'string', format: 'date-time' },
+          runs: { type: 'array', items: { type: 'string' } },
+          commitments: {
+            type: 'array',
+            description:
+              'One SHA-256 per run over what was removed — a receipt, not a copy. The same ' +
+              'list is in the appended audit entry, because a commitment kept only in this ' +
+              'response is one nobody can check later.',
+            items: {
+              type: 'object',
+              properties: {
+                executionId: { type: 'string' },
+                digest: { type: 'string' },
+              },
+            },
+          },
+          summary: {
+            type: 'object',
+            properties: {
+              erased: { type: 'integer' },
+              alreadyErased: { type: 'integer' },
             },
           },
         },

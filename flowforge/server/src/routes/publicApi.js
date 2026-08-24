@@ -25,6 +25,7 @@ const { analyzeEffects } = require('../services/effects')
 const { analyzeConvergence } = require('../services/convergence')
 const { analyzeCapacity } = require('../services/capacity')
 const { analyzeContract } = require('../services/contractCheck')
+const { accessReport, eraseSubject } = require('../services/subjectRequests')
 
 // Every endpoint that takes a workflow *document* accepts it in either form: as
 // the JSON export, or as `.flow` text under `flow`. Resolving it in one place
@@ -1237,6 +1238,88 @@ router.get('/workflows/:id/effects', tokenAuth('read'), (req, res) => {
       /* unparseable stored graph — describe an empty effect set */
     }
     res.json({ workflowId: workflow.id, ...analyzeEffects(graph) })
+  } catch (err) {
+    console.error(err)
+    res.status(500).json({ error: 'Internal server error' })
+  }
+})
+
+// — Data subject requests (services/subjectRequests.js) ————————————————
+//
+// Two halves of one regulation over one index. Both take the person's actual
+// identifier (an email, a customer id) in the body rather than the pseudonymous
+// key, because the key is derived from a server-side pepper and an operator
+// servicing a request holds the identifier, not the hash.
+//
+// Both require `manage`. Access is not an escalation over `read` — a token that
+// can list executions can already read their steps — but a bulk cross-workflow
+// disclosure about a named person is a governed act, and erasure is destructive
+// and audited. Scoping them the same way means the audit entry always names
+// somebody who was trusted with the workspace.
+
+// The workspace a subject request applies to: the caller's, when they belong to
+// exactly one, or the one they name. Never "all of them" — an erasure whose
+// scope was inferred is an erasure nobody can attest to.
+function subjectScope(req, res) {
+  const memberships = db
+    .prepare('SELECT workspace_id FROM workspace_members WHERE user_id = ?')
+    .all(req.user.id)
+    .map((r) => r.workspace_id)
+
+  const named = req.body?.workspaceId
+  if (named) {
+    if (!memberships.includes(named)) {
+      res.status(404).json({ error: 'Workspace not found' })
+      return null
+    }
+    return named
+  }
+  if (memberships.length === 1) return memberships[0]
+  res.status(400).json({
+    error: 'workspaceId is required when the token owner belongs to more than one workspace',
+  })
+  return null
+}
+
+// POST /api/v1/subjects/access — everything held about one person (Art. 15).
+//
+// A POST rather than a GET because the identifier is personal data and has no
+// business in a URL, a query log or a proxy access log.
+router.post('/subjects/access', tokenAuth('manage'), (req, res) => {
+  try {
+    const workspaceId = subjectScope(req, res)
+    if (!workspaceId) return
+    const identifier = req.body?.identifier
+    if (typeof identifier !== 'string' || identifier.trim() === '') {
+      return res.status(400).json({ error: 'identifier is required' })
+    }
+    res.json({ workspaceId, ...accessReport(workspaceId, identifier) })
+  } catch (err) {
+    console.error(err)
+    res.status(500).json({ error: 'Internal server error' })
+  }
+})
+
+// POST /api/v1/subjects/erasure — destroy it (Art. 17).
+//
+// Returns a certificate: the id, the runs affected, and a SHA-256 commitment
+// per run to what was removed. The same certificate is appended to the
+// workspace's audit chain, which still verifies afterwards — the record grows
+// and nothing in it changes, which is the only way this can coexist with an
+// append-only log.
+router.post('/subjects/erasure', tokenAuth('manage'), (req, res) => {
+  try {
+    const workspaceId = subjectScope(req, res)
+    if (!workspaceId) return
+    const identifier = req.body?.identifier
+    if (typeof identifier !== 'string' || identifier.trim() === '') {
+      return res.status(400).json({ error: 'identifier is required' })
+    }
+    const reason = typeof req.body?.reason === 'string' ? req.body.reason.slice(0, 500) : null
+    res.json({
+      workspaceId,
+      ...eraseSubject(workspaceId, identifier, { actorId: req.user.id, reason }),
+    })
   } catch (err) {
     console.error(err)
     res.status(500).json({ error: 'Internal server error' })
