@@ -540,7 +540,8 @@ release; `recommendation` is `promote`, `rollback`, or `wait` — the value a jo
 branches on, rather than something to be inferred from a p-value.
 
 ```bash
-curl -s https://your-flowforge-host/api/v1/workflows/6f0c…/canary   -H "Authorization: Bearer $FLOWFORGE_TOKEN"
+curl -s https://your-flowforge-host/api/v1/workflows/6f0c…/canary \
+  -H "Authorization: Bearer $FLOWFORGE_TOKEN"
 ```
 
 ```json
@@ -854,7 +855,8 @@ Requires the `read` scope.
 ### What a run can do
 
 ```bash
-curl -s https://your-flowforge-host/api/v1/workflows/6f0c…/effects   -H "Authorization: Bearer $FLOWFORGE_TOKEN"
+curl -s https://your-flowforge-host/api/v1/workflows/6f0c…/effects \
+  -H "Authorization: Bearer $FLOWFORGE_TOKEN"
 ```
 
 Every node that reaches outside FlowForge or costs money, with the **decisions
@@ -893,6 +895,62 @@ opt-in rather than a default.
 gates — *if this approval rejects, what can still happen?* `target` is `null`
 when the graph does not determine the destination (a templated *authority*,
 not merely a templated path). See [docs/EFFECTS.md](./EFFECTS.md).
+
+Requires the `read` scope.
+
+### Ask a question of run history
+
+```bash
+curl -s -X POST https://your-flowforge-host/api/v1/workflows/6f0c…/query \
+  -H "Authorization: Bearer $FLOWFORGE_TOKEN" -H 'Content-Type: application/json' \
+  -d '{"where": "status == \"failed\" and steps.charge.output.status >= 500"}'
+```
+
+`where` is an **FXL** expression — the same language condition nodes and the
+Filter node use, so the whole stdlib is available and there is no second syntax
+to learn. It is evaluated against a scope describing one run: `status`,
+`triggerType`, `priority`, the three timestamps, computed `durationMs` and
+`waitMs`, the recorded `trigger.…` payload, and
+`steps.<nodeId>.{status,type,durationMs,error,input,output}`.
+
+```json
+{
+  "workflowId": "6f0c…",
+  "ok": true,
+  "runs": [
+    { "id": "e57a…", "status": "failed", "triggerType": "webhook",
+      "createdAt": "2026-08-01T10:00:00.000Z", "durationMs": 5000, "waitMs": 2000 }
+  ],
+  "plan": {
+    "pushedDown": ["status == \"failed\""],
+    "loadedSteps": true,
+    "scanned": 240, "matched": 1, "truncated": false, "evaluationErrors": 0
+  }
+}
+```
+
+Conjuncts that map onto execution columns are pushed into SQL — but **every
+conjunct is also evaluated by FXL**, so the SQL only narrows the candidate set
+and a pushdown bug can cost speed rather than change the answer. That matters
+because FXL falls back to string comparison: `undefined >= 400` is *true* and
+`null != "failed"` is *true*, while the corresponding SQL drops both rows. Every
+clause is therefore widened with `OR <col> IS NULL`.
+
+`plan` explains the answer. An empty `pushedDown` means a full scan — usually a
+predicate under a `not` or an `or`, where narrowing the candidate set is not the
+same as narrowing the result. `evaluationErrors` counts runs whose evaluation
+threw, so "nothing matched" can be told from "the field name is wrong".
+
+**One sharp edge, kept on purpose:** `steps.charge.output.status >= 500` also
+matches runs with *no charge step*, because `"undefined" >= "500"`. That is what
+a condition node does with the same expression, and a query dialect with
+different rules would be worse. Guard with `in`, which on an object is a
+`hasOwnProperty` test: `"charge" in steps and steps.charge.output.status >= 500`.
+
+A POST because a predicate is a program, not a parameter. A predicate that does
+not parse returns `400` with the character `position`. `flowforge query` exits 0
+on matches, 1 on none and 2 on a bad predicate. See
+[docs/QUERY.md](./QUERY.md).
 
 Requires the `read` scope.
 
@@ -1245,13 +1303,18 @@ fired.
 
 ```bash
 # Start a run that stops before charge-card (or ?breakAt=all for every node)
-curl -s -X POST "https://your-flowforge-host/api/v1/workflows/6f0c…/trigger?breakAt=charge-card"   -H "Authorization: Bearer $FLOWFORGE_TOKEN" -H "Content-Type: application/json"   -d '{"orderId": "ord-8891"}'
+curl -s -X POST "https://your-flowforge-host/api/v1/workflows/6f0c…/trigger?breakAt=charge-card" \
+  -H "Authorization: Bearer $FLOWFORGE_TOKEN" -H "Content-Type: application/json" \
+  -d '{"orderId": "ord-8891"}'
 
 # See what it stopped on
-curl -s https://your-flowforge-host/api/v1/executions/4e9a…/breaks   -H "Authorization: Bearer $FLOWFORGE_TOKEN"
+curl -s https://your-flowforge-host/api/v1/executions/4e9a…/breaks \
+  -H "Authorization: Bearer $FLOWFORGE_TOKEN"
 
 # Let it go — optionally with a different config
-curl -s -X POST https://your-flowforge-host/api/v1/executions/4e9a…/breaks/b1/resume   -H "Authorization: Bearer $FLOWFORGE_TOKEN" -H "Content-Type: application/json"   -d '{"action": "continue", "override": {"config": {"url": "https://staging.acme.com/charges"}}}'
+curl -s -X POST https://your-flowforge-host/api/v1/executions/4e9a…/breaks/b1/resume \
+  -H "Authorization: Bearer $FLOWFORGE_TOKEN" -H "Content-Type: application/json" \
+  -d '{"action": "continue", "override": {"config": {"url": "https://staging.acme.com/charges"}}}'
 ```
 
 ```json
