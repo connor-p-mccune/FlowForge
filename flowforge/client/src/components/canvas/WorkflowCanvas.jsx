@@ -41,6 +41,7 @@ import IssuesPanel from './IssuesPanel'
 import LineagePanel from './LineagePanel'
 import ConvergencePanel from './ConvergencePanel'
 import ContractGate from './ContractGate'
+import AssertionsPanel from './AssertionsPanel'
 import GuaranteesPanel from './GuaranteesPanel'
 import FlowTextPanel from './FlowTextPanel'
 import PathsPanel from './PathsPanel'
@@ -130,6 +131,7 @@ function CanvasInner({ workflowId }) {
   const [flowTextOpen, setFlowTextOpen] = useState(false)
   const [pathsOpen, setPathsOpen] = useState(false)
   const [convergenceOpen, setConvergenceOpen] = useState(false)
+  const [assertionsOpen, setAssertionsOpen] = useState(false)
   // Held here rather than in the panel because it decorates the *canvas*: the
   // panel owns the fetch, the edges own the drawing.
   const [convergence, setConvergence] = useState(null)
@@ -759,6 +761,7 @@ function CanvasInner({ workflowId }) {
   const handleToggleIssues = useCallback(() => setIssuesOpen((v) => !v), [])
   const handleToggleLineage = useCallback(() => setLineageOpen((v) => !v), [])
   const handleToggleConvergence = useCallback(() => setConvergenceOpen((v) => !v), [])
+  const handleToggleAssertions = useCallback(() => setAssertionsOpen((v) => !v), [])
   const handleToggleGuarantees = useCallback(() => setGuaranteesOpen((v) => !v), [])
   const handleTogglePaths = useCallback(() => setPathsOpen((v) => !v), [])
   const handleTogglePreview = useCallback(() => setPreviewOpen((v) => !v), [])
@@ -1219,6 +1222,8 @@ function CanvasInner({ workflowId }) {
         lineageOpen={lineageOpen}
         onToggleConvergence={handleToggleConvergence}
         convergenceOpen={convergenceOpen}
+        onToggleAssertions={handleToggleAssertions}
+        assertionsOpen={assertionsOpen}
         onToggleGuarantees={handleToggleGuarantees}
         guaranteesOpen={guaranteesOpen}
         onTogglePaths={handleTogglePaths}
@@ -1387,6 +1392,13 @@ function CanvasInner({ workflowId }) {
           onClose={() => setLineageOpen(false)}
           onSelectNode={handleSelectIssueNode}
         />
+      )}
+      {/* The sibling of Guarantees, and the split is the point: those are proved
+          over the *graph* before anything runs; these are checked against the
+          runs that happened, which is the only way to reach a property about
+          data or an outcome. */}
+      {assertionsOpen && (
+        <AssertionsPanel workflowId={workflowId} onClose={() => setAssertionsOpen(false)} />
       )}
       {contractGate && (
         <ContractGate

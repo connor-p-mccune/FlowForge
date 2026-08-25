@@ -27,8 +27,10 @@ export default function CanvasToolbar({
   onToggleIssues,
   onToggleLineage,
   onToggleConvergence,
+  onToggleAssertions,
   lineageOpen,
   convergenceOpen,
+  assertionsOpen,
   onToggleGuarantees,
   onToggleFlowText,
   flowTextOpen,
@@ -198,6 +200,14 @@ export default function CanvasToolbar({
         aria-pressed={guaranteesOpen}
       >
         🛡 Guarantees
+      </button>
+      <button
+        className={`toolbar-btn toolbar-btn--issues${assertionsOpen ? ' toolbar-btn--active' : ''}`}
+        title="Must never happen — properties of runs, checked against the ones that happened. Guarantees prove what the graph can do; these check what it did"
+        onClick={onToggleAssertions}
+        aria-pressed={assertionsOpen}
+      >
+        ⛔ Assertions
       </button>
       <button
         className={`toolbar-btn toolbar-btn--issues${flowTextOpen ? ' toolbar-btn--active' : ''}`}

@@ -8870,3 +8870,220 @@ html, body, #root {
   margin: 0;
   padding: 8px 12px 0;
 }
+
+/* — Assertions panel ————————————————————————————————————————————————— */
+/* The sibling of Guarantees. Reuses the .issues-panel chrome; everything below
+   is what a list of properties-of-runs needs that a list of findings does not. */
+
+.assertions__lede {
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: #334155;
+  margin: 0 0 10px;
+}
+
+.assertions__lede--quiet { color: var(--text-muted, #64748b); }
+
+.assertion-list {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0 0 12px;
+  padding: 0;
+}
+
+.assertion {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 9px 10px;
+  border: 1px solid #e2e8f0;
+  border-left-width: 3px;
+  border-radius: 6px;
+  background: #fff;
+}
+
+/* Holding is quiet, violated is loud — and broken gets its own colour rather
+   than borrowing either, because it is neither. */
+.assertion--holding { border-left-color: #16a34a; }
+.assertion--violated { border-left-color: #dc2626; background: #fef2f2; }
+.assertion--broken { border-left-color: #d97706; background: #fffbeb; }
+.assertion--unchecked { border-left-color: #cbd5e1; }
+
+.assertion__head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.assertion__icon {
+  font-weight: 700;
+  font-size: 13px;
+  line-height: 1;
+}
+
+.assertion--holding .assertion__icon { color: #16a34a; }
+.assertion--violated .assertion__icon { color: #dc2626; }
+.assertion--broken .assertion__icon { color: #b45309; }
+.assertion--unchecked .assertion__icon { color: #94a3b8; }
+
+.assertion__name {
+  flex: 1;
+  min-width: 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: #0f172a;
+}
+
+.assertion__off {
+  font-style: normal;
+  font-weight: 400;
+  color: var(--text-muted, #64748b);
+}
+
+.assertion__action {
+  font: inherit;
+  font-size: 11px;
+  color: #64748b;
+  background: none;
+  border: none;
+  padding: 2px 4px;
+  cursor: pointer;
+  border-radius: 4px;
+}
+
+.assertion__action:hover { background: #f1f5f9; color: #0f172a; }
+.assertion__action--remove:hover { background: #fef2f2; color: #b91c1c; }
+
+.assertion__predicate {
+  display: block;
+  font-family: var(--mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: 11.5px;
+  line-height: 1.45;
+  color: #334155;
+  background: #f8fafc;
+  border-radius: 5px;
+  padding: 5px 7px;
+  overflow-x: auto;
+  white-space: pre;
+}
+
+.assertion__meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  font-size: 11px;
+  color: var(--text-muted, #64748b);
+}
+
+.assertion__violations { color: #b91c1c; font-weight: 600; }
+.assertion__errors { color: #b45309; }
+
+/* The one line that has to be unmissable: zero violations because it has never
+   worked, not because nothing went wrong. */
+.assertion__broken {
+  color: #b45309;
+  line-height: 1.45;
+}
+
+.assertion__counterexample {
+  font-size: 11px;
+  color: #7f1d1d;
+}
+
+.assertion__counterexample code {
+  font-family: var(--mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  background: #fee2e2;
+  border-radius: 4px;
+  padding: 1px 4px;
+}
+
+.assertion-add {
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  width: 100%;
+  color: #475569;
+  background: #fff;
+  border: 1px dashed #cbd5e1;
+  border-radius: 6px;
+  padding: 8px;
+  cursor: pointer;
+}
+
+.assertion-add:hover { border-color: #94a3b8; color: #0f172a; }
+
+.assertion-form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  background: #f8fafc;
+}
+
+.assertion-form__field {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  font-size: 11px;
+  font-weight: 600;
+  color: #475569;
+}
+
+.assertion-form__field input,
+.assertion-form__field textarea {
+  font: inherit;
+  font-weight: 400;
+  font-size: 12px;
+  padding: 6px 8px;
+  border: 1px solid #cbd5e1;
+  border-radius: 5px;
+  background: #fff;
+  color: #0f172a;
+}
+
+.assertion-form__field textarea {
+  font-family: var(--mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: 11.5px;
+  resize: vertical;
+}
+
+.assertion-form__error {
+  font-size: 11.5px;
+  line-height: 1.45;
+  color: #b91c1c;
+  margin: 0;
+}
+
+.assertion-form__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.assertion-form__cancel,
+.assertion-form__pin {
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  border-radius: 5px;
+  padding: 6px 12px;
+  cursor: pointer;
+  border: 1px solid transparent;
+}
+
+.assertion-form__cancel {
+  background: #fff;
+  border-color: #cbd5e1;
+  color: #475569;
+}
+
+.assertion-form__pin {
+  background: #0f172a;
+  color: #fff;
+}
+
+.assertion-form__pin:disabled { opacity: 0.45; cursor: default; }
