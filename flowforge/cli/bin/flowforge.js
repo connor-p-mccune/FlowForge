@@ -33,6 +33,7 @@ const COMMANDS = {
   capacity: require('../src/commands/capacity'),
   contract: require('../src/commands/contract'),
   subject: require('../src/commands/subject'),
+  query: require('../src/commands/query'),
   release: require('../src/commands/release'),
   trigger: require('../src/commands/trigger'),
   pause: require('../src/commands/pause'),
@@ -91,6 +92,7 @@ Usage:
   flowforge pause <workflow-id>                    Hold all new runs (kill switch) — needs a manage token
   flowforge unpause <workflow-id>                  Release the pause and accept runs again
   flowforge runs <workflow-id> [--limit N]         Recent runs for a workflow
+  flowforge query <id> "<fxl>" [--explain] [--json]  Ask a question of run history in FXL — exits 1 on no matches, 2 on a bad predicate
   flowforge backfill <id> --from <iso|7d> [--yes]  Re-run a schedule over a past window (previews unless --yes)
   flowforge deps <workflow-id>                     What a workflow calls and what calls it (exits non-zero on a reference cycle)
   flowforge insights <workflow-id> [--limit N]     Duration percentiles, success rate, anomalies

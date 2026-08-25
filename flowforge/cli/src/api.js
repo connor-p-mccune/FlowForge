@@ -3,10 +3,15 @@
 // because they usually did ({ error } bodies pass through verbatim).
 
 class ApiError extends Error {
-  constructor(message, status) {
+  // `body` carries the parsed error payload when the server sent one. Most
+  // failures need only the message, but some carry structure worth surfacing —
+  // a parser's character `position`, a merge's conflict list — and a command
+  // that wants it should not have to re-issue the request to get it.
+  constructor(message, status, body = null) {
     super(message)
     this.name = 'ApiError'
     this.status = status
+    this.body = body
   }
 }
 
@@ -44,7 +49,7 @@ function createClient({ baseUrl, token }) {
       /* non-JSON body (proxy error page) — fall through to the status check */
     }
     if (!res.ok) {
-      throw new ApiError(data?.error || `Request failed with HTTP ${res.status}`, res.status)
+      throw new ApiError(data?.error || `Request failed with HTTP ${res.status}`, res.status, data)
     }
     return data
   }
