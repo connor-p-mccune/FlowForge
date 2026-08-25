@@ -38,6 +38,7 @@ describe('GET /api/v1/openapi.json', () => {
       '/subjects/access',
       '/subjects/erasure',
       '/workflows',
+      '/workflows/{workflowId}/assertions',
       '/workflows/{workflowId}/backfill',
       '/workflows/{workflowId}/backfills',
       '/workflows/{workflowId}/canary',

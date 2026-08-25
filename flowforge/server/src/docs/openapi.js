@@ -956,6 +956,53 @@ const spec = {
         },
       },
     },
+    '/workflows/{workflowId}/assertions': {
+      get: {
+        tags: ['workflows'],
+        summary: 'Things that must never happen, and whether they have',
+        description:
+          '[Guarantees](#tag/workflows) prove properties of the **graph** — ' +
+          '*can this ever charge a card without the approval having run?* — ' +
+          'statically, by dominance. That is the strongest kind of check there ' +
+          'is, and it can only see what the graph’s shape decides.\n\n' +
+          'The properties that break production are about **data and ' +
+          'outcomes**: a run must never complete with the charge step returning ' +
+          '4xx; a refund must never exceed the order total. No graph analysis ' +
+          'reaches those, and there are thousands of runs already recorded that ' +
+          'would answer them.\n\n' +
+          'An assertion is a **saved query**. The predicate describes the shape ' +
+          'of a run that must not exist, in the same FXL ' +
+          '`POST /workflows/{workflowId}/query` takes — so a predicate is ' +
+          'developed against history with `flowforge query` and then pinned, ' +
+          'unchanged. Each is evaluated on the engine’s terminal hook against ' +
+          'the run that just settled, so every run is judged exactly once with ' +
+          'no watermark to be wrong about.\n\n' +
+          '**Gate on `violated + broken`, not on `violated` alone.** An ' +
+          'assertion whose predicate throws on every run reports zero ' +
+          'violations, and treating that as green is the failure mode this ' +
+          'design exists to avoid — so evaluations that *complete* are counted ' +
+          'separately from ones that *throw*, and one with errors and no ' +
+          'successes is `broken`. It has never once worked, and it is a gap in ' +
+          'the monitoring rather than a clean bill of health.\n\n' +
+          'Requires the `read` scope.',
+        operationId: 'getWorkflowAssertions',
+        parameters: [{ $ref: '#/components/parameters/WorkflowId' }],
+        responses: {
+          200: {
+            description: 'The pinned assertions and their states.',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/AssertionReport' },
+              },
+            },
+          },
+          401: { $ref: '#/components/responses/Unauthorized' },
+          403: { $ref: '#/components/responses/Forbidden' },
+          404: { $ref: '#/components/responses/NotFound' },
+          429: { $ref: '#/components/responses/RateLimited' },
+        },
+      },
+    },
     '/workflows/{workflowId}/backfill': {
       post: {
         tags: ['workflows'],
@@ -3452,6 +3499,61 @@ const spec = {
                 compared: { type: 'integer' },
                 findings: { type: 'array', items: { $ref: '#/components/schemas/DataDriftFinding' } },
               },
+            },
+          },
+        },
+      },
+      AssertionReport: {
+        type: 'object',
+        properties: {
+          workflowId: { type: 'string' },
+          assertions: {
+            type: 'array',
+            items: {
+              type: 'object',
+              properties: {
+                id: { type: 'string' },
+                name: { type: 'string' },
+                predicate: {
+                  type: 'string',
+                  description: 'An FXL expression. A run matching it is a violation.',
+                },
+                enabled: { type: 'boolean' },
+                state: {
+                  type: 'string',
+                  enum: ['holding', 'violated', 'broken', 'unchecked'],
+                  description:
+                    '`broken` means the predicate has thrown and never once evaluated ' +
+                    'successfully — it is claiming nothing, and is never counted as holding.',
+                },
+                checked: {
+                  type: 'integer',
+                  description: 'Evaluations that completed. Not the same as runs seen.',
+                },
+                violations: { type: 'integer' },
+                errors: { type: 'integer', description: 'Evaluations that threw.' },
+                lastError: { type: 'string', nullable: true },
+                lastCheckedAt: { type: 'string', format: 'date-time', nullable: true },
+                lastViolationAt: { type: 'string', format: 'date-time', nullable: true },
+                lastViolationExecutionId: {
+                  type: 'string',
+                  nullable: true,
+                  description: 'The counterexample — the run that matched.',
+                },
+              },
+            },
+          },
+          summary: {
+            type: 'object',
+            properties: {
+              total: { type: 'integer' },
+              violated: { type: 'integer' },
+              broken: {
+                type: 'integer',
+                description: 'Gate on `violated + broken`; broken never folds into holding.',
+              },
+              holding: { type: 'integer' },
+              unchecked: { type: 'integer', description: 'No run has reached it yet.' },
             },
           },
         },

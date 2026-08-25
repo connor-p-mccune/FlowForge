@@ -27,6 +27,7 @@ const { analyzeCapacity } = require('../services/capacity')
 const { analyzeContract } = require('../services/contractCheck')
 const { accessReport, eraseSubject } = require('../services/subjectRequests')
 const { queryRuns } = require('../services/runQuery')
+const runAssertions = require('../services/runAssertions')
 
 // Every endpoint that takes a workflow *document* accepts it in either form: as
 // the JSON export, or as `.flow` text under `flow`. Resolving it in one place
@@ -1239,6 +1240,26 @@ router.get('/workflows/:id/effects', tokenAuth('read'), (req, res) => {
       /* unparseable stored graph — describe an empty effect set */
     }
     res.json({ workflowId: workflow.id, ...analyzeEffects(graph) })
+  } catch (err) {
+    console.error(err)
+    res.status(500).json({ error: 'Internal server error' })
+  }
+})
+
+// GET /api/v1/workflows/:id/assertions — what this workflow forbids, and
+// whether it is holding (services/runAssertions.js).
+//
+// The CI-shaped question is `summary.violated`, but the number a pipeline
+// should gate on is `violated + broken`. An assertion nobody can evaluate is a
+// gap in the monitoring rather than a clean bill of health, and a build that
+// passed on it would be passing on a check that has never once worked.
+//
+// Read-only; `read` scope.
+router.get('/workflows/:id/assertions', tokenAuth('read'), (req, res) => {
+  try {
+    const workflow = getWorkflowForMember(req.params.id, req.user.id)
+    if (!workflow) return res.status(404).json({ error: 'Workflow not found' })
+    res.json({ workflowId: workflow.id, ...runAssertions.reportFor(workflow.id) })
   } catch (err) {
     console.error(err)
     res.status(500).json({ error: 'Internal server error' })

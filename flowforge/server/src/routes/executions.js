@@ -19,6 +19,7 @@ const runSchedule = require('../services/runSchedule')
 const scheduleSim = require('../services/scheduleSim')
 const nodePriority = require('../services/nodePriority')
 const { queryRuns } = require('../services/runQuery')
+const runAssertions = require('../services/runAssertions')
 
 const router = express.Router()
 
@@ -207,6 +208,95 @@ router.post('/workflows/:id/test', auth, async (req, res) => {
 // GET /api/workflows/:id/executions — past runs, newest first. workflowUpdatedAt
 // lets the client flag runs whose workflow has been edited since (a replay runs
 // the *current* definition), without a per-row query.
+// — Run assertions (services/runAssertions.js) ————————————————————————
+//
+// A saved query that must never match. Guarantees prove properties of the
+// graph; these check the properties of *runs* that no graph analysis reaches —
+// the ones about data and outcomes.
+//
+// The predicate is the same FXL the query route above takes, deliberately: a
+// predicate is developed with `query` against history and then pinned here, and
+// it has to mean the same thing in both places.
+
+// GET /api/workflows/:id/assertions — what this workflow forbids, and whether
+// it is holding.
+router.get('/workflows/:id/assertions', auth, (req, res) => {
+  try {
+    const workflow = getWorkflowForMember(req.params.id, req.user.id)
+    if (!workflow) return res.status(404).json({ error: 'Workflow not found' })
+    res.json({ workflowId: workflow.id, ...runAssertions.reportFor(workflow.id) })
+  } catch (err) {
+    console.error(err)
+    res.status(500).json({ error: 'Internal server error' })
+  }
+})
+
+// POST /api/workflows/:id/assertions — pin one.
+//
+// A predicate that does not parse is refused rather than stored, because a
+// stored one that cannot be evaluated is silently green forever.
+router.post('/workflows/:id/assertions', auth, (req, res) => {
+  try {
+    const workflow = getWorkflowForMember(req.params.id, req.user.id)
+    if (!workflow) return res.status(404).json({ error: 'Workflow not found' })
+
+    const result = runAssertions.createAssertion(workflow.id, {
+      name: req.body?.name,
+      predicate: req.body?.predicate,
+      createdBy: req.user.id,
+    })
+    if (!result.ok) return res.status(400).json({ error: result.error })
+    res.status(201).json({ assertion: result.assertion })
+  } catch (err) {
+    console.error(err)
+    res.status(500).json({ error: 'Internal server error' })
+  }
+})
+
+// The workflow an assertion belongs to, checked for membership. Assertion ids
+// are opaque, so the ownership has to be resolved through the workflow rather
+// than trusted from the path.
+function assertionForMember(assertionId, userId) {
+  const assertion = db
+    .prepare('SELECT * FROM workflow_assertions WHERE id = ?')
+    .get(assertionId)
+  if (!assertion) return null
+  return getWorkflowForMember(assertion.workflow_id, userId) ? assertion : null
+}
+
+// PUT /api/assertions/:id — rename, re-word, enable or disable.
+router.put('/assertions/:id', auth, (req, res) => {
+  try {
+    if (!assertionForMember(req.params.id, req.user.id)) {
+      return res.status(404).json({ error: 'Assertion not found' })
+    }
+    const result = runAssertions.updateAssertion(req.params.id, {
+      name: req.body?.name,
+      predicate: req.body?.predicate,
+      enabled: req.body?.enabled,
+    })
+    if (!result.ok) return res.status(400).json({ error: result.error })
+    res.json({ assertion: result.assertion })
+  } catch (err) {
+    console.error(err)
+    res.status(500).json({ error: 'Internal server error' })
+  }
+})
+
+// DELETE /api/assertions/:id
+router.delete('/assertions/:id', auth, (req, res) => {
+  try {
+    if (!assertionForMember(req.params.id, req.user.id)) {
+      return res.status(404).json({ error: 'Assertion not found' })
+    }
+    runAssertions.deleteAssertion(req.params.id)
+    res.json({ ok: true })
+  } catch (err) {
+    console.error(err)
+    res.status(500).json({ error: 'Internal server error' })
+  }
+})
+
 // POST /api/workflows/:id/query — ask a question of this workflow's run history
 // in FXL (services/runQuery.js).
 //
