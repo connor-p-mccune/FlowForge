@@ -70,6 +70,37 @@ ensureColumn('executions', 'trigger_type', 'TEXT')
 // artefact that must survive an erasure is the proof it happened, and a row
 // keyed on the address would make that proof a copy of the thing deleted.
 // NULL is the normal case — most workflows are not about a person.
+// Run assertions (services/runAssertions.js): an FXL predicate describing a run
+// that must never happen, evaluated against every real run of the workflow as
+// it settles.
+//
+// The counters are the whole state machine. `ok_count` is evaluations that
+// completed; `error_count` is ones that threw — and an assertion with errors and
+// no successes has never once worked, which is a different thing from holding
+// and must not be reported as green. `alerted_at` edge-triggers the
+// notification, so a storm of violations is one alert rather than one per run.
+db.exec(`
+  CREATE TABLE IF NOT EXISTS workflow_assertions (
+    id TEXT PRIMARY KEY,
+    workflow_id TEXT NOT NULL REFERENCES workflows(id) ON DELETE CASCADE,
+    name TEXT NOT NULL,
+    predicate TEXT NOT NULL,
+    enabled INTEGER NOT NULL DEFAULT 1,
+    created_by TEXT REFERENCES users(id) ON DELETE SET NULL,
+    created_at TEXT NOT NULL,
+    ok_count INTEGER NOT NULL DEFAULT 0,
+    error_count INTEGER NOT NULL DEFAULT 0,
+    violation_count INTEGER NOT NULL DEFAULT 0,
+    last_error TEXT,
+    last_checked_at TEXT,
+    last_violation_at TEXT,
+    last_violation_execution_id TEXT REFERENCES executions(id) ON DELETE SET NULL,
+    alerted_at TEXT
+  );
+  CREATE INDEX IF NOT EXISTS idx_assertions_workflow
+    ON workflow_assertions (workflow_id) WHERE enabled = 1;
+`)
+
 ensureColumn('workflows', 'subject_path', 'TEXT')
 ensureColumn('executions', 'subject_id', 'TEXT')
 // Set when a run's recorded data has been erased on request. The row survives:

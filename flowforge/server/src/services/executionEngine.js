@@ -35,6 +35,7 @@ const scheduleSim = require('./scheduleSim')
 const retryBudget = require('./retryBudget')
 const convergence = require('./convergence')
 const subjectIndex = require('./subjectIndex')
+const runAssertions = require('./runAssertions')
 
 const runners = {
   'action-http': require('./nodeRunners/httpRequest'),
@@ -423,8 +424,25 @@ async function runLeasedExecution(
   // the /metrics registry. nested marks sub-workflow child runs.
   const runStartedMs = Date.now()
   const isNested = ancestorWorkflowIds.length > 0
-  const recordTerminal = (status) =>
+  const recordTerminal = (status) => {
     recordExecution(status, (Date.now() - runStartedMs) / 1000, { nested: isNested })
+    // Run assertions (services/runAssertions.js): things this workflow's author
+    // said must never happen, judged against the run that just did.
+    //
+    // Here rather than on a sweep because a sweep needs a watermark to know
+    // which runs it has already judged, and a watermark can be wrong in both
+    // directions — skip one and a violation is missed forever, replay one and
+    // it alerts twice. The run in front of us is exact.
+    //
+    // Wrapped, unconditionally. A monitor that can fail the thing it monitors
+    // is worse than no monitor, and this one runs on the completion path of
+    // every real run in the system.
+    try {
+      if (!dryRun) runAssertions.checkRun(executionId, { workflow })
+    } catch (err) {
+      console.error(`Assertion check failed for execution ${executionId}: ${err.message}`)
+    }
+  }
 
   // Workspace secrets, decrypted just for this run. Node configs reference them
   // as {{secrets.NAME}}; the map lives only in engine memory, and the redactor
