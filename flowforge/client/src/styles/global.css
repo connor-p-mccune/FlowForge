@@ -8759,3 +8759,114 @@ html, body, #root {
 }
 
 .contract-gate__confirm:hover { background: #b91c1c; }
+
+/* — Run query bar ————————————————————————————————————————————————— */
+/* Sits above the run history list. A match replaces the list rather than
+   filtering it, because the list is the fifty most recent runs and the one
+   somebody is searching for is usually older than that. */
+
+.run-query {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px;
+  border-bottom: 1px solid #e2e8f0;
+  background: #f8fafc;
+}
+
+.run-query__row {
+  display: flex;
+  gap: 6px;
+}
+
+.run-query__input {
+  flex: 1;
+  min-width: 0;
+  font-family: var(--mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: 12px;
+  padding: 6px 9px;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  background: #fff;
+  color: #0f172a;
+}
+
+.run-query__input:focus {
+  outline: none;
+  border-color: #6366f1;
+  box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.15);
+}
+
+.run-query__go,
+.run-query__clear {
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  border-radius: 6px;
+  padding: 6px 12px;
+  cursor: pointer;
+  white-space: nowrap;
+  border: 1px solid transparent;
+}
+
+.run-query__go {
+  background: #0f172a;
+  color: #fff;
+}
+
+.run-query__go:hover:not(:disabled) { background: #1e293b; }
+.run-query__go:disabled { opacity: 0.45; cursor: default; }
+
+.run-query__clear {
+  background: #fff;
+  border-color: #cbd5e1;
+  color: #475569;
+}
+
+.run-query__clear:hover { background: #f1f5f9; }
+
+.run-query__error {
+  font-size: 12px;
+  color: #b91c1c;
+  background: #fef2f2;
+  border-radius: 6px;
+  padding: 7px 9px;
+}
+
+/* Monospace and pre-wrapped, because the caret only lines up under the
+   character it means if every glyph is the same width. */
+.run-query__caret {
+  font-family: var(--mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: 11.5px;
+  line-height: 1.35;
+  margin: 5px 0 0;
+  white-space: pre;
+  overflow-x: auto;
+  color: #7f1d1d;
+}
+
+.run-query__examples {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.run-query__example {
+  font-family: var(--mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: 11px;
+  color: #475569;
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  border-radius: 999px;
+  padding: 2px 8px;
+  cursor: pointer;
+}
+
+.run-query__example:hover { border-color: #94a3b8; color: #0f172a; }
+
+.run-query__summary {
+  font-size: 12px;
+  color: var(--text-muted, #64748b);
+  margin: 0;
+  padding: 8px 12px 0;
+}

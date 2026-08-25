@@ -159,3 +159,83 @@ describe('POST /api/v1/workflows/:id/query', () => {
     expect((await query({ where: 'status == "failed"' }, workflowId, outsiderToken)).status).toBe(404)
   })
 })
+
+// The session route, which the run-history panel uses. Same analysis, different
+// caller — and the reason it exists is that the panel's list is the fifty most
+// recent runs, which is the right default for a history view and the wrong one
+// for a question.
+describe('POST /api/workflows/:id/query', () => {
+  let jwt
+  let userId
+  let workflowId
+
+  beforeAll(async () => {
+    const res = await request(app)
+      .post('/api/auth/register')
+      .send({ email: 'session-query@example.com', password: 'password123', displayName: 'S' })
+    jwt = res.body.token
+    userId = db.prepare('SELECT id FROM users WHERE email = ?').get('session-query@example.com').id
+    const workspaceId = (
+      await request(app).get('/api/workspaces').set('Authorization', `Bearer ${jwt}`)
+    ).body.workspaces[0].id
+
+    workflowId = uuidv4()
+    db.prepare(
+      `INSERT INTO workflows (id, workspace_id, name, graph_json, status, created_by)
+       VALUES (?, ?, 'Sessioned', '{"nodes":[],"edges":[]}', 'deployed', ?)`
+    ).run(workflowId, workspaceId, userId)
+
+    // Sixty runs: more than the history panel's fifty, so a match older than
+    // the list is only reachable through the query.
+    for (let i = 0; i < 60; i += 1) {
+      const created = BASE + i * 60000
+      db.prepare(
+        `INSERT INTO executions (id, workflow_id, status, triggered_by, created_at, started_at, finished_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`
+      ).run(
+        uuidv4(), workflowId, i === 0 ? 'oldest-failure' : 'completed', userId,
+        iso(created), iso(created), iso(created + 1000)
+      )
+    }
+  })
+
+  const post = (body) =>
+    request(app)
+      .post(`/api/workflows/${workflowId}/query`)
+      .set('Authorization', `Bearer ${jwt}`)
+      .send(body)
+
+  it('reaches past the fifty runs the history list loads', async () => {
+    const list = await request(app)
+      .get(`/api/workflows/${workflowId}/executions`)
+      .set('Authorization', `Bearer ${jwt}`)
+    expect(list.body.executions).toHaveLength(50)
+    // The oldest run is not in that page at all, and the query still finds it.
+    expect(list.body.executions.some((e) => e.status === 'oldest-failure')).toBe(false)
+
+    const res = await post({ where: 'status == "oldest-failure"' })
+    expect(res.status).toBe(200)
+    expect(res.body.runs).toHaveLength(1)
+  })
+
+  it('rejects a predicate that does not parse, with the position', async () => {
+    const res = await post({ where: 'status ==' })
+    expect(res.status).toBe(400)
+    expect(res.body).toHaveProperty('position')
+  })
+
+  it('requires a predicate', async () => {
+    expect((await post({})).status).toBe(400)
+  })
+
+  it('404s for a workflow the caller is not a member of', async () => {
+    const other = await request(app)
+      .post('/api/auth/register')
+      .send({ email: 'outsider-sq@example.com', password: 'password123', displayName: 'O' })
+    const res = await request(app)
+      .post(`/api/workflows/${workflowId}/query`)
+      .set('Authorization', `Bearer ${other.body.token}`)
+      .send({ where: 'status == "completed"' })
+    expect(res.status).toBe(404)
+  })
+})

@@ -5,6 +5,7 @@ import { StepList } from './ExecutionPanel'
 import ExecutionTimeline from './ExecutionTimeline'
 import RunComparison from './RunComparison'
 import RollbackSection from './RollbackSection'
+import RunQueryBar from './RunQueryBar'
 import { SkeletonRows } from '../Skeleton'
 
 function parseSteps(rows) {
@@ -139,6 +140,10 @@ export default function ExecutionHistory({ workflowId, nodes, autoOpenId }) {
   const [comparison, setComparison] = useState(null) // GET .../compare result
   const [error, setError] = useState(null)
   const [loading, setLoading] = useState(true)
+  // A query result replaces the list rather than filtering it. The list is the
+  // fifty most recent runs, and the run somebody is searching for is usually
+  // old precisely because it is the one they remember.
+  const [queryResult, setQueryResult] = useState(null)
   const toast = useToast()
 
   const load = useCallback(async () => {
@@ -394,9 +399,39 @@ export default function ExecutionHistory({ workflowId, nodes, autoOpenId }) {
     )
   }
 
+  // The query returns the same facts the list rows read, in camelCase. Mapping
+  // them here keeps the rendering path below unchanged — the list never learns
+  // that there are two sources.
+  const asRow = (run) => ({
+    id: run.id,
+    status: run.status,
+    trigger_type: run.triggerType,
+    priority: run.priority,
+    created_at: run.createdAt,
+    started_at: run.startedAt,
+    finished_at: run.finishedAt,
+  })
+
+  const visible = queryResult ? queryResult.runs.map(asRow) : executions
+
   return (
     <>
-      {executions.length > 1 && (
+      <RunQueryBar
+        workflowId={workflowId}
+        active={Boolean(queryResult)}
+        onResult={setQueryResult}
+      />
+      {queryResult && (
+        <p className="run-query__summary">
+          {queryResult.plan.matched === 0
+            ? `No runs match. ${queryResult.plan.scanned} scanned.`
+            : `${queryResult.plan.matched} of ${queryResult.plan.scanned} scanned.`}
+          {queryResult.plan.truncated && ' Stopped at the scan cap — older matches may exist.'}
+          {queryResult.plan.evaluationErrors > 0 &&
+            ` ${queryResult.plan.evaluationErrors} could not be evaluated.`}
+        </p>
+      )}
+      {visible.length > 1 && (
         <div className="exec-history__toolbar">
           <button
             className={`exec-history__compare-toggle${compareMode ? ' exec-history__compare-toggle--active' : ''}`}
@@ -415,7 +450,7 @@ export default function ExecutionHistory({ workflowId, nodes, autoOpenId }) {
         </div>
       )}
       <ul className="exec-history">
-      {executions.map((ex) => (
+      {visible.map((ex) => (
         <li className="exec-history__item" key={ex.id}>
           <div className="exec-history__row-wrap">
             <button

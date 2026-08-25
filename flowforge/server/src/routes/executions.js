@@ -18,6 +18,7 @@ const { listResponses: listApprovalResponses } = require('../services/approvals'
 const runSchedule = require('../services/runSchedule')
 const scheduleSim = require('../services/scheduleSim')
 const nodePriority = require('../services/nodePriority')
+const { queryRuns } = require('../services/runQuery')
 
 const router = express.Router()
 
@@ -206,6 +207,36 @@ router.post('/workflows/:id/test', auth, async (req, res) => {
 // GET /api/workflows/:id/executions — past runs, newest first. workflowUpdatedAt
 // lets the client flag runs whose workflow has been edited since (a replay runs
 // the *current* definition), without a per-row query.
+// POST /api/workflows/:id/query — ask a question of this workflow's run history
+// in FXL (services/runQuery.js).
+//
+// The list above is the fifty most recent runs, which is the right default for
+// a history panel and the wrong one for a question. This reaches past it: the
+// predicate decides which runs come back, not their recency.
+router.post('/workflows/:id/query', auth, (req, res) => {
+  try {
+    const workflow = getWorkflowForMember(req.params.id, req.user.id)
+    if (!workflow) return res.status(404).json({ error: 'Workflow not found' })
+
+    const where = req.body?.where
+    if (typeof where !== 'string' || where.trim() === '') {
+      return res.status(400).json({ error: 'where is required and must be an FXL expression' })
+    }
+    if (where.length > 4000) {
+      return res.status(400).json({ error: 'where must be at most 4000 characters' })
+    }
+
+    const result = queryRuns(workflow.id, where, { limit: req.body?.limit })
+    if (!result.ok) {
+      return res.status(400).json({ error: result.error, position: result.position })
+    }
+    res.json({ workflowId: workflow.id, ...result })
+  } catch (err) {
+    console.error(err)
+    res.status(500).json({ error: 'Internal server error' })
+  }
+})
+
 router.get('/workflows/:id/executions', auth, (req, res) => {
   try {
     const workflow = getWorkflowForMember(req.params.id, req.user.id)
