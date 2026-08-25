@@ -898,6 +898,58 @@ not merely a templated path). See [docs/EFFECTS.md](./EFFECTS.md).
 
 Requires the `read` scope.
 
+### Things that must never happen
+
+```bash
+curl -s https://your-flowforge-host/api/v1/workflows/6f0c…/assertions \
+  -H "Authorization: Bearer $FLOWFORGE_TOKEN"
+```
+
+[Guarantees](./GUARANTEES.md) prove properties of the **graph**, statically, by
+dominance. The properties that break production are about **data and outcomes**,
+and no graph analysis reaches them — but thousands of recorded runs would answer
+them.
+
+An assertion is a **saved query**: the predicate describes the shape of a run
+that must not exist, in the same FXL `POST /workflows/{id}/query` takes. Develop
+it against history with `flowforge query`, then pin the same string. Each is
+evaluated on the engine's terminal hook against the run that just settled, so
+every run is judged exactly once — no watermark to skip a run or replay one.
+
+```json
+{
+  "workflowId": "6f0c…",
+  "assertions": [
+    { "id": "as-1", "name": "no 5xx from charge", "enabled": true,
+      "predicate": "steps.charge.output.status >= 500",
+      "state": "holding", "checked": 412, "violations": 0, "errors": 0 },
+    { "id": "as-2", "name": "items non-empty", "enabled": true,
+      "predicate": "first(trigger.items) == \"\"",
+      "state": "broken", "checked": 0, "violations": 0, "errors": 412,
+      "lastError": "first: expected an array" }
+  ],
+  "summary": { "total": 2, "violated": 0, "broken": 1, "holding": 1, "unchecked": 0 }
+}
+```
+
+**Gate on `violated + broken`, not on `violated` alone.** An assertion whose
+predicate throws on every run reports zero violations, and treating that as
+green is exactly the failure this design exists to avoid — so evaluations that
+*complete* are counted separately from ones that *throw*, and one with errors
+and no successes is `broken`. It has never once worked; it is a gap in the
+monitoring rather than a clean bill of health, and it never folds into
+`holding`.
+
+`lastViolationExecutionId` is the counterexample — the run that matched.
+Alerting is edge-triggered, so a storm of matching runs is one incident and
+`violations` records how many there were. `flowforge assertions <id>` exits
+non-zero on either state. Authoring is on the session API
+(`POST /api/workflows/:id/assertions`, `PUT`/`DELETE /api/assertions/:id`); a
+predicate that does not parse is refused rather than stored. See
+[docs/ASSERTIONS.md](./ASSERTIONS.md).
+
+Requires the `read` scope.
+
 ### Ask a question of run history
 
 ```bash
