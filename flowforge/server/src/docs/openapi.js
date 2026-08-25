@@ -835,6 +835,90 @@ const spec = {
         },
       },
     },
+    '/workflows/{workflowId}/query': {
+      post: {
+        tags: ['workflows'],
+        summary: 'Ask a question of run history',
+        description:
+          'The insights, regressions and drift reports each answer one *fixed* ' +
+          'question. This answers the one somebody actually has during an ' +
+          'incident, which is always specific: *which runs last week failed at ' +
+          'the charge step with a 5xx, for orders over a thousand?*\n\n' +
+          '`where` is an **FXL** expression — the same language condition nodes ' +
+          'and the Filter node use, so the whole stdlib is available and there ' +
+          'is no second syntax to learn. It is evaluated against a scope ' +
+          'describing one run:\n\n' +
+          '| | |\n|---|---|\n' +
+          '| `id`, `status`, `triggerType`, `priority` | the run |\n' +
+          '| `createdAt`, `startedAt`, `finishedAt` | ISO-8601 UTC |\n' +
+          '| `durationMs`, `waitMs` | computed; `null` while a run is unfinished |\n' +
+          '| `trigger.…` | the recorded trigger payload |\n' +
+          '| `steps.<nodeId>.{status,type,durationMs,error,input,output}` | per step |\n\n' +
+          '```\nstatus == "failed" and steps.charge.output.status >= 500\n' +
+          'durationMs > 60000 and trigger.order.total > 1000\n```\n\n' +
+          '`plan` explains the answer: `pushedDown` lists the conjuncts turned ' +
+          'into SQL, `loadedSteps` says whether step rows had to be read, and ' +
+          '`scanned` against `matched` says why a query was slow. Every conjunct ' +
+          'is evaluated by FXL whether or not it was pushed, so the SQL is only ' +
+          'ever an optimisation.\n\n' +
+          '**One sharp edge, kept on purpose.** FXL falls back to string ' +
+          'comparison, so `steps.charge.output.status >= 500` also matches runs ' +
+          'with no charge step — `"undefined" >= "500"`. That is what a ' +
+          'condition node does with the same expression, and a query dialect ' +
+          'with different rules would be worse. Guard with `in`, which on an ' +
+          'object is a `hasOwnProperty` test: ' +
+          '`"charge" in steps and steps.charge.output.status >= 500`.\n\n' +
+          'A POST because a predicate is a program, not a parameter. Requires ' +
+          'the `read` scope.',
+        operationId: 'queryWorkflowRuns',
+        parameters: [{ $ref: '#/components/parameters/WorkflowId' }],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                required: ['where'],
+                properties: {
+                  where: { type: 'string', maxLength: 4000, description: 'An FXL predicate.' },
+                  limit: { type: 'integer', minimum: 1, maximum: 500, default: 50 },
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          200: {
+            description: 'The matching runs, and the plan that found them.',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/RunQueryResult' },
+              },
+            },
+          },
+          400: {
+            description:
+              'The predicate did not parse. `position` is the character offset, so an ' +
+              'editor can put a caret on it.',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    error: { type: 'string' },
+                    position: { type: 'integer', nullable: true },
+                  },
+                },
+              },
+            },
+          },
+          401: { $ref: '#/components/responses/Unauthorized' },
+          403: { $ref: '#/components/responses/Forbidden' },
+          404: { $ref: '#/components/responses/NotFound' },
+          429: { $ref: '#/components/responses/RateLimited' },
+        },
+      },
+    },
     '/workflows/{workflowId}/schedule': {
       get: {
         tags: ['workflows'],
@@ -3367,6 +3451,64 @@ const spec = {
                 nodeType: { type: 'string', nullable: true },
                 compared: { type: 'integer' },
                 findings: { type: 'array', items: { $ref: '#/components/schemas/DataDriftFinding' } },
+              },
+            },
+          },
+        },
+      },
+      RunQueryResult: {
+        type: 'object',
+        properties: {
+          workflowId: { type: 'string' },
+          ok: { type: 'boolean' },
+          runs: {
+            type: 'array',
+            items: {
+              type: 'object',
+              properties: {
+                id: { type: 'string' },
+                status: { type: 'string' },
+                triggerType: { type: 'string', nullable: true },
+                priority: { type: 'string', nullable: true },
+                createdAt: { type: 'string', format: 'date-time' },
+                startedAt: { type: 'string', format: 'date-time', nullable: true },
+                finishedAt: { type: 'string', format: 'date-time', nullable: true },
+                durationMs: { type: 'integer', nullable: true },
+                waitMs: { type: 'integer', nullable: true },
+              },
+            },
+          },
+          plan: {
+            type: 'object',
+            description: 'Why the query was fast, or why it was not.',
+            properties: {
+              pushedDown: {
+                type: 'array',
+                items: { type: 'string' },
+                description:
+                  'The conjuncts turned into SQL. Empty means a full scan of the ' +
+                  'workflow’s runs — usually because the predicate sits under a `not` ' +
+                  'or an `or`, where narrowing the candidate set is not the same as ' +
+                  'narrowing the result.',
+              },
+              loadedSteps: {
+                type: 'boolean',
+                description: 'Whether step rows had to be read, which is per candidate run.',
+              },
+              scanned: { type: 'integer' },
+              matched: { type: 'integer' },
+              truncated: {
+                type: 'boolean',
+                description:
+                  'True when the scan cap was reached. The answer is then a prefix, and ' +
+                  'says so rather than pretending to be complete.',
+              },
+              evaluationErrors: {
+                type: 'integer',
+                description:
+                  'Runs whose evaluation threw — a function given the wrong shape. A ' +
+                  'mismatch for that row, not a failed query, but counted so "nothing ' +
+                  'matched" can be told from "nothing could be evaluated".',
               },
             },
           },

@@ -26,6 +26,7 @@ const { analyzeConvergence } = require('../services/convergence')
 const { analyzeCapacity } = require('../services/capacity')
 const { analyzeContract } = require('../services/contractCheck')
 const { accessReport, eraseSubject } = require('../services/subjectRequests')
+const { queryRuns } = require('../services/runQuery')
 
 // Every endpoint that takes a workflow *document* accepts it in either form: as
 // the JSON export, or as `.flow` text under `flow`. Resolving it in one place
@@ -1238,6 +1239,42 @@ router.get('/workflows/:id/effects', tokenAuth('read'), (req, res) => {
       /* unparseable stored graph — describe an empty effect set */
     }
     res.json({ workflowId: workflow.id, ...analyzeEffects(graph) })
+  } catch (err) {
+    console.error(err)
+    res.status(500).json({ error: 'Internal server error' })
+  }
+})
+
+// POST /api/v1/workflows/:id/query — ask a question of this workflow's run
+// history in FXL (services/runQuery.js).
+//
+// A POST rather than a GET because a predicate is a program, not a parameter: a
+// useful one runs past what belongs in a URL, and quoting an expression full of
+// brackets and quotes through a query string is a worse experience than a body.
+//
+// `read` scope. It reads executions and their steps and returns matching runs —
+// the same data `GET /executions/:id` already exposes, reached by a different
+// question.
+router.post('/workflows/:id/query', tokenAuth('read'), (req, res) => {
+  try {
+    const workflow = getWorkflowForMember(req.params.id, req.user.id)
+    if (!workflow) return res.status(404).json({ error: 'Workflow not found' })
+
+    const where = req.body?.where
+    if (typeof where !== 'string' || where.trim() === '') {
+      return res.status(400).json({ error: 'where is required and must be an FXL expression' })
+    }
+    if (where.length > 4000) {
+      return res.status(400).json({ error: 'where must be at most 4000 characters' })
+    }
+
+    const result = queryRuns(workflow.id, where, { limit: req.body?.limit })
+    // A predicate that does not parse is the caller's mistake, and the position
+    // is what makes it fixable — the same contract the .flow parser offers.
+    if (!result.ok) {
+      return res.status(400).json({ error: result.error, position: result.position })
+    }
+    res.json({ workflowId: workflow.id, ...result })
   } catch (err) {
     console.error(err)
     res.status(500).json({ error: 'Internal server error' })
