@@ -1614,6 +1614,41 @@ cd client && npm install && npm run dev
 Make sure `.env` values are exported or present; the server reads them via
 `dotenv`.
 
+### Demo data
+
+```bash
+cd server && node src/db/seed.js     # ~5,800 runs over 90 days
+```
+
+Log in as `demo@flowforge.dev` / `demo1234`. Deterministic and idempotent —
+re-running wipes and recreates the demo workspace.
+
+The data is shaped to *demonstrate*, because an empty panel teaches nothing
+about what a panel is for. Five workflows, and one of them —
+**Refund Approval** — exists to give the newer analyses something real:
+
+- **A queue.** It has a concurrency cap of two and a human approval that holds
+  its slot for a mean of twenty minutes. The wait is **simulated**, not written
+  in: slots are taken and released as runs are generated, so the delay each run
+  records is *caused* by the cap. That is the only way a demo of a queueing
+  model demonstrates anything — a plausible number written into each row
+  produces data the model cannot explain, and its self-check correctly says so.
+- **Arrivals that follow a working day**, so the cap is contended at eleven in
+  the morning and idle at four — which is what the peak analysis exists to find.
+- **Recorded step outputs and trigger payloads**, so `steps.refund.status`,
+  `steps.refund.output.refunded` and `trigger.order.total` all resolve.
+- **Two pinned assertions**, whose states are computed by replaying the real
+  check over the seeded history rather than written in.
+
+The seed prints the workflow id and four commands worth running against it:
+
+```bash
+flowforge capacity <id> --target 300000
+flowforge query <id> 'steps.refund.status == "failed"' --explain
+flowforge assertions <id>
+flowforge subject ada@northwind.example
+```
+
 ---
 
 ## Testing & linting
