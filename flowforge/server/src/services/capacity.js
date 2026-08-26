@@ -88,7 +88,18 @@ function measure(rows, windowDays) {
     }
   }
 
-  const windowMs = windowDays * 86400000
+  // The denominator is the period the workflow was actually able to receive
+  // traffic, not the nominal window.
+  //
+  // A workflow three days old asked about over thirty days would otherwise
+  // report a tenth of its real arrival rate — and that error runs in the
+  // dangerous direction: it makes a cap look far safer than it is, on exactly
+  // the workflows nobody has capacity data for yet. Floored at an hour so a
+  // burst inside one minute cannot divide by almost nothing.
+  const nominalMs = windowDays * 86400000
+  const firstArrivalMs = arrivals.length ? Math.min(...arrivals) : NaN
+  const observedMs = Number.isFinite(firstArrivalMs) ? Date.now() - firstArrivalMs : nominalMs
+  const windowMs = Math.max(3600000, Math.min(nominalMs, observedMs))
 
   // The mean rate is the wrong statistic for deciding a cap, and it is wrong in
   // the direction that matters: a workflow taking 20 runs an hour on average
@@ -105,6 +116,9 @@ function measure(rows, windowDays) {
   return {
     runs: rows.length,
     windowDays,
+    // What the rate was actually measured over, which is the nominal window
+    // only once the workflow is at least that old.
+    measuredOverDays: Number((windowMs / 86400000).toFixed(2)),
     // Per millisecond, which is what queueing.js wants; the surfaces convert.
     arrivalRatePerMs: arrivals.length / windowMs,
     arrivalsPerHour: (arrivals.length / windowMs) * 3600000,

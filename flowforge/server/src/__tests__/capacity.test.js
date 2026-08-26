@@ -339,3 +339,43 @@ describe('analyzeCapacity — peak load', () => {
     expect(analyzeCapacity(wfId).peakRecommendation).toBeNull()
   })
 })
+
+// The denominator is the period the workflow could actually receive traffic,
+// not the nominal window — and the difference runs in the dangerous direction
+// on exactly the workflows nobody has capacity data for yet.
+describe('analyzeCapacity — a workflow younger than the window', () => {
+  it('measures the rate over the runs it has, not over a window it did not exist for', () => {
+    const { wfId, userId } = seedWorkflow({ cap: 4 })
+    // 72 runs across three days, asked about over a thirty-day window. The
+    // honest rate is one an hour; dividing by thirty days would report a tenth
+    // of that and make the cap look ten times safer than it is.
+    seedRuns(wfId, userId, { count: 72, serviceMs: 60000, windowDays: 3 })
+    const { measured } = analyzeCapacity(wfId, { windowDays: 30 })
+    expect(measured.arrivalsPerHour).toBeCloseTo(1, 0)
+    expect(measured.measuredOverDays).toBeLessThan(4)
+  })
+
+  it('uses the whole window once the workflow is older than it', () => {
+    const { wfId, userId } = seedWorkflow({ cap: 4 })
+    seedRuns(wfId, userId, { count: 168, serviceMs: 60000, windowDays: 7 })
+    expect(analyzeCapacity(wfId, { windowDays: 7 }).measured.measuredOverDays).toBeCloseTo(7, 0)
+  })
+
+  it('will not divide by almost nothing when every run landed in one minute', () => {
+    // A burst inside a minute would otherwise report an arrival rate of
+    // thousands per hour and declare every cap hopeless.
+    const { wfId, userId } = seedWorkflow({ cap: 4 })
+    const now = Date.now()
+    const insert = db.prepare(
+      `INSERT INTO executions (id, workflow_id, status, triggered_by, created_at, started_at, finished_at)
+       VALUES (?, ?, 'completed', ?, ?, ?, ?)`
+    )
+    for (let i = 0; i < 40; i += 1) {
+      const created = now - 60000 + i * 1000
+      insert.run(uuidv4(), wfId, userId, iso(created), iso(created), iso(created + 1000))
+    }
+    const { measured } = analyzeCapacity(wfId, { windowDays: 7 })
+    expect(measured.measuredOverDays).toBeCloseTo(1 / 24, 2)
+    expect(measured.arrivalsPerHour).toBeCloseTo(40, 0)
+  })
+})
