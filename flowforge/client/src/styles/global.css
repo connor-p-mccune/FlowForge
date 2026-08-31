@@ -9183,3 +9183,30 @@ html, body, #root {
   color: var(--text-muted, #94a3b8);
   margin: 2px 0 0;
 }
+
+/* The witness sits under its survivor: the diagnosis and the prescription
+   together, so the payload can be copied into a scenario without hunting. */
+.mutation__witness {
+  display: block;
+  margin-top: 3px;
+  font-size: 11px;
+  color: var(--text-muted, #64748b);
+}
+
+.mutation__witness code {
+  font-family: var(--mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: 10.5px;
+  background: #fff;
+  border: 1px solid #fecaca;
+  border-radius: 4px;
+  padding: 1px 4px;
+  color: #7f1d1d;
+  user-select: all;
+}
+
+.mutation__suggestion {
+  display: block;
+  margin-top: 2px;
+  font-style: normal;
+  color: var(--text-muted, #94a3b8);
+}

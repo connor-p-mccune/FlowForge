@@ -9,6 +9,10 @@
 // is 61%" but *"the approval gate can be deleted and every one of your tests
 // still passes."*
 //
+// And where the solver can find one, each survivor comes with **the input that
+// would have caught it** — because a diagnosis nobody can act on is where most
+// coverage tools stop.
+//
 // **Exits non-zero on a survivor only with `--strict`.** A survivor is evidence
 // of a gap and not proof of one — an *equivalent* mutant, one that does not
 // change behaviour, cannot be killed by anything, and identifying those is
@@ -78,13 +82,22 @@ module.exports = async function mutants(args, ctx) {
     ctx.log(bold(`${survivors.length} bug(s) nothing would notice`))
     for (const m of survivors) {
       ctx.log(`  ${red('·')} ${m.describe}`)
+      // The mutant is the diagnosis; the witness is the prescription. Printing
+      // it against the survivor rather than in a summary is the difference
+      // between a report and something somebody can paste into a scenario.
+      if (m.witness) {
+        ctx.log(`      ${gray('caught by')} ${cyan(JSON.stringify(m.witness.triggerData))}`)
+        if (m.suggestion) ctx.log(`      ${gray(m.suggestion)}`)
+      }
     }
-    ctx.log(
-      gray(
-        '\n  A scenario that asserts on what the workflow *decided* kills these;\n' +
-          '  one that asserts only that the run completed does not.'
+    if (!survivors.some((m) => m.witness)) {
+      ctx.log(
+        gray(
+          '\n  A scenario that asserts on what the workflow *decided* kills these;\n' +
+            '  one that asserts only that the run completed does not.'
+        )
       )
-    )
+    }
   }
 
   ctx.log('')

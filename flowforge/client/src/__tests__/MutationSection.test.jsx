@@ -166,3 +166,52 @@ describe('MutationSection', () => {
     await waitFor(() => expect(screen.getByText('Check')).not.toBeDisabled())
   })
 })
+
+// The mutant is the diagnosis; the witness is the prescription. Where the
+// solver found an input the two graphs disagree on, it belongs against the
+// survivor rather than in a summary — copyable into a scenario without hunting.
+describe('MutationSection — witnesses', () => {
+  const survivor = (over = {}) =>
+    mutant({
+      id: 'm2',
+      killed: false,
+      by: null,
+      operator: 'off-by-one',
+      describe: '"Large order?" off by one — 100 became 101',
+      ...over,
+    })
+
+  it('shows the input that would have caught a survivor', async () => {
+    apiFetch.mockResolvedValue(
+      report([
+        survivor({
+          witness: { triggerData: { total: 101 }, assumptions: [] },
+          suggestion: 'assert on which branch "check" takes with this input',
+        }),
+      ])
+    )
+    section()
+    fireEvent.click(check())
+    expect(await screen.findByText('{"total":101}')).toBeInTheDocument()
+    expect(screen.getByText(/assert on which branch "check" takes/)).toBeInTheDocument()
+  })
+
+  it('falls back to the general advice when the solver found nothing', async () => {
+    // An equivalent mutation has no distinguishing input, and inventing one
+    // would be worse than saying what generally kills these.
+    apiFetch.mockResolvedValue(report([survivor()]))
+    section()
+    fireEvent.click(check())
+    expect(await screen.findByText(/asserts on what the workflow/)).toBeInTheDocument()
+  })
+
+  it('does not repeat the general advice once a witness is shown', async () => {
+    apiFetch.mockResolvedValue(
+      report([survivor({ witness: { triggerData: { total: 101 }, assumptions: [] } })])
+    )
+    section()
+    fireEvent.click(check())
+    await screen.findByText('{"total":101}')
+    expect(screen.queryByText(/asserts on what the workflow/)).not.toBeInTheDocument()
+  })
+})

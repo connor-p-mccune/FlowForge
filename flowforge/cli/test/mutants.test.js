@@ -146,3 +146,40 @@ test('without a workflow id prints usage and fails', async () => {
   assert.equal(code, 1)
   assert.match(ctx.output(), /Usage: flowforge mutants/)
 })
+
+// A diagnosis nobody can act on is where most coverage tools stop. Where the
+// solver found an input the original and the mutant disagree on, it is printed
+// against the survivor — pasteable into a scenario rather than summarised.
+test('prints the input that would have caught a survivor', async () => {
+  const { out } = await run(
+    report([
+      mutant({
+        killed: false,
+        by: null,
+        operator: 'off-by-one',
+        describe: '"Large order?" off by one — 100 became 101',
+        witness: { triggerData: { total: 101 }, assumptions: [] },
+        suggestion: 'assert on which branch "check" takes with this input',
+      }),
+    ])
+  )
+  assert.match(out, /caught by \{"total":101\}/)
+  assert.match(out, /assert on which branch "check" takes/)
+})
+
+test('falls back to the general advice when no witness was found', async () => {
+  // An equivalent mutant has no distinguishing input, and inventing one would
+  // be worse than saying nothing.
+  const { out } = await run(report([mutant({ killed: false, by: null })]))
+  assert.match(out, /asserts on what the workflow \*decided\* kills these/)
+  assert.doesNotMatch(out, /caught by \{/)
+})
+
+test('does not repeat the general advice once a witness is shown', async () => {
+  const { out } = await run(
+    report([
+      mutant({ killed: false, by: null, witness: { triggerData: { total: 101 }, assumptions: [] } }),
+    ])
+  )
+  assert.doesNotMatch(out, /asserts on what the workflow \*decided\* kills these/)
+})

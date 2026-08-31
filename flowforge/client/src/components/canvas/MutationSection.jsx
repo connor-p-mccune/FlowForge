@@ -50,7 +50,8 @@ export default function MutationSection({ workflowId }) {
       <p className="mutation__lede">
         Introduces a plausible bug — a condition wired backwards, a threshold off by one,
         a gate deleted — and re-runs every check. A bug nothing catches is a gap in the
-        checks, not a bug in the workflow.
+        checks, not a bug in the workflow, and comes with the input that would have
+        caught it.
       </p>
 
       {error && <p className="webhook-panel__error">{error}</p>}
@@ -76,14 +77,26 @@ export default function MutationSection({ workflowId }) {
           {survivors.length > 0 && (
             <ul className="mutation__survivors">
               {survivors.map((m) => (
-                <li key={m.id}>{m.describe}</li>
+                <li key={m.id}>
+                  {m.describe}
+                  {/* The mutant is the diagnosis; the witness is the
+                      prescription. Against the survivor rather than in a
+                      summary, so it can be copied into a scenario. */}
+                  {m.witness && (
+                    <span className="mutation__witness">
+                      caught by <code>{JSON.stringify(m.witness.triggerData)}</code>
+                      {m.suggestion && <em className="mutation__suggestion">{m.suggestion}</em>}
+                    </span>
+                  )}
+                </li>
               ))}
             </ul>
           )}
 
-          {survivors.length > 0 && (
-            // Actionable, because "61% covered" is not. What kills these is a
-            // scenario that checks the answer rather than the exit status.
+          {survivors.length > 0 && !survivors.some((m) => m.witness) && (
+            // The fallback, for survivors the solver could not find an input
+            // for — an equivalent mutation has none, and inventing one would be
+            // worse than the general advice.
             <p className="mutation__advice">
               A scenario that asserts on what the workflow <em>decided</em> kills these; one
               that asserts only that the run completed does not.

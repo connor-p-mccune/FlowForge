@@ -136,12 +136,70 @@ MISSED  "Large order?" off by one — 100 became 101                —
 
 1 bug(s) nothing would notice
   · "Large order?" off by one — 100 became 101
-
-  A scenario that asserts on what the workflow *decided* kills these;
-  one that asserts only that the run completed does not.
+      caught by {"total":101}
+      assert on which branch "check" takes with this input
 
   5/6 caught (83%) · 1 by the linter · 1 by a guarantee · 3 by a test
 ```
+
+That last pair of lines is [the witness](#the-input-that-would-have-caught-it),
+and it is the difference between a report and something somebody can paste into
+a scenario.
+
+---
+
+## The input that would have caught it
+
+A survivor is a diagnosis, and a diagnosis is where most coverage tools stop.
+*"The threshold can be off by one and every test still passes"* is true, and the
+next thing anybody says is **"so what do I write?"**
+
+Answering that needs no new machinery. [Path feasibility](./PATHS.md) already
+turns a branch into the payload that drives it, backed by a real solver. The
+only new idea is what to ask it:
+
+> Find an input on which the original and the mutant **disagree**.
+
+Such an input *is* the missing test, because a scenario running it and asserting
+on the outcome cannot pass on both graphs.
+
+Three of the four operators need no solver call at all — a swapped condition
+disagrees on **every** input that reaches it, and a removed node on every input
+that reaches it, so the existing witnesses answer directly.
+
+**`off-by-one` is the one that has to be solved for**, and it is the case that
+shows why a lazier answer would be wrong. `total > 100` became `total > 101`, so
+the distinguishing inputs are exactly those satisfying:
+
+```
+(total > 100) and not (total > 101)     →     total == 101
+```
+
+A witness for the *original* branch is no use: the solver is as likely to return
+`total = 5000`, which both graphs agree about, and a generated test that passes
+on the bug is worse than none. So a **probe graph** is built — the original with
+that one condition replaced by the conjunction — and the solver asked for an
+input taking its true branch. If that is unsatisfiable the shift went the other
+way (`< 100` → `< 101`), and the reversed conjunction is tried.
+
+Each witness carries a **suggestion**, because a payload alone is half an
+answer: running it proves nothing unless the assertion is about the thing the
+two graphs disagree on.
+
+```console
+1 bug(s) nothing would notice
+  · "Large order?" off by one — 100 became 101
+      caught by {"total":101}
+      assert on which branch "check" takes with this input
+```
+
+Solved for survivors only, and capped. A mutant something already caught needs
+no test written for it, and a witness proves the graphs **differ** on that input
+— not that a scenario written around it is a good test, which still depends on
+what the assertion reaches. Where the solver finds nothing — a truncated search,
+a condition over a value it cannot model, or an equivalent mutant that genuinely
+has no distinguishing input — the answer is nothing rather than an invented
+payload.
 
 ---
 
@@ -174,10 +232,8 @@ care?"* — and that judgement is one a person can make and an algorithm cannot.
 - **It does not mutate node config beyond thresholds.** Changing a URL or an
   email address produces a mutant every scenario kills trivially (dry-run
   outputs differ) without saying anything about coverage.
-- **It does not generate the missing test.** [Path feasibility](./PATHS.md)
-  already produces payloads that reach a branch; pairing the two — *"here is the
-  survivor, and here is an input that would have caught it"* — is the obvious
-  next step and is not this one.
+- **It does not write the scenario for you.** It hands you the payload and says
+  what to assert; turning that into a saved scenario is one click you make.
 - **It does not run against a candidate graph.** The analysis is about the saved
   workflow's checks. Judging an edit is [preview's](./PREVIEW.md) job.
 - **It is bounded.** Sixteen mutants against ten scenarios is already a hundred
