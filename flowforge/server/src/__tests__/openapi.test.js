@@ -104,3 +104,51 @@ describe('GET /api/v1/openapi.json', () => {
     }
   })
 })
+
+// The test above pins what the *spec* says. This asks the *router*, which is
+// the direction the drift actually goes: a route gets added to serve a feature,
+// and writing the spec entry is the step somebody forgets. An endpoint nobody
+// can find in the documentation is an endpoint nobody uses.
+describe('the spec against the router', () => {
+  const fs = require('fs')
+  const nodePath = require('path')
+
+  it('documents every route the public router mounts', async () => {
+    const { body: spec } = await request(app).get('/api/v1/openapi.json')
+    const source = fs.readFileSync(
+      nodePath.join(__dirname, '..', 'routes', 'publicApi.js'),
+      'utf8'
+    )
+
+    // Compared on shape rather than on parameter names: the spec names its
+    // parameters (`{workflowId}`) and Express does not (`:id`).
+    const shapeOf = (route) =>
+      route.replace(/:[A-Za-z]+/g, '{}').replace(/\{[A-Za-z]+\}/g, '{}')
+    const documented = new Set(Object.keys(spec.paths).map(shapeOf))
+
+    const undocumented = []
+    const pattern = /router\.(get|post|put|patch|delete)\(\s*'([^']+)'/g
+    let match = pattern.exec(source)
+    while (match) {
+      const [, method, route] = match
+      // The spec cannot document the endpoint that serves the spec.
+      if (route !== '/openapi.json' && !documented.has(shapeOf(route))) {
+        undocumented.push(`${method.toUpperCase()} ${route}`)
+      }
+      match = pattern.exec(source)
+    }
+
+    expect(undocumented).toEqual([])
+  })
+
+  it('finds the routes at all, so the check cannot pass by matching nothing', () => {
+    // A regex that stopped matching would make the test above vacuously green,
+    // which is the failure mode of every source-scanning check.
+    const source = fs.readFileSync(
+      nodePath.join(__dirname, '..', 'routes', 'publicApi.js'),
+      'utf8'
+    )
+    const mounted = source.match(/router\.(get|post|put|patch|delete)\(\s*'([^']+)'/g) || []
+    expect(mounted.length).toBeGreaterThan(40)
+  })
+})
