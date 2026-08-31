@@ -29,6 +29,7 @@ const { mutants, MAX_MUTANTS } = require('./mutation')
 const { lintGraph } = require('./workflowLinter')
 const { guaranteeIssues } = require('./guarantees')
 const { runScenario } = require('./workflowTester')
+const { witnessSurvivors } = require('./mutationWitness')
 
 // A mutation analysis is a foreground operation somebody is waiting for, so the
 // scenario suite it runs per mutant is bounded too. Sixteen mutants against ten
@@ -192,21 +193,35 @@ async function analyzeMutations(workflow, { limit = MAX_MUTANTS } = {}) {
     )
   }
 
-  const killed = results.filter((r) => r.killed)
+  // A survivor is a diagnosis; the input that would have caught it is the
+  // prescription. Solved only for the ones nothing caught, because a mutant
+  // something already noticed needs no test written for it.
+  const withWitnesses = witnessSurvivors(
+    graph,
+    results,
+    new Map(candidates.map((m) => [m.id, m]))
+  )
+
+  const killed = withWitnesses.filter((r) => r.killed)
   return {
     available: true,
     workflowId: workflow.id,
     scenarios: scenarios.length,
     guarantees: declared.length,
-    mutants: results,
+    mutants: withWitnesses,
     summary: {
-      total: results.length,
+      total: withWitnesses.length,
       killed: killed.length,
-      survived: results.length - killed.length,
+      survived: withWitnesses.length - killed.length,
       // A percentage, because that is what everybody expects from a mutation
       // score — and the survivors below it are what anybody should actually
       // read, since a score of 80% says nothing about *which* fifth got through.
-      score: results.length === 0 ? null : Math.round((killed.length / results.length) * 100),
+      score:
+        withWitnesses.length === 0
+          ? null
+          : Math.round((killed.length / withWitnesses.length) * 100),
+      // How many survivors came with a payload that would have caught them.
+      witnessed: withWitnesses.filter((r) => !r.killed && r.witness).length,
       byLint: killed.filter((r) => r.by === 'lint').length,
       byGuarantee: killed.filter((r) => r.by === 'guarantee').length,
       byTest: killed.filter((r) => r.by === 'test').length,

@@ -28,7 +28,7 @@ const edge = (source, target, sourceHandle = null) => ({
 const GRAPH = {
   nodes: [
     node('t1', 'trigger-webhook'),
-    node('check', 'condition', { expression: 'total > 100' }, 'Large order?'),
+    node('check', 'condition', { operator: 'expression', expression: 'total > 100' }, 'Large order?'),
     node('tag', 'transform', { template: '{"tier": "large"}' }, 'Tag large'),
     node('skip', 'transform', { template: '{"tier": "small"}' }, 'Tag small'),
     node('out', 'output-return', { value: '{{tag}}' }, 'Return'),

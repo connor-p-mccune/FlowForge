@@ -40,7 +40,7 @@ beforeAll(() => {
 const GRAPH = {
   nodes: [
     node('t1', 'trigger-webhook'),
-    node('check', 'condition', { expression: 'total > 100' }, 'Large order?'),
+    node('check', 'condition', { operator: 'expression', expression: 'total > 100' }, 'Large order?'),
     node('tag', 'transform', { template: '{"tier": "large"}' }, 'Tag large'),
     node('skip', 'transform', { template: '{"tier": "small"}' }, 'Tag small'),
     node('out', 'output-return', { value: '{{tag}}' }, 'Return'),
@@ -255,5 +255,57 @@ describe('analyzeMutations', () => {
     const workflow = seedWorkflow()
     const report = await analyzeMutations(workflow, { limit: 2 })
     expect(report.summary.total).toBe(2)
+  })
+})
+
+// A survivor is a diagnosis. The input that would have caught it is the
+// prescription, and it is where most coverage tools stop — "the threshold can
+// be off by one and every test still passes" is true and leaves somebody asking
+// what to write.
+describe('analyzeMutations — witnesses', () => {
+  it('gives a survivor the input that would have caught it', async () => {
+    const workflow = seedWorkflow()
+    addScenario(workflow.id, {
+      name: 'it runs',
+      triggerData: { total: 500 },
+      assertions: [{ expression: 'status == "completed"' }],
+    })
+
+    const report = await analyzeMutations(workflow)
+    const offByOne = report.mutants.find((m) => m.operator === 'off-by-one' && !m.killed)
+    expect(offByOne).toBeTruthy()
+    // The boundary, not just any passing input — 500 is a value both graphs
+    // agree about, and a generated test around it would pass on the bug.
+    expect(offByOne.witness.triggerData.total).toBe(101)
+  })
+
+  it('says what to assert as well as what to send', async () => {
+    const workflow = seedWorkflow()
+    addScenario(workflow.id, {
+      name: 'it runs',
+      triggerData: { total: 500 },
+      assertions: [{ expression: 'status == "completed"' }],
+    })
+    const report = await analyzeMutations(workflow)
+    const survivor = report.mutants.find((m) => !m.killed && m.suggestion)
+    expect(survivor.suggestion).toBeTruthy()
+  })
+
+  it('spends no solver time on the mutants something already caught', async () => {
+    const workflow = seedWorkflow()
+    addScenario(workflow.id, {
+      name: 'checks the answer',
+      triggerData: { total: 500 },
+      assertions: [{ expression: 'output.tier == "large"' }],
+    })
+    const report = await analyzeMutations(workflow)
+    expect(report.mutants.filter((m) => m.killed).every((m) => !m.witness)).toBe(true)
+  })
+
+  it('counts how many survivors came with one', async () => {
+    const workflow = seedWorkflow()
+    const report = await analyzeMutations(workflow)
+    expect(report.summary.witnessed).toBeLessThanOrEqual(report.summary.survived)
+    expect(report.summary.witnessed).toBeGreaterThan(0)
   })
 })

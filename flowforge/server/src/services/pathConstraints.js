@@ -878,11 +878,20 @@ function analyzePaths(rawGraph) {
     }
   }
 
-  const nodes = graph.nodes.map((n) => ({
-    nodeId: n.id,
-    label: labelOf(n),
-    status: graphReachable.has(n.id) ? statusOf(nodeResult.get(n.id)) : 'unwired',
-  }))
+  // Per node, with the input that reaches it. The solver already computed the
+  // model on the way to deciding reachability; surfacing it answers a question
+  // the branch witnesses cannot — *what payload gets a run to this step?* —
+  // which is what turns a surviving mutant into a test somebody can add.
+  const nodes = graph.nodes.map((n) => {
+    const result = nodeResult.get(n.id)
+    const status = graphReachable.has(n.id) ? statusOf(result) : 'unwired'
+    return {
+      nodeId: n.id,
+      label: labelOf(n),
+      status,
+      witness: status === 'reachable' && result?.model ? describeWitness(result.model, []) : null,
+    }
+  })
 
   // Findings. A dead branch is an error: the author wired an outcome that no
   // input reaches, so either the condition above it or the branch itself is
