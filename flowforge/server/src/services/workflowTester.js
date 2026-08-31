@@ -82,7 +82,11 @@ function evaluateAssertions(assertions, scope) {
 // Run one scenario against a workflow and return its result. Never throws for a
 // test failure — a failing assertion or a run error is data, so the caller (a
 // route, a CLI gate) renders it rather than 500ing.
-async function runScenario(workflow, scenario) {
+// `graphOverride` runs the scenario against a graph the workflow does not hold,
+// which is what mutation testing needs: a mutant has to be executed without ever
+// being saved. The engine only honours it in dry-run mode, and a scenario is
+// always a dry run, so there is no path by which this touches a real system.
+async function runScenario(workflow, scenario, { graphOverride = null } = {}) {
   const input = parseJson(scenario.trigger_data, {})
   const assertions = Array.isArray(scenario.assertions)
     ? scenario.assertions
@@ -103,7 +107,12 @@ async function runScenario(workflow, scenario) {
   let runError = null
   try {
     output = (await withTimeout(
-      runExecution(executionId, { dryRun: true, payload: input, publish: () => {} }),
+      runExecution(executionId, {
+        dryRun: true,
+        payload: input,
+        publish: () => {},
+        ...(graphOverride ? { graphOverride } : {}),
+      }),
       timeoutMs()
     )) ?? null
   } catch (err) {
