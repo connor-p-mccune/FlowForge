@@ -9087,3 +9087,99 @@ html, body, #root {
 }
 
 .assertion-form__pin:disabled { opacity: 0.45; cursor: default; }
+
+/* — Mutation section ————————————————————————————————————————————————— */
+/* Inside the Tests panel, under the scenarios it judges. "Run all" says whether
+   the suite passes; this says whether passing means anything. */
+
+.mutation {
+  margin-top: 18px;
+  padding-top: 14px;
+  border-top: 1px solid #e2e8f0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.mutation__head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.mutation__title {
+  flex: 1;
+  font-size: 13px;
+  font-weight: 600;
+  color: #0f172a;
+}
+
+.mutation__lede {
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-muted, #64748b);
+  margin: 0;
+}
+
+.mutation__score {
+  font-size: 13px;
+  font-weight: 600;
+  margin: 4px 0 0;
+}
+
+.mutation__score--clean { color: #15803d; }
+.mutation__score--gaps { color: #b91c1c; }
+
+/* The survivors are the report. A percentage says a fifth got through and
+   nothing about which fifth, and the which is the part worth reading. */
+.mutation__survivors {
+  list-style: none;
+  margin: 0;
+  padding: 0 0 0 12px;
+  border-left: 2px solid #fecaca;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+  line-height: 1.45;
+  color: #7f1d1d;
+}
+
+.mutation__advice {
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--text-muted, #64748b);
+  margin: 0;
+}
+
+.mutation__advice--warn { color: #b45309; }
+
+.mutation__caught {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  font-size: 11.5px;
+  line-height: 1.45;
+  color: #475569;
+}
+
+.mutation__tick {
+  color: #16a34a;
+  font-weight: 700;
+  margin-right: 5px;
+}
+
+.mutation__by {
+  font-style: normal;
+  color: var(--text-muted, #94a3b8);
+}
+
+.mutation__caveat {
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--text-muted, #94a3b8);
+  margin: 2px 0 0;
+}

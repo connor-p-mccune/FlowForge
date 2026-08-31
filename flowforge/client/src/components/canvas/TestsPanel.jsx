@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import MutationSection from './MutationSection'
 import { apiFetch } from '../../services/api'
 
 // Workflow test scenarios panel. A scenario is a named trigger payload plus a
@@ -332,6 +333,12 @@ export default function TestsPanel({ workflowId, open, onClose }) {
                 + Add scenario
               </button>
             )}
+
+            {/* Under the scenarios rather than behind a toolbar button of its
+                own, because it is the second half of what is already here: "Run
+                all" says whether the suite passes, this says whether passing
+                means anything — and it belongs after the thing it judges. */}
+            <MutationSection workflowId={workflowId} />
           </>
         )}
       </div>
