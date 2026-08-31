@@ -28,6 +28,7 @@ const { analyzeContract } = require('../services/contractCheck')
 const { accessReport, eraseSubject } = require('../services/subjectRequests')
 const { queryRuns } = require('../services/runQuery')
 const runAssertions = require('../services/runAssertions')
+const { analyzeMutations } = require('../services/mutationCheck')
 
 // Every endpoint that takes a workflow *document* accepts it in either form: as
 // the JSON export, or as `.flow` text under `flow`. Resolving it in one place
@@ -1240,6 +1241,27 @@ router.get('/workflows/:id/effects', tokenAuth('read'), (req, res) => {
       /* unparseable stored graph — describe an empty effect set */
     }
     res.json({ workflowId: workflow.id, ...analyzeEffects(graph) })
+  } catch (err) {
+    console.error(err)
+    res.status(500).json({ error: 'Internal server error' })
+  }
+})
+
+// POST /api/v1/workflows/:id/mutations — the CI form of "are these tests any
+// good?" (services/mutationCheck.js).
+//
+// `summary.survived` is what a pipeline gates on, and it is a deliberately
+// different question from the one `flowforge test` answers. That says whether
+// the suite passes; this says whether passing means anything.
+//
+// `read` scope. It executes, but only as dry runs against graphs the workflow
+// does not hold — no side-effecting node fires — and the rows are deleted
+// afterwards, so nothing in the workspace changes.
+router.post('/workflows/:id/mutations', tokenAuth('read'), async (req, res) => {
+  try {
+    const workflow = getWorkflowForMember(req.params.id, req.user.id)
+    if (!workflow) return res.status(404).json({ error: 'Workflow not found' })
+    res.json(await analyzeMutations(workflow))
   } catch (err) {
     console.error(err)
     res.status(500).json({ error: 'Internal server error' })

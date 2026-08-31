@@ -20,6 +20,7 @@ const scheduleSim = require('../services/scheduleSim')
 const nodePriority = require('../services/nodePriority')
 const { queryRuns } = require('../services/runQuery')
 const runAssertions = require('../services/runAssertions')
+const { analyzeMutations } = require('../services/mutationCheck')
 
 const router = express.Router()
 
@@ -208,6 +209,25 @@ router.post('/workflows/:id/test', auth, async (req, res) => {
 // GET /api/workflows/:id/executions — past runs, newest first. workflowUpdatedAt
 // lets the client flag runs whose workflow has been edited since (a replay runs
 // the *current* definition), without a per-row query.
+// POST /api/workflows/:id/mutations — would any of this workflow's checks
+// notice if it were subtly wrong? (services/mutationCheck.js)
+//
+// A POST rather than a GET despite writing nothing, because it *executes*:
+// every surviving mutant costs a full pass of the scenario suite as dry runs.
+// A GET invites a cache, a prefetch and a browser retry, none of which should
+// silently launch a hundred and sixty runs.
+router.post('/workflows/:id/mutations', auth, async (req, res) => {
+  try {
+    const workflow = getWorkflowForMember(req.params.id, req.user.id)
+    if (!workflow) return res.status(404).json({ error: 'Workflow not found' })
+    if (forbidViewer(res, workflow.workspace_id, req.user.id)) return
+    res.json(await analyzeMutations(workflow))
+  } catch (err) {
+    console.error(err)
+    res.status(500).json({ error: 'Internal server error' })
+  }
+})
+
 // — Run assertions (services/runAssertions.js) ————————————————————————
 //
 // A saved query that must never match. Guarantees prove properties of the

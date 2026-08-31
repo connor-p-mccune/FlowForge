@@ -1537,6 +1537,64 @@ const spec = {
         },
       },
     },
+    '/workflows/{workflowId}/mutations': {
+      post: {
+        tags: ['workflows'],
+        summary: 'Are this workflow’s checks any good?',
+        description:
+          'Every other check answers *does this workflow pass?* This answers ' +
+          'the question underneath: **if it were subtly wrong, would any of ' +
+          'them notice?**\n\n' +
+          'A suite of three scenarios that all assert `status == "completed"` ' +
+          'passes on a workflow with its approval gate deleted. A guarantee ' +
+          'nobody declared cannot break. Green is not the same as covered.\n\n' +
+          'So a plausible bug is introduced and every check re-run. The ' +
+          'operators are mistakes somebody has actually made — a condition ' +
+          'wired backwards, a threshold off by one, a gate deleted and the ' +
+          'graph rewired past it, a step removed — not random ' +
+          'perturbation, because a report full of mutants nobody would write is ' +
+          'one people stop reading.\n\n' +
+          'A mutant is killed by whichever check notices first, cheapest-first: ' +
+          '`lint` (free, and by something the author never wrote), `guarantee` ' +
+          '(statically, over every execution the graph admits), then `test` ' +
+          '(empirically, on the declared inputs). Anything still standing ' +
+          '**survived**, and the survivors are the report — not "coverage ' +
+          'is 61%" but *"the approval gate can be deleted and every one of your ' +
+          'tests still passes."*\n\n' +
+          'A mutant is credited only with what its **mutation** broke: findings ' +
+          'are compared against what the original already fails, so a workflow ' +
+          'that does not lint cannot score a perfect 100 on inherited errors.\n\n' +
+          '**Nothing is written.** Mutants run through the engine’s ' +
+          '`graphOverride` in dry-run mode, so no side-effecting node fires, and ' +
+          'the dry-run rows are deleted afterwards.\n\n' +
+          '**The honest limit:** an *equivalent* mutant cannot be killed by ' +
+          'anything, because it does not change behaviour — and detecting ' +
+          'those is undecidable in general. A survivor is evidence of a gap ' +
+          'rather than proof of one, which is why the report names the mutation ' +
+          'instead of only scoring it.\n\n' +
+          'A POST despite writing nothing, because it *executes*: a surviving ' +
+          'mutant costs a full pass of the scenario suite. Requires the `read` ' +
+          'scope.',
+        operationId: 'checkWorkflowMutations',
+        parameters: [{ $ref: '#/components/parameters/WorkflowId' }],
+        responses: {
+          200: {
+            description:
+              'The mutation report, or `available: false` for a graph with nothing to ' +
+              'mutate (`empty`, `no-mutations`).',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/MutationReport' },
+              },
+            },
+          },
+          401: { $ref: '#/components/responses/Unauthorized' },
+          403: { $ref: '#/components/responses/Forbidden' },
+          404: { $ref: '#/components/responses/NotFound' },
+          429: { $ref: '#/components/responses/RateLimited' },
+        },
+      },
+    },
     '/workflows/{workflowId}/merge': {
       post: {
         tags: ['workflows'],
@@ -3554,6 +3612,64 @@ const spec = {
               },
               holding: { type: 'integer' },
               unchecked: { type: 'integer', description: 'No run has reached it yet.' },
+            },
+          },
+        },
+      },
+      MutationReport: {
+        type: 'object',
+        properties: {
+          available: { type: 'boolean' },
+          reason: { type: 'string', nullable: true, enum: ['empty', 'no-mutations'] },
+          workflowId: { type: 'string' },
+          scenarios: { type: 'integer', description: 'Test scenarios the mutants were run against.' },
+          guarantees: { type: 'integer', description: 'Declared path invariants checked.' },
+          mutants: {
+            type: 'array',
+            items: {
+              type: 'object',
+              properties: {
+                id: { type: 'string' },
+                operator: {
+                  type: 'string',
+                  enum: ['swap-branches', 'off-by-one', 'remove-gate', 'skip-node'],
+                },
+                nodeId: { type: 'string' },
+                describe: {
+                  type: 'string',
+                  example: '"Approve refund" removed — the graph runs straight past the gate',
+                },
+                killed: { type: 'boolean' },
+                by: {
+                  type: 'string',
+                  nullable: true,
+                  enum: ['lint', 'guarantee', 'test'],
+                  description: 'Which check noticed. Null when nothing did.',
+                },
+                detail: {
+                  type: 'string',
+                  nullable: true,
+                  description: 'The message, or the name of the scenario that failed.',
+                },
+              },
+            },
+          },
+          summary: {
+            type: 'object',
+            properties: {
+              total: { type: 'integer' },
+              killed: { type: 'integer' },
+              survived: { type: 'integer', description: 'Gate on this.' },
+              score: {
+                type: 'integer',
+                nullable: true,
+                description:
+                  'Killed as a percentage. Read the survivors instead — 80% says nothing ' +
+                  'about which fifth got through.',
+              },
+              byLint: { type: 'integer' },
+              byGuarantee: { type: 'integer' },
+              byTest: { type: 'integer' },
             },
           },
         },

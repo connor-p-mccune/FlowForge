@@ -59,6 +59,7 @@ describe('GET /api/v1/openapi.json', () => {
       '/workflows/{workflowId}/lineage',
       '/workflows/{workflowId}/lint',
       '/workflows/{workflowId}/merge',
+      '/workflows/{workflowId}/mutations',
       '/workflows/{workflowId}/paths',
       '/workflows/{workflowId}/pause',
       '/workflows/{workflowId}/preview',
