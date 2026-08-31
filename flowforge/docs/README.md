@@ -1,6 +1,6 @@
 # FlowForge design records
 
-Twenty-six documents is too many to read in order, so this is a map rather than
+Twenty-seven documents is too many to read in order, so this is a map rather than
 a table of contents. Each record covers one part that was hard, and each is
 organised the same way: **what the obvious implementation gets wrong**, the
 design that fixes it, and the limits stated rather than oversold.
@@ -40,6 +40,7 @@ most familiar.
 | [PATHS.md](./PATHS.md) | *Is there an input that reaches this branch?* — a solver question, so there is a solver: difference logic, finite domains, DPLL(T). Its models double as generated test scenarios. |
 | [LINEAGE.md](./LINEAGE.md) | Where a value came from, what breaks if it changes, and whether anything reaching a URL is controlled by whoever sent the webhook. |
 | [EFFECTS.md](./EFFECTS.md) | *What can this workflow do to the outside world, and what has to be true first?* — control dependence, and why a gate somebody routed around must report as no gate at all. |
+| [MUTATION.md](./MUTATION.md) | Every check answers *does this workflow pass?* This answers the one underneath — *if it were subtly wrong, would any of them notice?* Green is not the same as covered. |
 | [PREVIEW.md](./PREVIEW.md) | Every deploy gate is static. None says what the change *does*. So replay last week's traffic against the candidate graph. |
 
 ---

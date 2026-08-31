@@ -898,6 +898,67 @@ not merely a templated path). See [docs/EFFECTS.md](./EFFECTS.md).
 
 Requires the `read` scope.
 
+### Are this workflow's checks any good?
+
+```bash
+curl -s -X POST https://your-flowforge-host/api/v1/workflows/6f0c…/mutations \
+  -H "Authorization: Bearer $FLOWFORGE_TOKEN"
+```
+
+Every other check answers *does this workflow pass?* This answers the question
+underneath: **if it were subtly wrong, would any of them notice?** A suite of
+three scenarios that all assert `status == "completed"` passes on a workflow
+with its approval gate deleted. Green is not the same as covered.
+
+So a plausible bug is introduced and every check re-run. The operators are
+mistakes somebody has actually made — a condition wired backwards, a threshold
+off by one, a gate deleted and the graph rewired past it, a step removed — not
+random perturbation, because a report full of mutants nobody would write is one
+people stop reading.
+
+```json
+{
+  "available": true,
+  "workflowId": "6f0c…",
+  "scenarios": 3,
+  "guarantees": 1,
+  "mutants": [
+    { "id": "m1", "operator": "swap-branches", "nodeId": "check",
+      "describe": "\"Large order?\" wired backwards — its true and false branches swapped",
+      "killed": true, "by": "test", "detail": "a large order is tagged large" },
+    { "id": "m2", "operator": "off-by-one", "nodeId": "check",
+      "describe": "\"Large order?\" off by one — 100 became 101",
+      "killed": false, "by": null, "detail": null }
+  ],
+  "summary": { "total": 6, "killed": 5, "survived": 1, "score": 83,
+               "byLint": 1, "byGuarantee": 1, "byTest": 3 }
+}
+```
+
+A mutant is killed by whichever check notices first, cheapest-first — `lint`
+(free, and by something the author never wrote), `guarantee` (statically, over
+every execution the graph admits), then `test` (empirically, on the declared
+inputs). Anything still standing **survived**, and the survivors are the report:
+not *"coverage is 61%"* but *"the approval gate can be deleted and every one of
+your tests still passes."*
+
+Findings are compared against a **baseline** of what the original already fails,
+so a mutant is credited only with what its mutation broke — a workflow that
+does not lint cannot score a perfect 100 on inherited errors.
+
+**Nothing is written.** Mutants run through the engine's `graphOverride` in
+dry-run mode, so no side-effecting node fires, and the dry-run rows are deleted
+afterwards.
+
+**The honest limit:** an *equivalent* mutant cannot be killed by anything,
+because it does not change behaviour, and detecting those is undecidable in
+general. A survivor is evidence of a gap rather than proof of one, which is why
+`flowforge mutants` reports and exits 0 by default and `--strict` opts into
+failing. See [docs/MUTATION.md](./MUTATION.md).
+
+A POST despite writing nothing, because it *executes*: a surviving mutant costs
+a full pass of the scenario suite. Requires the `read` scope.
+
 ### Things that must never happen
 
 ```bash
