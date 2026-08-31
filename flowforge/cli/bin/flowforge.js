@@ -35,6 +35,7 @@ const COMMANDS = {
   subject: require('../src/commands/subject'),
   query: require('../src/commands/query'),
   assertions: require('../src/commands/assertions'),
+  mutants: require('../src/commands/mutants'),
   release: require('../src/commands/release'),
   trigger: require('../src/commands/trigger'),
   pause: require('../src/commands/pause'),
@@ -94,6 +95,7 @@ Usage:
   flowforge unpause <workflow-id>                  Release the pause and accept runs again
   flowforge runs <workflow-id> [--limit N]         Recent runs for a workflow
   flowforge query <id> "<fxl>" [--explain] [--json]  Ask a question of run history in FXL — exits 1 on no matches, 2 on a bad predicate
+  flowforge mutants <id> [--strict]                Would any of this workflow's checks notice if it were subtly wrong? (mutation testing)
   flowforge assertions <id> [--strict]             Things this workflow says must never happen, checked against the runs that did (fails on a violation or a broken check)
   flowforge backfill <id> --from <iso|7d> [--yes]  Re-run a schedule over a past window (previews unless --yes)
   flowforge deps <workflow-id>                     What a workflow calls and what calls it (exits non-zero on a reference cycle)
