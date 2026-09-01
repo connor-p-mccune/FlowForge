@@ -3861,6 +3861,28 @@ html, body, #root {
 .analytics__rate--bad { color: #b91c1c; }
 .analytics__muted { color: #bbb; }
 
+/* Exposure: which workflow to review first. Reuses the analytics table, minus
+   the sort affordance — these rows are ordered by the report and re-sorting
+   them by name or run count would be sorting away the answer. */
+.exposure__panel .analytics__table th { cursor: default; }
+.exposure__panel .analytics__table th:hover { color: #888; }
+.exposure__panel .analytics__table-wrap { margin-top: 12px; }
+
+.exposure__headline { font-size: 13px; color: #444; margin: 0; line-height: 1.5; }
+.exposure__headline strong { color: #b91c1c; font-size: 15px; }
+.exposure__headline--clear { color: #15803d; }
+
+.exposure__unchecked { color: #b91c1c; font-weight: 600; }
+.exposure__checked { color: #15803d; }
+.exposure__offcanvas { color: #b45309; font-size: 12px; margin-left: 6px; }
+
+.exposure__note {
+  font-size: 12px;
+  color: #999;
+  line-height: 1.6;
+  margin: 12px 0 0;
+}
+
 .analytics__error {
   color: #b91c1c;
   background: #fef2f2;

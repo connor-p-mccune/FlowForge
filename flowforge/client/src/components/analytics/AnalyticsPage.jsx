@@ -8,6 +8,7 @@ import NodeUsageChart from './NodeUsageChart'
 import WorkflowsTable from './WorkflowsTable'
 import StatusPageSection from './StatusPageSection'
 import CostSection from './CostSection'
+import ExposureSection from './ExposureSection'
 
 const RANGES = [7, 30, 90]
 
@@ -102,6 +103,13 @@ export default function AnalyticsPage({ workspaceId }) {
           <WorkflowsTable workflows={data.workflows} />
         </>
       )}
+      {/* Everything above is about volume: how many runs, how fast, how much.
+          None of it says which workflow *matters* — a thousand runs that write
+          a log and a thousand that charge a card are the same bar. This ranks
+          the workspace by consequence instead, and renders whether or not
+          anything has run: a workflow that can charge a card and never has is
+          exactly the one nobody has looked at. */}
+      <ExposureSection workspaceId={workspaceId} days={days} />
       {/* Spend renders independently of the range buttons above: a budget is a
           calendar-month commitment, and showing "7 days" of it against a
           monthly cap would be two different questions in one panel. */}
