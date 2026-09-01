@@ -64,8 +64,15 @@ const SUB_WORKFLOW_TYPES = new Set(['sub-workflow', 'for-each'])
 // rather than a database query so the analysis stays pure and the caller
 // decides what "visible" means — which is also what keeps the workspace
 // boundary in one place.
-function expand(workflow, resolve, { depth, stack, chain }) {
-  const report = analyzeEffects(workflow.graph)
+function expand(workflow, resolve, { depth, stack, chain, cache }) {
+  // Memoised by workflow id. One report is cheap; a workspace sweep is n
+  // workflows each walking into shared callees, and a utilities workflow that
+  // everything calls would otherwise be analysed once per caller per depth.
+  let report = cache.get(workflow.id)
+  if (!report) {
+    report = analyzeEffects(workflow.graph)
+    cache.set(workflow.id, report)
+  }
   if (!report.available) {
     return {
       effects: [],
@@ -117,6 +124,7 @@ function expand(workflow, resolve, { depth, stack, chain }) {
 
     const inner = expand(callee, resolve, {
       depth: depth + 1,
+      cache,
       stack: [...stack, workflow.id],
       chain: {
         conditions,
@@ -135,12 +143,16 @@ function expand(workflow, resolve, { depth, stack, chain }) {
 // Shaped like the per-graph one so a surface can render either, with two
 // additions per effect: `via`, the call chain that reaches it, and conditions
 // that name which workflow each came from.
-function reachableEffects(root, resolve) {
+// `cache` is optional and shared: a caller sweeping a whole workspace passes one
+// Map across every workflow, so a shared callee's effect report is computed
+// once rather than once per caller.
+function reachableEffects(root, resolve, { cache = new Map() } = {}) {
   if (!root?.graph) return { available: false, reason: 'empty' }
 
   const { effects, unresolved } = expand(root, resolve, {
     depth: 0,
     stack: [],
+    cache,
     chain: { conditions: [], via: [] },
   })
 
