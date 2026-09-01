@@ -21,6 +21,8 @@ const { verifyGuarantees, parseGuarantees } = require('../services/guarantees')
 const { formatWorkflow, parseWorkflow, DslError } = require('../services/workflowDsl')
 const { analyzeEffects } = require('../services/effects')
 const { analyzeConvergence } = require('../services/convergence')
+const { reachableEffects } = require('../services/reach')
+const { subWorkflowGraphs } = require('../services/reachLookup')
 const { analyzeContract } = require('../services/contractCheck')
 const { analyzePaths } = require('../services/pathConstraints')
 const { previewDeploy } = require('../services/backtest')
@@ -1088,6 +1090,29 @@ router.post('/workflows/:id/contract', auth, (req, res) => {
     }
 
     res.json(analyzeContract(workflow.id, candidate))
+  } catch (err) {
+    console.error(err)
+    res.status(500).json({ error: 'Internal server error' })
+  }
+})
+
+// GET /api/workflows/:id/reach — what a run of this workflow can ultimately do,
+// following every sub-workflow call (services/reach.js).
+//
+// A GET rather than the body-taking POST its neighbours use, and for a reason
+// specific to this one: the answer depends on graphs *other* workflows hold, so
+// judging the canvas on screen would mix an unsaved graph with saved callees
+// and describe a system that does not exist.
+router.get('/workflows/:id/reach', auth, (req, res) => {
+  try {
+    const workflow = db.prepare('SELECT * FROM workflows WHERE id = ?').get(req.params.id)
+    if (!workflow || !isMember(workflow.workspace_id, req.user.id)) {
+      return res.status(404).json({ error: 'Workflow not found' })
+    }
+    const resolve = subWorkflowGraphs(workflow.workspace_id)
+    const root = resolve(workflow.id)
+    if (!root) return res.json({ available: false, reason: 'empty', workflowId: workflow.id })
+    res.json(reachableEffects(root, resolve))
   } catch (err) {
     console.error(err)
     res.status(500).json({ error: 'Internal server error' })

@@ -2222,6 +2222,53 @@ const spec = {
         },
       },
     },
+    '/workflows/{workflowId}/reach': {
+      get: {
+        tags: ['workflows'],
+        summary: 'What a run can ultimately do, across sub-workflow calls',
+        description:
+          'The [effect report](#tag/workflows) answers this over **one** graph. ' +
+          'A sub-workflow node breaks that: on the canvas it is one box, at run ' +
+          'time it is an entire other workflow, and *"calls workflow 4f2a"* is ' +
+          'true and tells a reviewer nothing.\n\n' +
+          'So the call is **expanded** into what the callee actually does, and ' +
+          'the same for its callees, to a bounded depth. Each effect carries ' +
+          '`via` — the call chain that reaches it — and the workflow it really ' +
+          'lives in.\n\n' +
+          '**The preconditions are a conjunction.** An effect inside the callee ' +
+          'is gated by the callee\'s decisions; the call itself is gated by the ' +
+          'caller\'s. Keeping only the callee\'s claims the effect happens ' +
+          'whenever the callee decides it should, ignoring that the caller may ' +
+          'never invoke it; keeping only the caller\'s claims it happens on ' +
+          'every call. Both are carried, in call order, each attributed to the ' +
+          'workflow it came from.\n\n' +
+          '`summary.direct` is the number the per-graph report would have given, ' +
+          'so the difference is visible rather than something to work out by ' +
+          'counting. `unresolved` says where the walk stopped — a cycle, the ' +
+          'depth bound, or a callee this token cannot see — and the unexpanded ' +
+          'effect stays in the report, because "calls something I cannot see" is ' +
+          'more useful than silence.\n\n' +
+          'Requires the `read` scope.',
+        operationId: 'getWorkflowReach',
+        parameters: [{ $ref: '#/components/parameters/WorkflowId' }],
+        responses: {
+          200: {
+            description:
+              'The transitive effect report, or `available: false` for an empty or ' +
+              'cyclic graph.',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ReachReport' },
+              },
+            },
+          },
+          401: { $ref: '#/components/responses/Unauthorized' },
+          403: { $ref: '#/components/responses/Forbidden' },
+          404: { $ref: '#/components/responses/NotFound' },
+          429: { $ref: '#/components/responses/RateLimited' },
+        },
+      },
+    },
     '/workflows/{workflowId}/regressions': {
       get: {
         tags: ['workflows'],
@@ -3670,6 +3717,99 @@ const spec = {
               byLint: { type: 'integer' },
               byGuarantee: { type: 'integer' },
               byTest: { type: 'integer' },
+            },
+          },
+        },
+      },
+      ReachReport: {
+        type: 'object',
+        properties: {
+          available: { type: 'boolean' },
+          reason: { type: 'string', nullable: true, enum: ['empty', 'cycle'] },
+          workflowId: { type: 'string' },
+          effects: {
+            type: 'array',
+            description:
+              'Ungated effects first, and within those the deepest chains \u2014 an effect ' +
+              'four calls away that nothing gates is the one a reviewer has least chance ' +
+              'of having noticed.',
+            items: {
+              type: 'object',
+              properties: {
+                nodeId: { type: 'string' },
+                label: { type: 'string' },
+                type: { type: 'string' },
+                kind: {
+                  type: 'string',
+                  enum: ['http', 'email', 'slack', 'sub-workflow', 'model'],
+                },
+                target: { type: 'string', nullable: true },
+                workflowId: {
+                  type: 'string',
+                  description: 'The workflow the effect really lives in, which may not be this one.',
+                },
+                workflowName: { type: 'string' },
+                via: {
+                  type: 'array',
+                  description: 'The call chain that reaches it. Empty for a direct effect.',
+                  items: {
+                    type: 'object',
+                    properties: {
+                      workflowId: { type: 'string' },
+                      name: { type: 'string' },
+                      nodeId: { type: 'string', description: 'The calling node.' },
+                      label: { type: 'string' },
+                    },
+                  },
+                },
+                conditions: {
+                  type: 'array',
+                  description:
+                    'Every decision that must go a particular way, in call order, each ' +
+                    'attributed to the workflow it came from.',
+                  items: {
+                    type: 'object',
+                    properties: {
+                      nodeId: { type: 'string' },
+                      label: { type: 'string' },
+                      type: { type: 'string', nullable: true },
+                      outcome: { type: 'string' },
+                      workflowId: { type: 'string' },
+                      workflowName: { type: 'string' },
+                    },
+                  },
+                },
+                always: { type: 'boolean', description: 'No decision anywhere in the chain gates it.' },
+                recursive: { type: 'boolean', description: 'The call leads back to a workflow already on the stack.' },
+                truncated: { type: 'boolean', description: 'The call was not followed: depth bound.' },
+              },
+            },
+          },
+          unresolved: {
+            type: 'array',
+            description: 'Where the walk stopped, and why.',
+            items: {
+              type: 'object',
+              properties: {
+                workflowId: { type: 'string' },
+                name: { type: 'string' },
+                reason: { type: 'string', enum: ['cycle', 'depth', 'not-visible', 'empty'] },
+                chain: { type: 'array', items: { type: 'object' } },
+              },
+            },
+          },
+          summary: {
+            type: 'object',
+            properties: {
+              total: { type: 'integer' },
+              direct: {
+                type: 'integer',
+                description: 'What the per-graph effect report would have counted.',
+              },
+              inherited: { type: 'integer', description: 'Reached through a call.' },
+              unconditional: { type: 'integer' },
+              workflows: { type: 'integer', description: 'How many workflows a run can reach into.' },
+              deepest: { type: 'integer', description: 'Longest call chain, in hops.' },
             },
           },
         },

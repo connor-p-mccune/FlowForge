@@ -23,6 +23,8 @@ const { verifyGuarantees, parseGuarantees } = require('../services/guarantees')
 const { parseWorkflow, formatWorkflow, DslError } = require('../services/workflowDsl')
 const { analyzeEffects } = require('../services/effects')
 const { analyzeConvergence } = require('../services/convergence')
+const { reachableEffects } = require('../services/reach')
+const { subWorkflowGraphs } = require('../services/reachLookup')
 const { analyzeCapacity } = require('../services/capacity')
 const { analyzeContract } = require('../services/contractCheck')
 const { accessReport, eraseSubject } = require('../services/subjectRequests')
@@ -1459,6 +1461,34 @@ router.post('/workflows/:id/contract', tokenAuth('read'), (req, res) => {
     }
 
     res.json(analyzeContract(workflow.id, candidate))
+  } catch (err) {
+    console.error(err)
+    res.status(500).json({ error: 'Internal server error' })
+  }
+})
+
+// GET /api/v1/workflows/:id/reach — what a run can *ultimately* do
+// (services/reach.js).
+//
+// The effect report answers that over one graph. A sub-workflow node breaks it:
+// on the canvas it is one box, at run time it is an entire other workflow, and
+// "calls workflow 4f2a" is true and useless to a reviewer. This expands the
+// call into what the callee actually does, to a bounded depth.
+//
+// The preconditions are a conjunction — the caller's gate on the call *and* the
+// callee's gate on the effect — with each condition attributed to the workflow
+// it came from, so a chain reads rather than arriving as unattributed clauses.
+//
+// Read-only and pure over stored graphs, so `read` is the whole authorisation
+// story.
+router.get('/workflows/:id/reach', tokenAuth('read'), (req, res) => {
+  try {
+    const workflow = getWorkflowForMember(req.params.id, req.user.id)
+    if (!workflow) return res.status(404).json({ error: 'Workflow not found' })
+    const resolve = subWorkflowGraphs(workflow.workspace_id)
+    const root = resolve(workflow.id)
+    if (!root) return res.json({ available: false, reason: 'empty', workflowId: workflow.id })
+    res.json(reachableEffects(root, resolve))
   } catch (err) {
     console.error(err)
     res.status(500).json({ error: 'Internal server error' })
