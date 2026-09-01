@@ -50,3 +50,35 @@ test('treats --step and --stop as booleans even before a positional', () => {
   assert.equal(flags.step, true)
   assert.deepEqual(positionals, ['debug', 'wf-1'])
 })
+
+// Every flag no code path reads a value from. Written out one per line rather
+// than looped over the set itself, because a test that reads the same list the
+// parser does would pass no matter what is in it.
+test('a value-less flag never eats the argument after it', () => {
+  const cases = [
+    ['effects', '--deep', 'wf-1'],
+    ['effects', '--ungated', 'wf-1'],
+    ['exposure', '--unchecked', 'ws-1'],
+    ['backfill', '--all', 'wf-1'],
+    ['subject', '--erase', 'a@b.com'],
+    ['query', '--explain', 'wf-1'],
+    ['merge', '--ours', 'wf-1'],
+    ['merge', '--theirs', 'wf-1'],
+    ['backfill', '--preview', 'wf-1'],
+    ['release', '--promote', 'wf-1'],
+    ['audit', '--verify', 'ws-1'],
+  ]
+  for (const argv of cases) {
+    const { positionals, flags } = parseArgs(argv)
+    assert.deepEqual(positionals, [argv[0], argv[2]], argv.join(' '))
+    assert.equal(flags[argv[1].slice(2)], true, argv.join(' '))
+  }
+})
+
+test('leaves a flag that takes an optional value alone', () => {
+  // --rollback and --recent are read as strings when given one, so the parser
+  // must not decide for them.
+  assert.equal(parseArgs(['release', 'wf-1', '--rollback', 'bad p99']).flags.rollback, 'bad p99')
+  assert.equal(parseArgs(['release', 'wf-1', '--rollback']).flags.rollback, true)
+  assert.equal(parseArgs(['drift', 'wf-1', '--recent', '20']).flags.recent, '20')
+})

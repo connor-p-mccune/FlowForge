@@ -3,8 +3,18 @@
 // `--flag=value`, and boolean flags (a --flag followed by another flag, or by
 // nothing, is `true`).
 
+// Flags that never take a value. A flag missing from this set is only treated
+// as boolean when nothing follows it, so `--deep 6f0c…` reads the workflow id
+// as the flag's value and leaves the command with no positional at all — it
+// prints its usage line and exits, which looks like the user's mistake.
+//
+// The rule for adding one: if no code path anywhere reads its value, it belongs
+// here. `--rollback` and `--recent` are deliberately absent, because both take
+// an optional value and both are read as a string when given one.
 const BOOLEAN_FLAGS = new Set([
   'watch', 'help', 'version', 'json', 'strict', 'yes', 'step', 'stop', 'facts', 'suggest', 'cover',
+  'all', 'deep', 'erase', 'explain', 'ours', 'theirs', 'preview', 'promote', 'ungated',
+  'unchecked', 'verify',
 ])
 
 // Flags that may appear more than once and collect their values into an array.
