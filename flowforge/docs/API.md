@@ -948,6 +948,71 @@ something I cannot see" is more useful than silence.
 
 Requires the `read` scope.
 
+### Which workflow should I look at first?
+
+```bash
+curl -s "https://your-flowforge-host/api/v1/workspaces/$WS/exposure?days=30" \
+  -H "Authorization: Bearer $FLOWFORGE_TOKEN"
+```
+
+Every endpoint above takes a workflow id, which assumes the hardest part is
+already done — that somebody knew which workflow to open. Nobody has one
+workflow. This ranks a whole workspace by a quantity made entirely of things
+already measured: **the effects a run can reach × how often it runs.**
+
+```json
+{
+  "available": true,
+  "windowDays": 30,
+  "workflows": [
+    { "workflowId": "6f0c…", "name": "Order webhook",
+      "runs": { "direct": 4120, "called": 0, "perDay": 412, "observedDays": 10 },
+      "effects": { "total": 1, "unconditional": 1, "inherited": 0, "workflows": 1 },
+      "exposure": { "floor": 412, "ceiling": 412 },
+      "assurance": { "scenarios": 0, "guarantees": 0, "assertions": 0,
+                     "drift": false, "checked": false },
+      "attributed": false, "calledBy": [] },
+    { "workflowId": "9a3e…", "name": "Send alert",
+      "runs": { "direct": 0, "called": 4120, "perDay": 0, "observedDays": 0 },
+      "exposure": { "floor": 0, "ceiling": 0 },
+      "attributed": true, "calledBy": ["Order webhook"] }
+  ],
+  "queue": ["6f0c…"],
+  "summary": { "workflows": 4, "unreadable": 0, "runsPerDay": 437,
+               "outwardPerDay": { "floor": 430, "ceiling": 526 },
+               "unchecked": 1, "uncheckedShare": 0.78,
+               "offCanvas": 2, "attributed": 1 }
+}
+```
+
+**`exposure` is an interval, not a number.** Most effects are gated and nothing
+here evaluates a gate, so `floor` counts only what nothing gates and `ceiling`
+counts everything. The ranking is by `ceiling`, because the report exists to
+find workflows nobody has checked and an untested gate is not evidence; `floor`
+separates two rows that share a ceiling.
+
+**`perDay` counts runs nobody else started.** A sub-workflow call writes its own
+execution row, so counting those would bill the same charge twice — once in the
+caller's row, where the transitive walk already put it — and rank the subroutine
+above the workflow that decides to invoke it. A workflow reached only through
+callers is `attributed: true` and names them, so its zero cannot be read as
+*safe* when it means *counted elsewhere*.
+
+**`assurance` is counted, never scored.** Four scenarios do not make a workflow
+four units safer; they might all assert the same trivial thing. The four kinds
+sit unweighted beside the exposure, and `queue` is the plainest filter over
+them: consequence, and nothing watching it. `uncheckedShare` is the share of the
+workspace's ceiling sitting on that queue.
+
+`days` is clamped to `[1, 90]` and echoed back as `windowDays`. The rate's
+divisor is the observed span rather than the window, floored at a day: a
+workflow deployed four days ago that has run 400 times runs 100 times a day, not
+13.
+
+`flowforge exposure [ws-id] [--unchecked]` renders the same thing and exits
+non-zero on a non-empty queue. Requires the `read` scope; any member may read
+it. See [docs/EXPOSURE.md](./EXPOSURE.md).
+
 ### Are this workflow's checks any good?
 
 ```bash
