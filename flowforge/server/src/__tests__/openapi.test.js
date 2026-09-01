@@ -74,6 +74,7 @@ describe('GET /api/v1/openapi.json', () => {
       '/workspaces',
       '/workspaces/{workspaceId}/audit',
       '/workspaces/{workspaceId}/audit/verify',
+      '/workspaces/{workspaceId}/exposure',
       '/workspaces/{workspaceId}/workflows/import',
     ])
     // Bearer auth is the declared scheme, applied globally.

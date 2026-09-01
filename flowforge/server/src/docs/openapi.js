@@ -174,6 +174,147 @@ const spec = {
         },
       },
     },
+    '/workspaces/{workspaceId}/exposure': {
+      get: {
+        tags: ['workspaces'],
+        summary: 'Rank a workspace by what a day of it does to the outside world',
+        description:
+          'Every other analysis in this API answers a question about one ' +
+          'workflow. This one ranks them all: for each, the effects a run can ' +
+          'reach (including the ones inside sub-workflows it calls) multiplied ' +
+          'by how often it actually runs, giving outward actions per day. The ' +
+          'figure is an interval — `floor` counts only effects nothing gates, ' +
+          '`ceiling` counts every effect — and the ranking is by `ceiling`, ' +
+          'because the report exists to find workflows nobody has checked and ' +
+          'an untested gate is not evidence. `queue` is the list that matters: ' +
+          'workflows with consequence and no scenarios, guarantees, assertions ' +
+          'or drift monitoring. Assurance is counted beside the exposure and ' +
+          'never folded into it. The rate counts runs nobody else started, so a ' +
+          'sub-workflow’s consequence is charged to its caller rather than ' +
+          'twice. Requires the `read` scope; any member may read it.',
+        operationId: 'getWorkspaceExposure',
+        parameters: [
+          { name: 'workspaceId', in: 'path', required: true, schema: { type: 'string' } },
+          {
+            name: 'days',
+            in: 'query',
+            required: false,
+            schema: { type: 'integer', minimum: 1, maximum: 90, default: 30 },
+            description: 'History window. Clamped to [1, 90]; the value used is echoed back.',
+          },
+        ],
+        responses: {
+          200: {
+            description: 'The workspace ranked, with the unchecked ones named.',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    available: { type: 'boolean' },
+                    workspaceId: { type: 'string' },
+                    windowDays: { type: 'integer' },
+                    workflows: {
+                      type: 'array',
+                      description: 'Every workflow, worst case first.',
+                      items: {
+                        type: 'object',
+                        properties: {
+                          workflowId: { type: 'string' },
+                          name: { type: 'string' },
+                          status: { type: 'string' },
+                          runs: {
+                            type: 'object',
+                            properties: {
+                              direct: { type: 'integer' },
+                              called: {
+                                type: 'integer',
+                                description: 'Runs started by a caller; excluded from the rate.',
+                              },
+                              perDay: { type: 'number' },
+                              observedDays: { type: 'number' },
+                            },
+                          },
+                          effects: {
+                            type: 'object',
+                            properties: {
+                              total: { type: 'integer' },
+                              unconditional: { type: 'integer' },
+                              inherited: {
+                                type: 'integer',
+                                description: 'Effects inside a workflow this one calls.',
+                              },
+                              workflows: { type: 'integer' },
+                              deepest: { type: 'integer' },
+                              unresolved: { type: 'integer' },
+                            },
+                          },
+                          exposure: {
+                            type: 'object',
+                            properties: {
+                              floor: { type: 'number' },
+                              ceiling: { type: 'number' },
+                            },
+                          },
+                          assurance: {
+                            type: 'object',
+                            properties: {
+                              scenarios: { type: 'integer' },
+                              guarantees: { type: 'integer' },
+                              assertions: { type: 'integer' },
+                              drift: { type: 'boolean' },
+                              checked: { type: 'boolean' },
+                            },
+                          },
+                          attributed: {
+                            type: 'boolean',
+                            description:
+                              'Reached only through callers; its consequence sits in their rows.',
+                          },
+                          calledBy: { type: 'array', items: { type: 'string' } },
+                        },
+                      },
+                    },
+                    queue: {
+                      type: 'array',
+                      items: { type: 'string' },
+                      description: 'Workflow ids with consequence and nothing checking them.',
+                    },
+                    summary: {
+                      type: 'object',
+                      properties: {
+                        workflows: { type: 'integer' },
+                        unreadable: { type: 'integer' },
+                        runsPerDay: { type: 'number' },
+                        outwardPerDay: {
+                          type: 'object',
+                          properties: {
+                            floor: { type: 'number' },
+                            ceiling: { type: 'number' },
+                          },
+                        },
+                        unchecked: { type: 'integer' },
+                        uncheckedShare: {
+                          type: 'number',
+                          description:
+                            'Share of the workspace’s ceiling sitting on unchecked workflows.',
+                        },
+                        offCanvas: { type: 'integer' },
+                        attributed: { type: 'integer' },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+          401: { $ref: '#/components/responses/Unauthorized' },
+          403: { $ref: '#/components/responses/Forbidden' },
+          404: { $ref: '#/components/responses/NotFound' },
+          429: { $ref: '#/components/responses/RateLimited' },
+        },
+      },
+    },
     '/workspaces/{workspaceId}/workflows/import': {
       post: {
         tags: ['workspaces'],

@@ -8,6 +8,7 @@ const activityService = require('../services/activityService')
 const { forbidViewer } = require('../services/workspaceRoles')
 const { recordAudit } = require('../services/auditLog')
 const trustStore = require('../services/trustStore')
+const { exposureReport, WINDOW_DAYS } = require('../services/exposure')
 
 const router = express.Router()
 
@@ -421,6 +422,32 @@ router.delete('/workspaces/:id', auth, (req, res) => {
 
     db.prepare('DELETE FROM workspaces WHERE id = ?').run(req.params.id)
     res.status(204).end()
+  } catch (err) {
+    console.error(err)
+    res.status(500).json({ error: 'Internal server error' })
+  }
+})
+
+// GET /api/workspaces/:id/exposure — rank this workspace's workflows by how
+// much of the outside world a day of them touches, and say which of them
+// nothing is checking (services/exposure.js).
+//
+// Any member may read it, viewers included. It reports only what the workflow
+// list and the run history already show a member, arranged into an order; a
+// review queue that half the team cannot see is a review queue nobody works.
+router.get('/workspaces/:id/exposure', auth, (req, res) => {
+  try {
+    const member = db
+      .prepare('SELECT 1 FROM workspace_members WHERE workspace_id = ? AND user_id = ?')
+      .get(req.params.id, req.user.id)
+    if (!member) return res.status(404).json({ error: 'Workspace not found' })
+
+    const raw = parseInt(req.query.days, 10)
+    // A window shorter than a day cannot produce a rate, and one longer than a
+    // quarter is ranking today's workspace on last year's traffic.
+    const days = Number.isFinite(raw) ? Math.min(Math.max(raw, 1), 90) : WINDOW_DAYS
+
+    res.json(exposureReport(req.params.id, { days }))
   } catch (err) {
     console.error(err)
     res.status(500).json({ error: 'Internal server error' })

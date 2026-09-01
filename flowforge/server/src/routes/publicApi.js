@@ -97,6 +97,7 @@ const { checkWorkflow, policyIssues } = require('../services/policyGate')
 const canary = require('../services/canary')
 const { snapshotVersion } = require('../services/canaryMonitor')
 const { forbidViewer, memberRole } = require('../services/workspaceRoles')
+const { exposureReport, WINDOW_DAYS: EXPOSURE_WINDOW_DAYS } = require('../services/exposure')
 const { isPaused, PAUSED_ERROR, pauseWorkflow, resumeWorkflow } = require('../services/workflowPause')
 const { computeDependencies } = require('../services/workflowDependencies')
 const { listAudit, verifyChain } = require('../services/auditLog')
@@ -248,6 +249,29 @@ router.get('/workspaces/:id/audit/verify', tokenAuth('read'), (req, res) => {
     // A broken chain is a 200 with ok:false, like the session route: a probe
     // must distinguish "the log is compromised" from "the endpoint is down".
     res.json({ ...verifyChain(req.params.id), verifiedAt: new Date().toISOString() })
+  } catch (err) {
+    console.error(err)
+    res.status(500).json({ error: 'Internal server error' })
+  }
+})
+
+// GET /api/v1/workspaces/:id/exposure — the workspace ranked by how much of the
+// outside world a day of it touches, and which workflows nothing is checking
+// (services/exposure.js). `read` scope, any member.
+//
+// It is on the public API because the review queue it produces is the sort of
+// thing a team wants posted somewhere on a Monday rather than found by opening
+// the app, and because `flowforge exposure --unchecked` makes it a CI gate: a
+// build that fails when a workflow reaches production with consequence and no
+// checks is the only version of this report that changes anything.
+router.get('/workspaces/:id/exposure', tokenAuth('read'), (req, res) => {
+  try {
+    if (memberRole(req.params.id, req.user.id) === null) {
+      return res.status(404).json({ error: 'Workspace not found' })
+    }
+    const raw = parseInt(req.query.days, 10)
+    const days = Number.isFinite(raw) ? Math.min(Math.max(raw, 1), 90) : EXPOSURE_WINDOW_DAYS
+    res.json(exposureReport(req.params.id, { days }))
   } catch (err) {
     console.error(err)
     res.status(500).json({ error: 'Internal server error' })
