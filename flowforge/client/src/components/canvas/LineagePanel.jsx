@@ -39,6 +39,9 @@ export default function LineagePanel({ workflowId, nodes, edges, selectedNodeId,
   // where data *leaves*; this says under what conditions — the two halves of
   // the question somebody has when they open this panel before a deploy.
   const [effects, setEffects] = useState(null)
+  // The same question with the sub-workflow boundary removed. Held separately
+  // so the panel can say "and this much of it is somebody else's workflow".
+  const [reach, setReach] = useState(null)
   const [error, setError] = useState(null)
 
   const load = useCallback(async () => {
@@ -62,6 +65,17 @@ export default function LineagePanel({ workflowId, nodes, edges, selectedNodeId,
           body: serializeGraph(nodes, edges),
         })
           .then(setEffects)
+          .catch(() => {
+            /* best-effort in the panel */
+          })
+
+        // And what a run can do once the sub-workflow calls are followed. A
+        // separate read because it depends on graphs *other* workflows hold —
+        // the canvas is the wrong thing to judge it against — and best-effort
+        // for the same reason the effect read is: neither should be able to
+        // stop the dataflow map rendering.
+        apiFetch(`/api/workflows/${workflowId}/reach`)
+          .then(setReach)
           .catch(() => {
             /* best-effort in the panel */
           })
@@ -103,7 +117,7 @@ export default function LineagePanel({ workflowId, nodes, edges, selectedNodeId,
         )}
 
         {!error && !selectedNodeId && report?.ok && (
-          <GraphMap report={report} effects={effects} onSelectNode={onSelectNode} />
+          <GraphMap report={report} effects={effects} reach={reach} onSelectNode={onSelectNode} />
         )}
 
         {!selectedNodeId && (
@@ -209,15 +223,37 @@ function NodeTrace({ trace, onSelectNode }) {
 // somebody routed around looks like — an approval still drawn on the canvas
 // with a second trigger reaching past it — which is precisely the case worth
 // putting at the top rather than sorting alphabetically into the middle.
-function Effects({ effects, onSelectNode }) {
-  if (!effects?.available || effects.effects.length === 0) return null
+function Effects({ effects, reach, onSelectNode }) {
+  // The transitive report supersedes the per-graph one when it has anything
+  // extra to say: it is the same list with the sub-workflow calls expanded, and
+  // showing both would be showing the same effects twice.
+  const inherited = reach?.available ? reach.summary.inherited : 0
+  const source = inherited > 0 ? reach : effects
+  if (!source?.available || source.effects.length === 0) return null
+
   return (
     <>
       <h3 className="lineage-section">What a run can do</h3>
+      {inherited > 0 && (
+        // The sentence a reviewer would otherwise have to work out: most of
+        // what this run does is not on the canvas in front of them.
+        <p className="lineage-note">
+          {inherited} of these {source.effects.length} happen inside{' '}
+          {reach.summary.workflows} other workflow{reach.summary.workflows === 1 ? '' : 's'} this
+          one calls.
+        </p>
+      )}
       <ul className="lineage-chain">
-        {effects.effects.map((e) => (
-          <li key={e.nodeId}>
-            <button className="lineage-link" onClick={() => onSelectNode(e.nodeId)}>
+        {source.effects.map((e) => (
+          <li key={`${e.workflowId || ''}:${e.nodeId}`}>
+            <button
+              className="lineage-link"
+              // A node in a callee is not on this canvas, so selecting it would
+              // do nothing — better to leave it unclickable than to offer a
+              // link that silently fails.
+              disabled={Boolean(e.via?.length)}
+              onClick={() => onSelectNode(e.nodeId)}
+            >
               {e.label}
             </button>
             <span className={`lineage-sensitivity lineage-sensitivity--${e.always ? 'high' : 'low'}`}>
@@ -229,6 +265,11 @@ function Effects({ effects, onSelectNode }) {
               {e.always
                 ? 'on every run'
                 : e.conditions.map((c) => `${c.label} = ${c.outcome}`).join(' and ')}
+              {e.via?.length > 0 && (
+                <em className="lineage-chain__via">
+                  {' '}via {e.via.map((v) => v.name).join(' → ')}
+                </em>
+              )}
             </span>
           </li>
         ))}
@@ -237,7 +278,7 @@ function Effects({ effects, onSelectNode }) {
   )
 }
 
-function GraphMap({ report, effects, onSelectNode }) {
+function GraphMap({ report, effects, reach, onSelectNode }) {
   const secrets = Object.entries(report.secretReach || {})
   return (
     <>
@@ -260,7 +301,7 @@ function GraphMap({ report, effects, onSelectNode }) {
         </>
       )}
 
-      <Effects effects={effects} onSelectNode={onSelectNode} />
+      <Effects effects={effects} reach={reach} onSelectNode={onSelectNode} />
 
       {report.sinks.length > 0 && (
         <>

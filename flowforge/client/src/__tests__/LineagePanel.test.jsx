@@ -239,3 +239,97 @@ describe('LineagePanel — what a run can do', () => {
     expect(call[1].body.nodes.map((n) => n.id)).toEqual(['hook', 'charge'])
   })
 })
+
+// A sub-workflow node is one box on the canvas and an entire other workflow at
+// run time. The panel says so, because a reviewer reading "Charge card" in a
+// report about Orders needs to know it happens somewhere else.
+describe('LineagePanel — across the sub-workflow boundary', () => {
+  const SHALLOW = {
+    workflowId: 'wf1',
+    available: true,
+    effects: [
+      {
+        nodeId: 'score', label: 'Fraud score', type: 'ai-classify', kind: 'model',
+        target: 'gpt-4o-mini', always: true, conditions: [],
+      },
+    ],
+    decisions: [],
+    summary: { total: 1, unconditional: 1, gated: 0, dynamicTargets: 0 },
+  }
+
+  const REACH = {
+    available: true,
+    workflowId: 'wf1',
+    effects: [
+      {
+        nodeId: 'charge', label: 'Charge card', type: 'action-http', kind: 'http',
+        target: 'api.acme.com', always: false,
+        workflowId: 'wf2', workflowName: 'Fulfilment',
+        via: [{ workflowId: 'wf2', name: 'Fulfilment', nodeId: 'call', label: 'Fulfil order' }],
+        conditions: [
+          { label: 'Approve order', outcome: 'true', workflowName: 'Orders' },
+          { label: 'In stock?', outcome: 'true', workflowName: 'Fulfilment' },
+        ],
+      },
+    ],
+    unresolved: [],
+    summary: { total: 1, direct: 0, inherited: 1, unconditional: 0, workflows: 1, deepest: 1 },
+  }
+
+  const mockAll = ({ reach = REACH, effects = SHALLOW } = {}) => {
+    apiFetch.mockImplementation((path) => {
+      if (path.endsWith('/reach')) return Promise.resolve(reach)
+      if (path.endsWith('/effects')) return Promise.resolve(effects)
+      return Promise.resolve(MAP)
+    })
+  }
+
+  it('shows an effect that happens inside a workflow this one calls', async () => {
+    mockAll()
+    panel()
+    expect(
+      await screen.findByText(/api\.acme\.com — Approve order = true and In stock\? = true/)
+    ).toBeInTheDocument()
+    expect(screen.getByText(/via Fulfilment/)).toBeInTheDocument()
+  })
+
+  it('says how much of what a run does is not on this canvas', async () => {
+    mockAll()
+    panel()
+    expect(
+      await screen.findByText(/1 of these 1 happen inside 1 other workflow this one calls/)
+    ).toBeInTheDocument()
+  })
+
+  it('does not offer a link to a node that is not on this canvas', async () => {
+    // Selecting it would silently do nothing, which is worse than not offering.
+    // Scoped to the effect's own row: the dataflow map above lists a sink with
+    // the same label, and it *is* on this canvas.
+    mockAll()
+    const { container } = panel()
+    await screen.findByText(/via Fulfilment/)
+    const row = [...container.querySelectorAll('li')].find((li) =>
+      li.textContent.includes('via Fulfilment')
+    )
+    expect(row.querySelector('button')).toBeDisabled()
+  })
+
+  it('falls back to the per-graph report when nothing is inherited', async () => {
+    // Showing both would be showing the same effects twice.
+    mockAll({ reach: { ...REACH, summary: { ...REACH.summary, inherited: 0, direct: 1 } } })
+    panel()
+    expect(await screen.findByText(/gpt-4o-mini — on every run/)).toBeInTheDocument()
+    expect(screen.queryByText(/happen inside/)).not.toBeInTheDocument()
+  })
+
+  it('still renders the effects when the transitive read fails', async () => {
+    // Two independent reads: neither should be able to hide the other.
+    apiFetch.mockImplementation((path) => {
+      if (path.endsWith('/reach')) return Promise.reject(new Error('nope'))
+      if (path.endsWith('/effects')) return Promise.resolve(SHALLOW)
+      return Promise.resolve(MAP)
+    })
+    panel()
+    expect(await screen.findByText(/What a run can do/)).toBeInTheDocument()
+  })
+})

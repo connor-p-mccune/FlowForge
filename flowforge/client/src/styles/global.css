@@ -9210,3 +9210,31 @@ html, body, #root {
   font-style: normal;
   color: var(--text-muted, #94a3b8);
 }
+
+/* The call chain on an inherited effect: which other workflow it really
+   happens in. Quieter than the conditions beside it, because the chain is
+   context and the conditions are the finding. */
+.lineage-chain__via {
+  font-style: normal;
+  color: var(--text-muted, #94a3b8);
+}
+
+/* The sentence a reviewer would otherwise have to work out for themselves:
+   most of what this run does is not on the canvas in front of them. */
+.lineage-note {
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: #b45309;
+  background: #fffbeb;
+  border-radius: 5px;
+  padding: 6px 8px;
+  margin: 0 0 8px;
+}
+
+/* A node inside a callee is not on this canvas, so its link is inert rather
+   than a click that silently does nothing. */
+.lineage-link:disabled {
+  cursor: default;
+  color: #0f172a;
+  text-decoration: none;
+}
