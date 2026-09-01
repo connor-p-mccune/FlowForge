@@ -898,6 +898,56 @@ not merely a templated path). See [docs/EFFECTS.md](./EFFECTS.md).
 
 Requires the `read` scope.
 
+### What a run can ultimately do
+
+```bash
+curl -s https://your-flowforge-host/api/v1/workflows/6f0c…/reach \
+  -H "Authorization: Bearer $FLOWFORGE_TOKEN"
+```
+
+The [effect report](#what-a-run-can-do) answers that over **one** graph. A
+sub-workflow node breaks it: on the canvas it is one box, at run time it is an
+entire other workflow, and *"calls workflow 4f2a"* is true and tells a reviewer
+nothing — the workflow they are reviewing can charge a card, three boxes and one
+call away.
+
+```json
+{
+  "available": true,
+  "workflowId": "6f0c…",
+  "effects": [
+    { "label": "Charge card", "kind": "http", "target": "api.acme.com",
+      "workflowName": "Fulfilment", "always": false,
+      "via": [{ "name": "Fulfilment", "nodeId": "call", "label": "Fulfil order" }],
+      "conditions": [
+        { "label": "Approve order", "outcome": "true", "workflowName": "Orders" },
+        { "label": "In stock?", "outcome": "true", "workflowName": "Fulfilment" }
+      ] }
+  ],
+  "unresolved": [],
+  "summary": { "total": 4, "direct": 3, "inherited": 1,
+               "unconditional": 1, "workflows": 1, "deepest": 1 }
+}
+```
+
+**The preconditions are a conjunction.** An effect inside the callee is gated by
+the callee's decisions; the call itself is gated by the caller's. Keeping only
+the callee's would claim the charge happens whenever the callee decides it
+should, ignoring that the caller may never invoke it; keeping only the caller's
+would claim it happens on every call. Both are carried, in call order, each
+attributed to the workflow it came from.
+
+`summary.direct` is the number the per-graph report would have given, so the
+difference is a fact rather than something to work out by counting. `unresolved`
+says where the walk stopped — a cycle, the depth bound, or a callee this token
+cannot see — and the unexpanded effect stays in the report, because "calls
+something I cannot see" is more useful than silence.
+
+`flowforge effects <id> --deep` renders the same thing. See
+[docs/EFFECTS.md](./EFFECTS.md#across-the-sub-workflow-boundary).
+
+Requires the `read` scope.
+
 ### Are this workflow's checks any good?
 
 ```bash

@@ -21,8 +21,9 @@ which is exactly the work a graph algorithm should be doing. And the answer is
 a classical one: **an effect's preconditions are the decisions it is control-
 dependent on.**
 
-The surfaces are `flowforge effects <id>`, `GET /api/v1/workflows/:id/effects`,
-and `POST /api/workflows/:id/effects` for the canvas.
+The surfaces are `flowforge effects <id> [--deep]`,
+`GET /api/v1/workflows/:id/effects`, `GET /api/v1/workflows/:id/reach` for the
+transitive form, and `POST /api/workflows/:id/effects` for the canvas.
 
 ---
 
@@ -121,6 +122,69 @@ than a plausible guess.
 
 ---
 
+## Across the sub-workflow boundary
+
+Everything above is about **one graph**, and over one graph it is complete. A
+sub-workflow node breaks that.
+
+On the canvas it is one box. At run time it is an entire other workflow, with
+its own HTTP calls, its own emails, its own gates — and the per-graph report
+describes it honestly and uselessly:
+
+```
+workflow  Fulfil order   → 4f2a…       always
+```
+
+*"Calls workflow 4f2a"* is true and tells a reviewer nothing. The workflow they
+are reviewing **can charge a card**; it just does it three boxes and one call
+away, and nobody reading the canvas would know.
+
+`flowforge effects --deep` and `GET /api/v1/workflows/:id/reach` expand the call
+into what the callee actually does, and the same for its callees, to a bounded
+depth.
+
+### The preconditions are a conjunction
+
+This is the part that has to be right.
+
+An effect inside the callee is gated by the **callee's** decisions. The call
+itself is gated by the **caller's**. So the honest precondition for *"this run
+can charge a card"* is both:
+
+```
+Approve order = true      ← in Orders, gating the call
+In stock?     = true      ← in Fulfilment, gating the charge
+```
+
+Dropping either half is wrong in a different direction. Keeping only the
+callee's claims the charge happens whenever the callee decides it should,
+ignoring that the caller may never invoke it. Keeping only the caller's claims
+it happens on every call.
+
+Both are carried, in call order, each attributed to the workflow it came from —
+so a reviewer reads a chain rather than a set of unattributed clauses. There is
+a test that an effect which *is* unconditional inside the callee is not reported
+as `always` once it is reached through a gate, because that is precisely the
+claim a review must not be given.
+
+### Where the walk stops
+
+Three things stop it, and each **keeps the unexpanded effect** rather than
+dropping it — *"calls something I cannot see"* is more useful to a reviewer than
+silence:
+
+| | |
+|---|---|
+| A **cycle** | A workflow already on the call stack. The engine refuses one at run time; expanding it here would not terminate. |
+| The **depth bound** | Reported as truncated rather than silently returning a prefix as though it were the whole answer. |
+| A callee **this caller cannot see** | Deleted, or in another workspace. That is not a policy decided here — it is the boundary the sub-workflow runner already enforces, so a call across workspaces is not one to follow because it is not one the engine would make. |
+
+`summary.direct` is deliberately the number the per-graph report would have
+given, so the difference between *what this graph does* and *what a run of it
+does* is a fact in the payload rather than something to work out by counting.
+
+---
+
 ## As a CI gate
 
 `--ungated` exits non-zero when any effect has no preconditions at all.
@@ -147,3 +211,8 @@ straight-line workflow's build is a check somebody deletes.
 - **It does not replace a declared guarantee.** This says what is true of the
   graph today. A [guarantee](./GUARANTEES.md) says what must stay true, and is
   enforced at deploy. Reading this report is how you decide which ones to pin.
+- **The inverse view stays per-graph.** *"If this approval rejects, what can
+  still happen?"* is a question about one set of decisions. Composing it across
+  a call chain — where a rejection in the caller and a rejection in the callee
+  rule out overlapping but different things — is a different report rather than
+  this one with more rows, so `--deep` does not attempt it.

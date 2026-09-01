@@ -84,7 +84,7 @@ Usage:
   flowforge debug <id> --break <node> [--step]     Run with breakpoints and report what each node was about to do (--stop parks it)
   flowforge types <workflow-id> [--node <id>]      Inferred data schema per node — what each one produces (exits non-zero on a type error)
   flowforge lineage <id> [--node <id>] [--strict]  Where data comes from and where it leaves — provenance, impact, and taint
-  flowforge effects <id> [--ungated]               What a run can do to the outside world, and what has to be true first (--ungated fails on an effect with no gate)
+  flowforge effects <id> [--deep] [--ungated]      What a run can do to the outside world, and what has to be true first (--deep follows sub-workflow calls; --ungated fails on an effect with no gate)
   flowforge converge <id> [--strict]               Where parallel branches collide and which value survives (--strict fails on a tie nothing in the graph decides)
   flowforge subject <identifier> [--erase] [--yes]  Data subject request — everything held about one person, and erasing it (previews unless --yes)
   flowforge contract <id> [file] [--strict]        What this workflow promises its callers, and whose references a change would break
