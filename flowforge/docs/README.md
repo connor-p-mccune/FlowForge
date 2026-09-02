@@ -1,6 +1,6 @@
 # FlowForge design records
 
-Twenty-nine documents is too many to read in order, so this is a map rather than
+Thirty documents is too many to read in order, so this is a map rather than
 a table of contents. Each record covers one part that was hard, and each is
 organised the same way: **what the obvious implementation gets wrong**, the
 design that fixes it, and the limits stated rather than oversold.
@@ -70,6 +70,7 @@ most familiar.
 | [DRIFT.md](./DRIFT.md) | Every monitor here watches *time* or *outcome*. None watches the **data** — so a field that starts arriving null is green on every dashboard. |
 | [ASSERTIONS.md](./ASSERTIONS.md) | Guarantees prove properties of the *graph*. The things that break production are properties of *runs* — so pin a query that must never match, and count "never once evaluated" as its own state rather than as green. |
 | [QUERY.md](./QUERY.md) | Every report here answers one *fixed* question. The one somebody has at 3am is always specific — so FXL becomes the query language, with a planner whose pushdown can only cost speed, never change the answer. |
+| [SCHEDULE-LOAD.md](./SCHEDULE-LOAD.md) | Every timing analysis here is about one run or one workflow. Nothing modelled the machine they share — and its load is not random, because cron is written by people and people write round numbers. |
 | [CAPACITY.md](./CAPACITY.md) | The concurrency cap is a number somebody typed once. Queueing theory says what it buys — and the model can be checked against the wait already recorded, so it grades itself. |
 
 ---

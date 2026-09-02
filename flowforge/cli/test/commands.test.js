@@ -1127,3 +1127,140 @@ test('lint --strict fails on warnings; without it warnings pass', async () => {
   assert.equal(strict, 1)
   assert.match(ctx.output(), /--strict/)
 })
+
+// flowforge schedule --workspace — the other question about the same subject.
+//
+// Every timing view in this CLI is about one workflow. The load is not, and it
+// is not random either: cron is written by people, and people write round
+// numbers.
+{
+  const scheduleCmd = require('../src/commands/schedule')
+
+  const COLLISION = {
+    available: true,
+    workspaceId: 'ws-1',
+    horizonDays: 7,
+    schedules: [],
+    peak: {
+      concurrent: 3,
+      at: '2026-09-03T00:00:00.000Z',
+      workflows: [
+        { workflowId: 'w1', name: 'Nightly reconcile', cron: '0 0 * * *', timeZone: null, durationMs: 2400000 },
+        { workflowId: 'w2', name: 'Digest', cron: '0 0 * * *', timeZone: 'Asia/Tokyo', durationMs: 1200000 },
+        { workflowId: 'w3', name: 'Cleanup', cron: '0 0 * * *', timeZone: null, durationMs: 300000 },
+      ],
+    },
+    suggestion: { workflowId: 'w1', name: 'Nightly reconcile', minutes: 20, peakBefore: 3, peakAfter: 1 },
+    clock: { occurrences: 21, onTheHour: 18, atMidnight: 7, share: 0.857 },
+    summary: {
+      scheduled: 3,
+      occurrences: 21,
+      unmeasured: 0,
+      lowerBound: false,
+      capacity: null,
+      overCapacity: null,
+    },
+    unmeasured: [],
+  }
+
+  const ONE_WORKSPACE = { workspaces: [{ id: 'ws-1', name: 'Acme' }] }
+
+  async function runSchedule(payload, { flags = {}, workspaces = ONE_WORKSPACE } = {}) {
+    const stub = await startStub((_m, path) => ({
+      json: path === '/api/v1/workspaces' ? workspaces : payload,
+    }))
+    const ctx = makeCtx(stub.api)
+    const code = await scheduleCmd({ positionals: [], flags: { workspace: true, ...flags } }, ctx)
+    await stub.close()
+    return { code, out: ctx.output(), requests: stub.requests }
+  }
+
+  test('schedule --workspace reports the peak and what is in it', async () => {
+    const { code, out } = await runSchedule(COLLISION)
+    assert.equal(code, 0)
+    assert.match(out, /At most 3 runs at once/)
+    assert.match(out, /Nightly reconcile/)
+    assert.match(out, /Asia\/Tokyo/)
+  })
+
+  test('schedule --workspace says how much of the schedule is a round number', async () => {
+    const { out } = await runSchedule(COLLISION)
+    assert.match(out, /86% of scheduled runs start on the hour, 7 of them at midnight/)
+  })
+
+  test('schedule --workspace names the one move that flattens the peak', async () => {
+    const { out } = await runSchedule(COLLISION)
+    assert.match(out, /Moving Nightly reconcile 20 minutes later would drop the peak from 3 to 1/)
+  })
+
+  test('schedule --workspace reaches no verdict without a capacity', async () => {
+    const { code, out } = await runSchedule(COLLISION)
+    assert.equal(code, 0)
+    assert.ok(!out.includes('Against a capacity'), out)
+  })
+
+  test('schedule --workspace exits non-zero over a stated capacity', async () => {
+    const over = { ...COLLISION, summary: { ...COLLISION.summary, capacity: 2, overCapacity: true } }
+    const { code, out } = await runSchedule(over, { flags: { capacity: 2 } })
+    assert.equal(code, 1)
+    assert.match(out, /Against a capacity of 2/)
+  })
+
+  test('schedule --workspace says the peak is a floor when something was excluded', async () => {
+    const partial = {
+      ...COLLISION,
+      summary: { ...COLLISION.summary, unmeasured: 2, lowerBound: true },
+      unmeasured: [
+        { workflowId: 'w9', name: 'Weekly report', cron: '0 0 * * 1' },
+        { workflowId: 'w8', name: 'Quarterly close', cron: '0 0 1 */3 *' },
+      ],
+    }
+    const { out } = await runSchedule(partial)
+    assert.match(out, /this peak is a floor/)
+    assert.match(out, /Weekly report, Quarterly close/)
+  })
+
+  test('schedule --workspace tells nothing-scheduled from nothing-measured', async () => {
+    const none = await runSchedule({ available: false, reason: 'no-schedules' })
+    assert.match(none.out, /No workflow in this workspace has a schedule trigger/)
+
+    const unmeasured = await runSchedule({
+      available: false,
+      reason: 'nothing-measured',
+      unmeasured: [{ workflowId: 'w1', name: 'Never run', cron: '0 0 * * *' }],
+    })
+    assert.match(unmeasured.out, /have never run/)
+    assert.match(unmeasured.out, /no occupancy to overlap/)
+  })
+
+  test('schedule --workspace uses the only workspace rather than demanding one', async () => {
+    const { requests } = await runSchedule(COLLISION)
+    assert.ok(requests.some((r) => r.path.startsWith('/api/v1/workspaces/ws-1/schedule')))
+  })
+
+  test('schedule --workspace asks which one when there are several', async () => {
+    const { code, out } = await runSchedule(COLLISION, {
+      workspaces: { workspaces: [{ id: 'a', name: 'A' }, { id: 'b', name: 'B' }] },
+    })
+    assert.equal(code, 1)
+    assert.match(out, /Pick one/)
+  })
+
+  test('schedule --workspace takes an explicit id without listing them', async () => {
+    const { requests } = await runSchedule(COLLISION, { flags: { workspace: 'ws-9' } })
+    assert.ok(requests.every((r) => r.path !== '/api/v1/workspaces'))
+    assert.ok(requests.some((r) => r.path.startsWith('/api/v1/workspaces/ws-9/schedule')))
+  })
+
+  test('schedule without --workspace still answers about one workflow', async () => {
+    const stub = await startStub(() => ({
+      json: { scheduled: true, active: true, cron: '0 9 * * *', reachable: true, nextRuns: ['2026-09-03T09:00:00.000Z'] },
+    }))
+    const ctx = makeCtx(stub.api)
+    const code = await scheduleCmd({ positionals: ['wf-1'], flags: {} }, ctx)
+    await stub.close()
+    assert.equal(code, 0)
+    assert.match(ctx.output(), /Schedule/)
+    assert.equal(stub.requests[0].path, '/api/v1/workflows/wf-1/schedule')
+  })
+}

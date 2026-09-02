@@ -109,6 +109,7 @@ Usage:
   flowforge contention <exec-id> [--max <ratio>]   Where a run's time went — work vs waiting for a slot (exits non-zero over the budget)
   flowforge drift <workflow-id> [--strict]         Has what this workflow *produces* changed? Fields, null rates, distributions (--strict fails the build)
   flowforge schedule <workflow-id> [--count N]     Upcoming scheduled run times (UTC)
+  flowforge schedule --workspace [ws-id] [--capacity N] What a week of every schedule does to the machine they share — peak concurrent runs, and the one move that flattens it (--capacity exits non-zero over budget)
   flowforge check <workflow-id> [--strict]         Gate CI on workflow health (exits non-zero on a breach)
   flowforge test <workflow-id> [--junit <file>]    Run the workflow's test scenarios (exits non-zero on failure)
   flowforge run <execution-id> [--watch]           One run with its steps

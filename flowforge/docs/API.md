@@ -1013,6 +1013,72 @@ workflow deployed four days ago that has run 400 times runs 100 times a day, not
 non-zero on a non-empty queue. Requires the `read` scope; any member may read
 it. See [docs/EXPOSURE.md](./EXPOSURE.md).
 
+### When does the scheduled load peak?
+
+```bash
+curl -s "https://your-flowforge-host/api/v1/workspaces/$WS/schedule?days=7&capacity=4" \
+  -H "Authorization: Bearer $FLOWFORGE_TOKEN"
+```
+
+Every other timing endpoint here is about one thing: the parallelism cap inside
+a run, the queue in front of a workflow, the longest chain in an execution. This
+is the load they all land on — and it is not random, because cron is written by
+people and people write round numbers. Nobody schedules a report for 03:47.
+
+```json
+{
+  "available": true,
+  "horizonDays": 7,
+  "peak": {
+    "concurrent": 5,
+    "at": "2026-09-03T00:00:00.000Z",
+    "workflows": [
+      { "name": "Nightly reconcile", "cron": "0 0 * * *",
+        "timeZone": null, "durationMs": 2400000 },
+      { "name": "Digest", "cron": "0 0 * * *",
+        "timeZone": "Asia/Tokyo", "durationMs": 1200000 }
+    ]
+  },
+  "suggestion": { "name": "Nightly reconcile", "minutes": 20,
+                  "peakBefore": 5, "peakAfter": 3 },
+  "clock": { "occurrences": 84, "onTheHour": 72, "atMidnight": 42, "share": 0.857 },
+  "summary": { "scheduled": 6, "occurrences": 84, "unmeasured": 2,
+               "lowerBound": true, "capacity": 4, "overCapacity": true },
+  "unmeasured": [{ "name": "Weekly report", "cron": "0 0 * * 1" }]
+}
+```
+
+**Colliding is not starting together.** An occurrence occupies
+`[start, start + mean duration)`, so the 40-minute job that begins at midnight
+is still holding a worker when the 00:30 job lands — and that is the commonest
+shape of the problem, because the long job is exactly the one somebody scheduled
+early to get it out of the way. Ends sort before starts at a tie: a run
+finishing at exactly midnight has released its worker before the midnight run
+needs one.
+
+**Time zones are not decoration.** Each cron is expanded in the zone the
+scheduler evaluates it in, so two workflows both set to "midnight" in different
+zones do not collide and two set to different hours may. Expanding everything in
+UTC would invent collisions and hide real ones.
+
+**A missing duration makes the peak a floor.** A scheduled workflow that has
+never run is excluded, named in `unmeasured`, and `summary.lowerBound` is set.
+Substituting a nominal duration would produce a peak built partly out of a
+number nobody measured.
+
+**No capacity, no verdict.** `summary.overCapacity` is `null` until you pass
+`?capacity=N`. The worker concurrency is a deployment fact this process may not
+share, and a verdict built on a guessed one is worse than none.
+
+`clock` is the finding rather than a curiosity: a peak that is an accident of
+everyone independently picking midnight has a cheap fix — `suggestion`, one
+workflow shifted by whole minutes inside the hour it already fires in — and a
+peak whose load is genuinely that high does not.
+
+`days` is clamped to `[1, 31]`. `flowforge schedule --workspace --capacity N`
+renders the same thing and exits non-zero over budget. Requires the `read`
+scope; any member. See [docs/SCHEDULE-LOAD.md](./SCHEDULE-LOAD.md).
+
 ### What happens twice?
 
 ```bash
