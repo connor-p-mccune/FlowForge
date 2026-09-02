@@ -1660,6 +1660,13 @@ async function rollbackExecution(executionId, { publish, dryRun = false } = {}) 
 }
 
 module.exports = {
+  // The retry shape, exported for the one thing that needs to agree with it: a
+  // static analysis of what a repeat would do (services/repeats.js) restates
+  // both rather than importing them, because pulling the run loop into an
+  // analysis is a cost nothing else pays. The test asserts the two agree, so
+  // the coupling is paid at test time and nowhere else.
+  MAX_ATTEMPTS,
+  SINGLE_ATTEMPT_TYPES,
   runExecution,
   executeRollback,
   rollbackExecution,

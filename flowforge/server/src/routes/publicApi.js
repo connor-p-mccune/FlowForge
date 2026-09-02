@@ -98,6 +98,8 @@ const canary = require('../services/canary')
 const { snapshotVersion } = require('../services/canaryMonitor')
 const { forbidViewer, memberRole } = require('../services/workspaceRoles')
 const { exposureReport, WINDOW_DAYS: EXPOSURE_WINDOW_DAYS } = require('../services/exposure')
+const { analyzeRepeats } = require('../services/repeats')
+const { recoveryPolicy: recoveryPolicyOf } = require('../services/crashRecovery')
 const { isPaused, PAUSED_ERROR, pauseWorkflow, resumeWorkflow } = require('../services/workflowPause')
 const { computeDependencies } = require('../services/workflowDependencies')
 const { listAudit, verifyChain } = require('../services/auditLog')
@@ -1513,6 +1515,38 @@ router.get('/workflows/:id/reach', tokenAuth('read'), (req, res) => {
     const root = resolve(workflow.id)
     if (!root) return res.json({ available: false, reason: 'empty', workflowId: workflow.id })
     res.json(reachableEffects(root, resolve))
+  } catch (err) {
+    console.error(err)
+    res.status(500).json({ error: 'Internal server error' })
+  }
+})
+
+// GET /api/v1/workflows/:id/repeats — what happens twice (services/repeats.js).
+//
+// Three mechanisms repeat a step: node retries (three attempts by default, on
+// every run), resume-from-failure, and crash recovery. Each is correct on its
+// own terms, and nothing in the product tells an author what their graph does
+// under any of them.
+//
+// The CI-shaped question is `summary.retriedUnsafe` — steps the engine repeats
+// *by itself* whose repeat is not safe. That is the number that needs no crash
+// and no bad luck beyond a timeout, and `flowforge repeats --strict` gates on
+// it. `recovery.verdict` is the other half: `recovery_policy: 'resume'` is an
+// assertion about the graph, and this is where it gets checked.
+//
+// Read-only and pure over stored graphs, so `read` is the whole authorisation
+// story.
+router.get('/workflows/:id/repeats', tokenAuth('read'), (req, res) => {
+  try {
+    const workflow = getWorkflowForMember(req.params.id, req.user.id)
+    if (!workflow) return res.status(404).json({ error: 'Workflow not found' })
+    const resolve = subWorkflowGraphs(workflow.workspace_id)
+    const root = resolve(workflow.id)
+    if (!root) return res.json({ available: false, reason: 'empty', workflowId: workflow.id })
+    res.json({
+      ...analyzeRepeats(root, resolve, { recoveryPolicy: recoveryPolicyOf(workflow) }),
+      name: workflow.name,
+    })
   } catch (err) {
     console.error(err)
     res.status(500).json({ error: 'Internal server error' })

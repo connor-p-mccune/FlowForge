@@ -2370,6 +2370,129 @@ const spec = {
         },
       },
     },
+    '/workflows/{workflowId}/repeats': {
+      get: {
+        tags: ['workflows'],
+        summary: 'What happens twice?',
+        description:
+          'Three mechanisms in this engine execute the same logical step more ' +
+          'than once, and each is correct on its own terms: **node retries** ' +
+          '(three attempts by default, on by default, on every run), ' +
+          '**resume-from-failure**, and **crash recovery**. Nothing else in the ' +
+          'product says what a given graph does under any of them.\n\n' +
+          'Each step gets a verdict. `safe` — a read, or a method RFC 9110 ' +
+          'defines as idempotent. `guarded` — declares `idempotent`, and its ' +
+          'runner sends the key. `unsafe` — a repeat does the work again. ' +
+          '`billed` — kept apart from `unsafe` because paying twice is a budget ' +
+          'decision rather than a correctness one, and folding them together ' +
+          'would make every AI workflow look broken. `unknown` — the method is ' +
+          'computed, so the graph does not settle it. `opaque` — a sub-workflow ' +
+          'call whose callee could not be read.\n\n' +
+          '**Gate on `summary.retriedUnsafe`.** That counts steps the engine ' +
+          'repeats *by itself* whose repeat is not safe — the ones that need no ' +
+          'crash and no bad luck beyond a timeout.\n\n' +
+          '`recovery.verdict` is the other half. `recovery_policy: "resume"` is ' +
+          'documented as *"for a graph whose steps are idempotent, which only ' +
+          'its author can know"* — an assertion made once in a dropdown about a ' +
+          'graph edited many times since, and this is where it is checked ' +
+          'against the graph. `contradicted` means the policy claims something ' +
+          'the graph denies.\n\n' +
+          'Sub-workflow calls are followed to a bounded depth; a call carries ' +
+          'the worst verdict its callee can produce. Requires the `read` scope.',
+        operationId: 'getWorkflowRepeats',
+        parameters: [{ $ref: '#/components/parameters/WorkflowId' }],
+        responses: {
+          200: {
+            description: 'The repeat report, or `available: false` for an empty graph.',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    available: { type: 'boolean' },
+                    reason: { type: 'string', nullable: true, enum: ['empty'] },
+                    workflowId: { type: 'string' },
+                    name: { type: 'string' },
+                    steps: {
+                      type: 'array',
+                      description: 'Worst verdict first; within one, the automatically-retried first.',
+                      items: {
+                        type: 'object',
+                        properties: {
+                          nodeId: { type: 'string' },
+                          label: { type: 'string' },
+                          type: { type: 'string' },
+                          verdict: {
+                            type: 'string',
+                            enum: ['unsafe', 'unknown', 'opaque', 'billed', 'guarded', 'safe'],
+                          },
+                          why: { type: 'string' },
+                          method: { type: 'string', nullable: true },
+                          retried: {
+                            type: 'boolean',
+                            description:
+                              'The engine retries this node on its own. False for the ' +
+                              'single-attempt types, whose repeat needs a resume or a recovery.',
+                          },
+                          declaredButUnsendable: {
+                            type: 'boolean',
+                            description:
+                              'Declares `idempotent` on a node type that sends no key, so the ' +
+                              'declaration does nothing. The linter warns about the same thing.',
+                          },
+                          calls: {
+                            type: 'object',
+                            nullable: true,
+                            properties: {
+                              workflowId: { type: 'string' },
+                              name: { type: 'string' },
+                              steps: { type: 'integer' },
+                            },
+                          },
+                        },
+                      },
+                    },
+                    recovery: {
+                      type: 'object',
+                      properties: {
+                        policy: { type: 'string', enum: ['safe', 'resume', 'manual'] },
+                        verdict: {
+                          type: 'string',
+                          enum: ['consistent', 'contradicted', 'unverified', 'blocks-recovery'],
+                        },
+                        why: { type: 'string' },
+                      },
+                    },
+                    summary: {
+                      type: 'object',
+                      properties: {
+                        steps: { type: 'integer' },
+                        safe: { type: 'integer' },
+                        guarded: { type: 'integer' },
+                        unsafe: { type: 'integer' },
+                        billed: { type: 'integer' },
+                        unknown: { type: 'integer' },
+                        opaque: { type: 'integer' },
+                        maxAttempts: { type: 'integer' },
+                        retriedUnsafe: {
+                          type: 'integer',
+                          description: 'The CI number: repeated by the engine, and not safe to repeat.',
+                        },
+                        declaredButUnsendable: { type: 'integer' },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+          401: { $ref: '#/components/responses/Unauthorized' },
+          403: { $ref: '#/components/responses/Forbidden' },
+          404: { $ref: '#/components/responses/NotFound' },
+          429: { $ref: '#/components/responses/RateLimited' },
+        },
+      },
+    },
     '/workflows/{workflowId}/reach': {
       get: {
         tags: ['workflows'],

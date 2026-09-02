@@ -15,7 +15,8 @@ const { checkWorkflow, policyIssues } = require('../services/policyGate')
 const stepCache = require('../services/stepCache')
 const { isValidPriority } = require('../services/runPriority')
 const { ROLLBACK_POLICIES } = require('../services/compensation')
-const { POLICIES: RECOVERY_POLICIES } = require('../services/crashRecovery')
+const { POLICIES: RECOVERY_POLICIES, recoveryPolicy: recoveryPolicyOf } = require('../services/crashRecovery')
+const { analyzeRepeats, MAX_ATTEMPTS } = require('../services/repeats')
 const { describeLineage, analyzeLineage, traceProvenance, traceImpact } = require('../services/lineage')
 const { verifyGuarantees, parseGuarantees } = require('../services/guarantees')
 const { formatWorkflow, parseWorkflow, DslError } = require('../services/workflowDsl')
@@ -1113,6 +1114,36 @@ router.get('/workflows/:id/reach', auth, (req, res) => {
     const root = resolve(workflow.id)
     if (!root) return res.json({ available: false, reason: 'empty', workflowId: workflow.id })
     res.json(reachableEffects(root, resolve))
+  } catch (err) {
+    console.error(err)
+    res.status(500).json({ error: 'Internal server error' })
+  }
+})
+
+// GET /api/workflows/:id/repeats — what a repeat of this workflow's steps would
+// do, and whether its recovery policy describes the graph (services/repeats.js).
+//
+// A GET for the reason the reach walk is one: it follows sub-workflow calls, so
+// the answer depends on graphs *other* workflows hold, and judging an unsaved
+// canvas against saved callees would describe a system that does not exist. The
+// recovery policy it checks is a stored column too — a claim already made,
+// rather than one on screen.
+router.get('/workflows/:id/repeats', auth, (req, res) => {
+  try {
+    const workflow = db.prepare('SELECT * FROM workflows WHERE id = ?').get(req.params.id)
+    if (!workflow || !isMember(workflow.workspace_id, req.user.id)) {
+      return res.status(404).json({ error: 'Workflow not found' })
+    }
+    const resolve = subWorkflowGraphs(workflow.workspace_id)
+    const root = resolve(workflow.id)
+    if (!root) return res.json({ available: false, reason: 'empty', workflowId: workflow.id })
+    res.json({
+      ...analyzeRepeats(root, resolve, {
+        recoveryPolicy: recoveryPolicyOf(workflow),
+        maxAttempts: MAX_ATTEMPTS,
+      }),
+      name: workflow.name,
+    })
   } catch (err) {
     console.error(err)
     res.status(500).json({ error: 'Internal server error' })

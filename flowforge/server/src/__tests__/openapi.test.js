@@ -66,6 +66,7 @@ describe('GET /api/v1/openapi.json', () => {
       '/workflows/{workflowId}/query',
       '/workflows/{workflowId}/reach',
       '/workflows/{workflowId}/regressions',
+      '/workflows/{workflowId}/repeats',
       '/workflows/{workflowId}/resume',
       '/workflows/{workflowId}/schedule',
       '/workflows/{workflowId}/tests/run',
