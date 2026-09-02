@@ -1,6 +1,6 @@
 # FlowForge design records
 
-Twenty-seven documents is too many to read in order, so this is a map rather than
+Twenty-nine documents is too many to read in order, so this is a map rather than
 a table of contents. Each record covers one part that was hard, and each is
 organised the same way: **what the obvious implementation gets wrong**, the
 design that fixes it, and the limits stated rather than oversold.
@@ -41,6 +41,7 @@ most familiar.
 | [LINEAGE.md](./LINEAGE.md) | Where a value came from, what breaks if it changes, and whether anything reaching a URL is controlled by whoever sent the webhook. |
 | [EFFECTS.md](./EFFECTS.md) | *What can this workflow do to the outside world, and what has to be true first?* — control dependence, and why a gate somebody routed around must report as no gate at all. |
 | [EXPOSURE.md](./EXPOSURE.md) | Every other analysis here answers a question about *one* workflow, and assumes somebody knew which one to open. This ranks a whole workspace by outward actions per day, and names what nothing is checking. |
+| [REPEATS.md](./REPEATS.md) | Every other check asks whether one run is right. Three mechanisms make a step run twice — and the engine's own retries need no crash at all. Also the only place `recovery_policy: 'resume'` is held against the graph it was set on. |
 | [MUTATION.md](./MUTATION.md) | Every check answers *does this workflow pass?* This answers the one underneath — *if it were subtly wrong, would any of them notice?* Green is not the same as covered, and each gap comes with the input that would have closed it. |
 | [PREVIEW.md](./PREVIEW.md) | Every deploy gate is static. None says what the change *does*. So replay last week's traffic against the candidate graph. |
 

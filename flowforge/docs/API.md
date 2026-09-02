@@ -1013,6 +1013,68 @@ workflow deployed four days ago that has run 400 times runs 100 times a day, not
 non-zero on a non-empty queue. Requires the `read` scope; any member may read
 it. See [docs/EXPOSURE.md](./EXPOSURE.md).
 
+### What happens twice?
+
+```bash
+curl -s https://your-flowforge-host/api/v1/workflows/6f0c…/repeats   -H "Authorization: Bearer $FLOWFORGE_TOKEN"
+```
+
+Every other analysis here asks whether **one run** is right. Three mechanisms
+make a step run a second time — node retries (three attempts by default, on
+every run), resume-from-failure, and crash recovery — and nothing else says what
+a given graph does under any of them.
+
+```json
+{
+  "available": true,
+  "name": "Orders",
+  "steps": [
+    { "nodeId": "charge", "label": "Charge card", "verdict": "unsafe",
+      "method": "POST", "retried": true,
+      "why": "a POST with no idempotency key — a repeat sends the request again" },
+    { "nodeId": "call", "label": "Fulfil order", "verdict": "unsafe",
+      "retried": false, "calls": { "name": "Fulfilment", "steps": 3 },
+      "why": "the worst a repeat of Fulfilment does is unsafe" },
+    { "nodeId": "score", "label": "Fraud score", "verdict": "billed", "retried": true,
+      "why": "a repeat produces another completion and is charged for it" }
+  ],
+  "recovery": {
+    "policy": "resume", "verdict": "contradicted",
+    "why": "the policy says every step is safe to repeat; 2 are not"
+  },
+  "summary": { "steps": 6, "unsafe": 2, "guarded": 1, "billed": 1,
+               "unknown": 0, "opaque": 0, "maxAttempts": 3,
+               "retriedUnsafe": 1, "declaredButUnsendable": 0 }
+}
+```
+
+**Gate on `summary.retriedUnsafe`** — steps the engine repeats *by itself* whose
+repeat is not safe. Those need no crash, no operator and no bad luck beyond a
+timeout, and a timeout is exactly the case where the far side may already have
+done the work. A workflow whose crash recovery would park for a person is the
+`safe` policy working, so it is deliberately not in that number.
+
+`verdict` is `safe` (a read, or a method RFC 9110 defines as idempotent),
+`guarded` (declares `idempotent` **and** its runner sends the key), `unsafe`,
+`billed` (kept apart because paying twice is a budget decision, not a
+correctness one), `unknown` (a computed method — the graph does not settle it),
+or `opaque` (a callee that could not be read). `declaredButUnsendable` marks the
+one finding with a *wrong belief* attached: `idempotent` ticked on a node type
+that sends no key.
+
+**`recovery.verdict` checks a claim.** `recovery_policy: "resume"` is documented
+as *"for a graph whose steps are idempotent, which only its author can know"* —
+an assertion made once in a dropdown about a graph edited many times since.
+`contradicted` means the graph denies it; `unverified` means the graph does not
+settle it either way, which is not the same as agreement. Sub-workflow calls are
+followed, so the claim can be contradicted by a charge three boxes and one call
+away.
+
+`flowforge repeats <id> --strict` renders the same thing and exits non-zero on
+`retriedUnsafe`. See [docs/REPEATS.md](./REPEATS.md).
+
+Requires the `read` scope.
+
 ### Are this workflow's checks any good?
 
 ```bash

@@ -30,6 +30,7 @@ const COMMANDS = {
   lineage: require('../src/commands/lineage'),
   effects: require('../src/commands/effects'),
   exposure: require('../src/commands/exposure'),
+  repeats: require('../src/commands/repeats'),
   converge: require('../src/commands/converge'),
   capacity: require('../src/commands/capacity'),
   contract: require('../src/commands/contract'),
@@ -97,6 +98,7 @@ Usage:
   flowforge unpause <workflow-id>                  Release the pause and accept runs again
   flowforge runs <workflow-id> [--limit N]         Recent runs for a workflow
   flowforge query <id> "<fxl>" [--explain] [--json]  Ask a question of run history in FXL — exits 1 on no matches, 2 on a bad predicate
+  flowforge repeats <id> [--strict]                What happens twice — retries, resume and recovery repeat steps; which of them do their work again (--strict fails on one the engine retries by itself)
   flowforge mutants <id> [--strict]                Would any of this workflow's checks notice if it were subtly wrong? (mutation testing)
   flowforge assertions <id> [--strict]             Things this workflow says must never happen, checked against the runs that did (fails on a violation or a broken check)
   flowforge backfill <id> --from <iso|7d> [--yes]  Re-run a schedule over a past window (previews unless --yes)
