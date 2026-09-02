@@ -150,6 +150,52 @@ function peakOverlap(intervals) {
   return best
 }
 
+// The busiest each hour of the day gets, across the whole horizon.
+//
+// The peak alone cannot answer the question a reader has immediately after
+// seeing it: *is midnight uniquely bad, or is it just marginally the worst?* A
+// workspace whose whole day sits at four and touches five at midnight has a
+// different problem from one that idles at zero and spikes to five, and the two
+// want opposite responses — capacity in the first case, a shifted cron in the
+// second.
+//
+// Concurrency is constant between consecutive events, so each gap contributes
+// its count to every hour-of-day it touches. A gap longer than a day touches
+// all of them, and marking each once is the whole of that special case.
+function hourlyPeak(intervals, fromMs, horizonMs) {
+  const byHour = new Array(24).fill(0)
+  if (intervals.length === 0) return byHour
+
+  const events = []
+  for (const i of intervals) {
+    events.push({ at: i.startMs, delta: 1 })
+    events.push({ at: i.endMs, delta: -1 })
+  }
+  events.sort((a, b) => a.at - b.at || a.delta - b.delta)
+
+  const HOUR_MS = 3600000
+  const endMs = fromMs + horizonMs
+  let count = 0
+  for (let e = 0; e < events.length; e += 1) {
+    count += events[e].delta
+    if (count === 0) continue
+    const from = events[e].at
+    const to = Math.min(events[e + 1]?.at ?? endMs, endMs)
+    if (to <= from) continue
+    // A span of a day or more is live in every hour; walking it hour by hour
+    // would be the same answer, slower.
+    if (to - from >= 24 * HOUR_MS) {
+      for (let h = 0; h < 24; h += 1) byHour[h] = Math.max(byHour[h], count)
+      continue
+    }
+    for (let t = from; t < to; t = Math.floor(t / HOUR_MS + 1) * HOUR_MS) {
+      const h = new Date(t).getUTCHours()
+      byHour[h] = Math.max(byHour[h], count)
+    }
+  }
+  return byHour
+}
+
 // How much of the schedule lands on a round number.
 //
 // Reported because it is the finding, not a curiosity: a workspace whose peak
@@ -283,6 +329,9 @@ function analyzeSchedule(workspaceId, { horizonDays = HORIZON_DAYS, capacity = n
       concurrent: peak.count,
       at: peak.at ? new Date(peak.at).toISOString() : null,
       workflows: colliding,
+      // The shape the peak sits in. Without it a reader cannot tell a spike
+      // from a plateau, and those want opposite responses.
+      byHourUtc: hourlyPeak(intervals, fromMs, horizonMs),
     },
     suggestion: shift,
     clock: roundness(intervals),
@@ -305,6 +354,7 @@ function analyzeSchedule(workspaceId, { horizonDays = HORIZON_DAYS, capacity = n
 module.exports = {
   analyzeSchedule,
   peakOverlap,
+  hourlyPeak,
   bestShift,
   roundness,
   HORIZON_DAYS,

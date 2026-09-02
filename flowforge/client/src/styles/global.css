@@ -8672,6 +8672,68 @@ html, body, #root {
   color: #b45309;
 }
 
+/* — Scheduled load ——————————————————————————————————————————————————— */
+/* The bar chart is the argument, not decoration: a peak of five means one thing
+   over an idle day and another over a day that already sits at four, and the
+   number alone cannot tell them apart. */
+
+.sched__headline { font-size: 14px; color: #334155; margin: 0 0 12px; }
+.sched__headline strong { font-size: 18px; color: #0f172a; }
+
+.sched__profile {
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+  height: 96px;
+  padding: 0 2px;
+  border-bottom: 1px solid #e2e8f0;
+}
+
+.sched__bar-slot {
+  flex: 1 1 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  align-items: center;
+  height: 100%;
+  position: relative;
+}
+
+.sched__bar {
+  width: 100%;
+  min-height: 2px;
+  background: #c7d2fe;
+  border-radius: 2px 2px 0 0;
+  transition: background 0.15s ease;
+}
+
+.sched__bar-slot:hover .sched__bar { background: #818cf8; }
+
+/* The hour the peak falls in, so the headline and the chart agree at a glance. */
+.sched__bar--peak { background: #4f46e5; }
+
+.sched__tick {
+  position: absolute;
+  bottom: -16px;
+  font-size: 9px;
+  color: #94a3b8;
+  font-variant-numeric: tabular-nums;
+}
+
+.sched__note { font-size: 12px; color: #64748b; margin: 24px 0 0; line-height: 1.5; }
+.sched__note--warn { color: #b45309; }
+
+.sched__suggestion { font-size: 13px; color: #334155; margin: 6px 0 0; line-height: 1.5; }
+.sched__suggestion strong { color: #4f46e5; }
+
+.sched__cron {
+  font-size: 11px;
+  background: #f1f5f9;
+  padding: 1px 5px;
+  border-radius: 3px;
+  color: #475569;
+}
+
 /* — Repeat hint ————————————————————————————————————————————————————— */
 /* Shown beside the crash-recovery dropdown, whose middle option asserts that
    this workflow's steps are idempotent. Two findings share the styling and not

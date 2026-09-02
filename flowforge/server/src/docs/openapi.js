@@ -403,6 +403,17 @@ const spec = {
                       properties: {
                         concurrent: { type: 'integer' },
                         at: { type: 'string', format: 'date-time', nullable: true },
+                        byHourUtc: {
+                          type: 'array',
+                          minItems: 24,
+                          maxItems: 24,
+                          items: { type: 'integer' },
+                          description:
+                            'The busiest each UTC hour of the day gets over the horizon. The ' +
+                            'shape the peak sits in: a workspace idling at zero and spiking to ' +
+                            'five wants a shifted cron, one sitting at four and touching five ' +
+                            'wants capacity, and the peak alone cannot tell them apart.',
+                        },
                         workflows: {
                           type: 'array',
                           description: 'The workflows live at the peak instant.',

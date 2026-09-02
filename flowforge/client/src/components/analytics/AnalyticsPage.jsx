@@ -9,6 +9,7 @@ import WorkflowsTable from './WorkflowsTable'
 import StatusPageSection from './StatusPageSection'
 import CostSection from './CostSection'
 import ExposureSection from './ExposureSection'
+import ScheduleLoadSection from './ScheduleLoadSection'
 
 const RANGES = [7, 30, 90]
 
@@ -110,6 +111,11 @@ export default function AnalyticsPage({ workspaceId }) {
           anything has run: a workflow that can charge a card and never has is
           exactly the one nobody has looked at. */}
       <ExposureSection workspaceId={workspaceId} days={days} />
+      {/* Everything above is about what already happened. This is what is
+          going to: the scheduled load, and the shape it lands in. Not
+          governed by the range buttons — a cron's next week does not
+          depend on how far back you are looking. */}
+      <ScheduleLoadSection workspaceId={workspaceId} />
       {/* Spend renders independently of the range buttons above: a budget is a
           calendar-month commitment, and showing "7 days" of it against a
           monthly cap would be two different questions in one panel. */}

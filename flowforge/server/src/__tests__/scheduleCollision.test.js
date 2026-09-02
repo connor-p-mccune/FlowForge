@@ -273,3 +273,72 @@ describe('analyzeSchedule', () => {
     expect(report.summary.occurrences).toBeLessThanOrEqual(500)
   })
 })
+
+// The peak alone cannot say whether midnight is uniquely bad or just
+// marginally the worst, and those want opposite responses: capacity for a
+// plateau, a shifted cron for a spike.
+describe('hourlyPeak', () => {
+  const { hourlyPeak } = require('../services/scheduleCollision')
+  const HOUR = 3600000
+  const day = Date.UTC(2026, 8, 3)
+
+  it('attributes a run to every hour it is live in', () => {
+    // 23:30 to 01:30 touches 23, 00 and 01.
+    const at = day + 23 * HOUR + 30 * 60000
+    const byHour = hourlyPeak(
+      [{ workflowId: 'a', startMs: at, endMs: at + 2 * HOUR }],
+      day,
+      3 * 86400000
+    )
+    expect(byHour[23]).toBe(1)
+    expect(byHour[0]).toBe(1)
+    expect(byHour[1]).toBe(1)
+    expect(byHour[2]).toBe(0)
+  })
+
+  it('records the busiest each hour ever gets, not the last', () => {
+    const byHour = hourlyPeak(
+      [
+        { workflowId: 'a', startMs: day, endMs: day + 10 * 60000 },
+        { workflowId: 'b', startMs: day, endMs: day + 10 * 60000 },
+        // The next day's midnight is quieter; the hour keeps its worst.
+        { workflowId: 'c', startMs: day + 86400000, endMs: day + 86400000 + 10 * 60000 },
+      ],
+      day,
+      3 * 86400000
+    )
+    expect(byHour[0]).toBe(2)
+  })
+
+  it('separates a spike from a plateau', () => {
+    const spike = hourlyPeak(
+      [
+        { workflowId: 'a', startMs: day, endMs: day + 10 * 60000 },
+        { workflowId: 'b', startMs: day, endMs: day + 10 * 60000 },
+      ],
+      day,
+      86400000
+    )
+    expect(spike[0]).toBe(2)
+    expect(spike.filter((n) => n > 0)).toHaveLength(1)
+
+    // One long run all day is a plateau at 1, not a spike at anything.
+    const plateau = hourlyPeak(
+      [{ workflowId: 'a', startMs: day, endMs: day + 86400000 }],
+      day,
+      86400000
+    )
+    expect(plateau.every((n) => n === 1)).toBe(true)
+  })
+
+  it('has twenty-four zeroes for an empty schedule', () => {
+    expect(hourlyPeak([], day, 86400000)).toEqual(new Array(24).fill(0))
+  })
+
+  it('rides along on the full report', () => {
+    addScheduled('Nightly', '0 0 * * *', { durationMs: 30 * MIN })
+    const { peak } = analyzeSchedule(wsId, { horizonDays: 2 })
+    expect(peak.byHourUtc).toHaveLength(24)
+    expect(peak.byHourUtc[0]).toBe(1)
+  })
+})
