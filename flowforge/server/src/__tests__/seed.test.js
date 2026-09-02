@@ -160,3 +160,96 @@ describe('seed — what the newer surfaces can find', () => {
     expect(row.subject_id).toMatch(/^[0-9a-f]{32}$/)
   })
 })
+
+// The seed's job is to be a believable workspace, and a believable workspace
+// has the problems real ones have. These pin the ones the newer analyses exist
+// to find — not because the demo needs them to look good, but because a report
+// that finds nothing in the only data anybody runs it against is a report
+// nobody can evaluate.
+describe('seed — the problems a real workspace has', () => {
+  const { analyzeSchedule } = require('../services/scheduleCollision')
+  const { analyzeRepeats } = require('../services/repeats')
+  const { subWorkflowGraphs } = require('../services/reachLookup')
+  const { recoveryPolicy } = require('../services/crashRecovery')
+
+  const wfNamed = (name) => db.prepare('SELECT * FROM workflows WHERE name = ?').get(name)
+
+  it('deploys its workflows, because a workspace with history has', () => {
+    const drafts = db
+      .prepare("SELECT COUNT(*) n FROM workflows WHERE workspace_id = ? AND status != 'deployed'")
+      .get(result.wsId).n
+    expect(drafts).toBe(0)
+  })
+
+  it('schedules the workflow whose name says it is scheduled', () => {
+    const digest = wfNamed('Daily Sales Digest')
+    const { nodes } = JSON.parse(digest.graph_json)
+    expect(nodes[0].type).toBe('trigger-schedule')
+    expect(nodes[0].data.config.cron).toBe('0 0 * * *')
+  })
+
+  it('files its scheduled runs as scheduled', () => {
+    // The query surfaces filter on trigger_type; seeding everything as one
+    // value would make a real column look like it never varies.
+    const kinds = db
+      .prepare(
+        `SELECT DISTINCT e.trigger_type t FROM executions e
+           JOIN workflows w ON w.id = e.workflow_id
+          WHERE w.workspace_id = ?`
+      )
+      .all(result.wsId)
+      .map((r) => r.t)
+      .sort()
+    expect(kinds).toEqual(expect.arrayContaining(['schedule', 'webhook']))
+    // Nothing in the demo is a dry run: those never occupied a slot, and the
+    // capacity report excludes them for that reason.
+    expect(kinds).not.toContain('dry-run')
+  })
+
+  it('lands its scheduled runs when the cron says, not across the afternoon', () => {
+    const digest = wfNamed('Daily Sales Digest')
+    const hours = db
+      .prepare('SELECT created_at FROM executions WHERE workflow_id = ?')
+      .all(digest.id)
+      .map((r) => new Date(r.created_at).getUTCHours())
+    expect(hours.length).toBeGreaterThan(0)
+    expect(new Set(hours)).toEqual(new Set([0]))
+  })
+
+  it('collides two nightly jobs at midnight, which is what people schedule', () => {
+    const report = analyzeSchedule(result.wsId, { horizonDays: 3 })
+    expect(report.available).toBe(true)
+    expect(report.peak.concurrent).toBeGreaterThanOrEqual(2)
+    expect(new Date(report.peak.at).getUTCHours()).toBe(0)
+    // And the report can do something about it.
+    expect(report.suggestion.peakAfter).toBeLessThan(report.suggestion.peakBefore)
+  })
+
+  it('gives the repeat report a POST that is genuinely not safe to repeat', () => {
+    const refund = wfNamed('Refund Approval')
+    const resolve = subWorkflowGraphs(result.wsId)
+    const report = analyzeRepeats(resolve(refund.id), resolve, {
+      recoveryPolicy: recoveryPolicy(refund),
+    })
+    const charge = report.steps.find((s) => s.label === 'Issue Refund')
+    expect(charge).toMatchObject({ verdict: 'unsafe', method: 'POST', retried: true })
+    expect(report.summary.retriedUnsafe).toBeGreaterThan(0)
+  })
+
+  it('has a recovery policy the graph contradicts, made the way people make it', () => {
+    // "It is a sync, syncs are idempotent" — over a POST with no key.
+    const sync = wfNamed('Data Sync Job')
+    expect(recoveryPolicy(sync)).toBe('resume')
+
+    const resolve = subWorkflowGraphs(result.wsId)
+    const report = analyzeRepeats(resolve(sync.id), resolve, { recoveryPolicy: 'resume' })
+    expect(report.recovery.verdict).toBe('contradicted')
+  })
+
+  it('distinguishes a read from a write, so the report is not all one colour', () => {
+    const sync = wfNamed('Data Sync Job')
+    const resolve = subWorkflowGraphs(result.wsId)
+    const verdicts = analyzeRepeats(resolve(sync.id), resolve).steps.map((s) => s.verdict).sort()
+    expect(verdicts).toEqual(['safe', 'unsafe'])
+  })
+})

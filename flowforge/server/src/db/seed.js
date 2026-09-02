@@ -87,12 +87,12 @@ let nodeSeq = 0
 // `id` is optional and generated when absent. The refund workflow names its
 // nodes, because it is the one the demo queries and assertions point at and
 // `steps.refund.output.status >= 500` is a sentence where `steps.n4.…` is not.
-function node(type, label, x, id) {
+function node(type, label, x, id, config) {
   return {
     id: id || `n${++nodeSeq}`,
     type,
     position: { x, y: 80 },
-    data: { label, config: {} },
+    data: { label, config: config || {} },
   }
 }
 function edge(source, target, sourceHandle) {
@@ -133,8 +133,14 @@ function buildWorkflows() {
 
   // 2. Daily Sales Digest (manual, linear, AI summary + email)
   nodeSeq = 0
-  const t2 = node('trigger-manual', 'Run Digest', 0)
-  const h2 = node('action-http', 'Fetch Orders', 160)
+  // A *daily* digest was triggered manually, which is the kind of thing that is
+  // true of a real workspace and nobody notices. It is scheduled, and it is
+  // scheduled at midnight, because that is what people pick.
+  const t2 = node('trigger-schedule', 'Every night', 0, undefined, { cron: '0 0 * * *' })
+  const h2 = node('action-http', 'Fetch Orders', 160, undefined, {
+    method: 'GET',
+    url: 'https://api.northwind.example/orders?since={{trigger.since}}',
+  })
   const tr2 = node('transform', 'Shape Data', 320)
   const ai2 = node('ai-prompt', 'Write Summary', 480)
   const e2 = node('action-email', 'Email Team', 640)
@@ -145,6 +151,7 @@ function buildWorkflows() {
     edges: [edge(t2.id, h2.id), edge(h2.id, tr2.id), edge(tr2.id, ai2.id), edge(ai2.id, e2.id), edge(e2.id, log2.id)],
     lambda: 1,
     failRate: 0.08,
+    schedule: { hour: 0, minute: 0 },
     plan: () => ({ path: [t2, h2, tr2, ai2, e2, log2], skipped: [] }),
   }
 
@@ -166,10 +173,20 @@ function buildWorkflows() {
 
   // 4. Data Sync Job (manual, two HTTP calls around a delay)
   nodeSeq = 0
-  const t4 = node('trigger-manual', 'Start Sync', 0)
-  const h4a = node('action-http', 'Pull Source', 160)
+  const t4 = node('trigger-schedule', 'Nightly', 0, undefined, { cron: '0 0 * * *' })
+  const h4a = node('action-http', 'Pull Source', 160, undefined, {
+    method: 'GET',
+    url: 'https://api.contoso.example/records',
+  })
   const d4 = node('action-delay', 'Throttle', 320)
-  const h4b = node('action-http', 'Push Target', 480)
+  // A POST with no idempotency key, on a workflow whose recovery policy says
+  // every step is safe to repeat. That combination is not staged for the demo —
+  // it is the mistake `flowforge repeats` exists to find, and an author who
+  // reasoned "it is a sync, syncs are idempotent" makes it honestly.
+  const h4b = node('action-http', 'Push Target', 480, undefined, {
+    method: 'POST',
+    url: 'https://api.fabrikam.example/records',
+  })
   const log4 = node('output-log', 'Report', 640)
   const wf4 = {
     name: 'Data Sync Job',
@@ -177,6 +194,8 @@ function buildWorkflows() {
     edges: [edge(t4.id, h4a.id), edge(h4a.id, d4.id), edge(d4.id, h4b.id), edge(h4b.id, log4.id)],
     lambda: 1.5,
     failRate: 0.12,
+    schedule: { hour: 0, minute: 0 },
+    recoveryPolicy: 'resume',
     plan: () => ({ path: [t4, h4a, d4, h4b, log4], skipped: [] }),
   }
 
@@ -191,7 +210,10 @@ function buildWorkflows() {
   const t5 = node('trigger-webhook', 'Refund Requested', 0, 'request')
   const v5 = node('validate', 'Check Request', 160, 'validate')
   const a5 = node('approval', 'Approve Refund', 320, 'approve')
-  const h5 = node('action-http', 'Issue Refund', 480, 'refund')
+  const h5 = node('action-http', 'Issue Refund', 480, 'refund', {
+    method: 'POST',
+    url: 'https://api.stripe.example/refunds',
+  })
   const log5 = node('output-log', 'Decline Notice', 480, 'decline')
   const wf5 = {
     name: 'Refund Approval',
@@ -341,6 +363,14 @@ const HOURLY_TOTAL = HOURLY.reduce((a, b) => a + b, 0)
 // comfortable on the weekly average and contended at eleven in the morning.
 function arrivalMs(wf, dayStart, maxSec) {
   let hour = 0
+  // A scheduled workflow arrives when its cron fires, give or take the few
+  // seconds a tick takes to reach the queue. Drawing it from the traffic curve
+  // would scatter a nightly job across the afternoon and quietly erase the
+  // thing the schedule report exists to show.
+  if (wf.schedule) {
+    const sec = wf.schedule.hour * 3600 + wf.schedule.minute * 60 + randInt(0, 4)
+    return dayStart + Math.min(sec, maxSec) * 1000 + randInt(0, 999)
+  }
   if (wf.diurnal) {
     let target = rand() * HOURLY_TOTAL
     while (hour < 23 && target > HOURLY[hour]) target -= HOURLY[hour++]
@@ -349,6 +379,17 @@ function arrivalMs(wf, dayStart, maxSec) {
   }
   const sec = hour * 3600 + randInt(0, 3599)
   return dayStart + Math.min(sec, maxSec) * 1000 + randInt(0, 999)
+}
+
+// What history should say started a run. The scheduler writes 'schedule', the
+// webhook route 'webhook', everything else 'manual' — and the query surfaces
+// filter on it, so seeding them all as 'manual' would make a real column look
+// like it never varies.
+function triggerTypeOf(wf) {
+  const type = wf.nodes[0].type
+  if (type === 'trigger-webhook') return 'webhook'
+  if (type === 'trigger-schedule') return 'schedule'
+  return 'manual'
 }
 
 // Build the per-step rows for a single run, starting at startMs.
@@ -429,10 +470,14 @@ function seed({ days = DAYS } = {}) {
       'INSERT INTO workspace_members (workspace_id, user_id, role, joined_at) VALUES (?, ?, ?, ?)'
     ).run(wsId, userId, 'owner', nowIso)
 
+    // Deployed, not draft. A workspace with ninety days of history behind it
+    // has deployed workflows, and three analyses read `status`: the schedule
+    // report only expands crons that will actually fire, and a sub-workflow
+    // call refuses a target that is not deployed.
     const insertWorkflow = db.prepare(
       `INSERT INTO workflows (id, workspace_id, name, graph_json, max_concurrent_runs,
-                              subject_path, created_by, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+                              subject_path, recovery_policy, status, created_by, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, 'deployed', ?, ?, ?)`
     )
     // created_at is when the run *arrived*; started_at is when a slot freed.
     // Keeping them apart is the whole reason the capacity report can check its
@@ -459,7 +504,7 @@ function seed({ days = DAYS } = {}) {
       insertWorkflow.run(
         workflowId, wsId, wf.name,
         JSON.stringify({ nodes: wf.nodes, edges: wf.edges }),
-        wf.cap ?? null, wf.subjectPath ?? null,
+        wf.cap ?? null, wf.subjectPath ?? null, wf.recoveryPolicy ?? 'safe',
         userId, createdAt, nowIso
       )
       workflowIds[wf.name] = workflowId
@@ -470,8 +515,12 @@ function seed({ days = DAYS } = {}) {
 
       for (let d = days - 1; d >= 0; d--) {
         // Organic daily volume: 0.5x–1.5x lambda, with occasional quiet days.
-        let runs = Math.round(wf.lambda * (0.5 + rand()))
-        if (rand() < 0.12) runs = 0
+        // A daily cron fires once a day. The organic 0.5x-1.5x spread and the
+        // occasional quiet day belong to traffic somebody sends, not to a
+        // timer — and a schedule that skipped Tuesdays would be a different
+        // and much stranger workspace.
+        let runs = wf.schedule ? 1 : Math.round(wf.lambda * (0.5 + rand()))
+        if (!wf.schedule && rand() < 0.12) runs = 0
 
         const dayStart = todayMidnight - d * DAY_MS
         const maxSec = d === 0 ? Math.max(1, nowSecOfDay - 5) : 86399
@@ -498,7 +547,7 @@ function seed({ days = DAYS } = {}) {
           insertExecution.run(
             executionId, workflowId, failed ? 'failed' : 'completed',
             userId,
-            wf.nodes[0].type === 'trigger-webhook' ? 'webhook' : 'manual',
+            triggerTypeOf(wf),
             wf.subjectPath && payload
               ? subjectOf(wsId, wf.subjectPath, payload)
               : null,
