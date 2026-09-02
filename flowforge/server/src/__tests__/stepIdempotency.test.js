@@ -74,6 +74,27 @@ describe('declaring it', () => {
     expect(idem.isEnabled(node('h', 'action-http', { idempotent: '{{trigger.on}}' }))).toBe(false)
     expect(idem.isEnabled(node('h', 'action-http'))).toBe(false)
   })
+
+  // A declaration a runner cannot honour is not a weaker guarantee than none.
+  // It is a false one, and the crash-recovery `safe` policy believed it: the
+  // exemption was granted on the strength of a header nothing ever sent.
+  it.each(['action-email', 'action-slack', 'sub-workflow', 'for-each', 'approval', 'wait-callback'])(
+    'refuses the declaration on a %s node, whose runner sends no key',
+    (type) => {
+      expect(idem.isEnabled(node('n', type, { idempotent: true }))).toBe(false)
+      expect(idem.headerFor(node('n', type, { idempotent: true }), {
+        parentExecutionId: 'exec-1',
+        parentNodeId: 'n',
+      })).toBeNull()
+    }
+  )
+
+  it('names the types that can be given a key, so extending it is deliberate', () => {
+    // The set decides whether the declaration means anything at all. It is
+    // asserted rather than read from the code under test, so adding a type
+    // without teaching its runner to send the header fails here first.
+    expect([...idem.KEYED_TYPES]).toEqual(['action-http'])
+  })
 })
 
 describe('the key', () => {

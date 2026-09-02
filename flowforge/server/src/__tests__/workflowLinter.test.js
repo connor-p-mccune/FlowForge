@@ -799,14 +799,30 @@ describe('lintGraph — type analysis', () => {
     })
 
     it('flags it on a node that cannot send the header', () => {
-      // Worse than untidy: the recovery policy *acts* on this declaration, so it
-      // would let a lost run re-execute a step on the strength of a header that
-      // was never sent.
+      // The runtime now refuses the declaration outright, so nothing acts on it
+      // — which is exactly why this warning still has to fire. A setting that is
+      // silently inert is one somebody goes on believing.
       const found = lintGraph(withNode(node('e1', 'action-email', {
         to: 'a@b.c', subject: 's', body: 'b', idempotent: true,
       }))).find((i) => i.message.includes('idempotency'))
       expect(found).toMatchObject({ severity: 'warning', nodeId: 'e1' })
       expect(found.message).toMatch(/only HTTP nodes send an idempotency key/)
+    })
+
+    it('warns from the raw flag, not from the predicate the runtime uses', () => {
+      // stepIdempotency.isEnabled returns false for these types — that is the
+      // fix. Asking it here would make the linter agree there is nothing to
+      // report and leave the author with no warning at all, so this is pinned
+      // against exactly that regression.
+      const { isEnabled } = require('../services/stepIdempotency')
+      for (const type of ['action-email', 'action-slack']) {
+        const config = type === 'action-email'
+          ? { to: 'a@b.c', subject: 's', body: 'b', idempotent: true }
+          : { webhookUrl: 'https://hooks.slack.com/x', message: 'hi', idempotent: true }
+        const n = node('n1', type, config)
+        expect(isEnabled(n)).toBe(false)
+        expect(lintGraph(withNode(n)).some((i) => i.message.includes('idempotency'))).toBe(true)
+      }
     })
 
     it('nudges when the request was already safe to repeat', () => {

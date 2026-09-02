@@ -277,6 +277,35 @@ describe('recovering a lost run', () => {
     expect(sweepFor(execId).outcome).toBe('resumed')
   })
 
+  // The escape hatch only opens where a key is actually sent. A declaration on
+  // a node type whose runner ignores it was granting the exemption anyway,
+  // which turned "stop and ask a person" into "send the email again".
+  it('honours a declared-idempotent HTTP step under the safe policy', () => {
+    const wfId = makeWorkflow(
+      {
+        nodes: [node('t1', 'trigger-manual'), node('work', 'action-http', { url: 'https://x.test', idempotent: true })],
+        edges: [edge('t1', 'work')],
+      },
+      { recovery_policy: 'safe' }
+    )
+    const { execId } = makeAbandoned(wfId, { nodeType: 'action-http' })
+    expect(sweepFor(execId).outcome).toBe('resumed')
+  })
+
+  it('ignores the same declaration on a node type that sends no key', () => {
+    const wfId = makeWorkflow(
+      {
+        nodes: [node('t1', 'trigger-manual'), node('work', 'action-email', { to: 'a@b.test', idempotent: true })],
+        edges: [edge('t1', 'work')],
+      },
+      { recovery_policy: 'safe' }
+    )
+    const { execId } = makeAbandoned(wfId, { nodeType: 'action-email' })
+    const result = sweepFor(execId)
+    expect(result.outcome).toBe('failed')
+    expect(result.reason).toMatch(/may already have taken effect/)
+  })
+
   it('never resumes under a manual policy', () => {
     const wfId = makeWorkflow(GRAPH, { recovery_policy: 'manual' })
     const { execId } = makeAbandoned(wfId)

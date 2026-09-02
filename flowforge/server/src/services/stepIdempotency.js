@@ -63,11 +63,39 @@ const MAX_CHAIN = 32
 // answer is not to claim idempotency at all.
 const HEADER = 'Idempotency-Key'
 
-// Is this node asking for a key? Read from the **raw** config, like the
-// `onError` and cache policies, so upstream data can never switch it on or off:
-// whether a request is safe to repeat is a property of the endpoint, which is a
-// static fact about the workflow rather than something a payload decides.
+// Node types whose runner actually sends the header.
+//
+// Only `action-http` does, and the set exists so that stays a fact rather than
+// an assumption. **Extend it in the same commit that teaches a runner to send
+// the key, never before** — this is the list that decides whether the
+// declaration means anything, and a type in it whose runner ignores the key is
+// the exact failure this constant was added to close.
+//
+// The others are absent for reasons, not oversight. An email has no header a
+// receiving mail server deduplicates on; a Slack webhook post has none either.
+// A sub-workflow's effects belong to the callee, and a flag on the calling node
+// cannot make somebody else's charge idempotent. An approval's effect is a row
+// a person may already have answered.
+const KEYED_TYPES = new Set(['action-http'])
+
+// Is this node asking for a key, *and* able to be given one?
+//
+// Read from the **raw** config, like the `onError` and cache policies, so
+// upstream data can never switch it on or off: whether a request is safe to
+// repeat is a property of the endpoint, which is a static fact about the
+// workflow rather than something a payload decides.
+//
+// The type check is the half that was missing, and its absence inverted the
+// feature. `crashRecovery.idempotentNodeIds` asks this question to decide
+// whether the `safe` policy may re-run an indeterminate step — so an
+// `action-email` node marked `idempotent: true` was granted the exemption while
+// its runner sent no key at all. Declaring it turned "stop and ask a person"
+// into "send the email again", which is worse than never having declared it.
+//
+// A declaration a runner cannot honour is not a weaker guarantee than none. It
+// is a false one, and it is believed.
 function isEnabled(node) {
+  if (!KEYED_TYPES.has(node?.type)) return false
   const value = node?.data?.config?.idempotent
   return value === true || value === 'true'
 }
@@ -126,6 +154,7 @@ function headerFor(node, ctx) {
 module.exports = {
   HEADER,
   MAX_CHAIN,
+  KEYED_TYPES,
   isEnabled,
   rootExecutionId,
   keyFor,

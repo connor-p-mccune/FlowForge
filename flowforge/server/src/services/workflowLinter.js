@@ -18,7 +18,6 @@ const { buildAdjacency, topoSort } = require('./dagParser')
 const { analyze } = require('./expression')
 const { inferGraphTypes, checkReferences } = require('./typeInference')
 const { CACHEABLE_TYPES, DEFAULT_TTL_SECONDS } = require('./stepCache')
-const { isEnabled: isIdempotent } = require('./stepIdempotency')
 const { unresolvablePaths } = require('./redaction')
 const { compensationPlan } = require('./compensation')
 const { analyzeLineage } = require('./lineage')
@@ -778,16 +777,25 @@ function lintGraph({ nodes: rawNodes = [], edges: rawEdges = [] } = {}, { secret
   }
 
   // Step idempotency. Only the HTTP node sends the header, so declaring it
-  // anywhere else is a claim nothing acts on — and, worse, a claim the recovery
-  // policy *does* act on: it would let a lost run re-execute a step on the
-  // strength of a header that was never sent. Reported for that reason rather
-  // than for tidiness.
+  // anywhere else is a claim nothing acts on, and this is where somebody finds
+  // that out.
+  //
+  // Read from the **raw** flag rather than through `stepIdempotency.isEnabled`,
+  // and that is the whole point of the line. `isEnabled` now returns false for
+  // a node type whose runner cannot send the key — which is what stops the
+  // crash-recovery `safe` policy acting on a header that was never sent — so
+  // asking it here would make this warning agree that there is nothing to warn
+  // about, and the setting would sit in the config doing silently nothing.
+  //
+  // The runtime ignoring a declaration and the author being told about it are
+  // two different jobs, and only one of them can be done by the same predicate.
   //
   // A GET is flagged separately and softly: it is already safe to repeat, so the
   // declaration is redundant rather than wrong, and the nudge is aimed at
   // somebody who ticked it on the wrong node.
   for (const node of nodes) {
-    if (!isIdempotent(node)) continue
+    const declared = node.data?.config?.idempotent
+    if (declared !== true && declared !== 'true') continue
     if (node.type !== 'action-http') {
       issues.push(
         issue(

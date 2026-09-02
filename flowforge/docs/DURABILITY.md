@@ -157,6 +157,27 @@ party is waiting for, and an HTTP node that declares `idempotent` does
 whose **repeat is unsafe**, rather than on anything that reaches outside — which
 is the distinction that actually matters.
 
+**Only where the key is actually sent.** The declaration is refused outright on
+a node type whose runner cannot send it — an email has no header a receiving
+mail server deduplicates on, a Slack webhook post has none either, and a
+sub-workflow's effects belong to the callee, where a flag on the calling node
+cannot reach them.
+
+That restriction is the load-bearing half, because the recovery policy reads the
+same flag. Without it, `idempotent: true` on an email node was granted the
+exemption while its runner sent nothing — turning *stop and ask a person* into
+*send the email again*. A declaration a runner cannot honour is not a weaker
+guarantee than none; it is a false one, and it is believed. The keyed types are
+asserted in the test suite rather than read from the code, so adding one without
+teaching its runner to send the header fails there first.
+
+The linter warns about such a declaration **from the raw flag**, deliberately
+not through the predicate the runtime uses. Asking the runtime's predicate would
+make the linter agree there is nothing to report, and the setting would sit in
+the config doing silently nothing — which is how somebody goes on believing it.
+The runtime ignoring a declaration and the author being told about it are two
+different jobs.
+
 **What the key is derived from is the whole design.** It must be the same for
 every attempt at one logical step and different for a genuinely new request,
 which rules out every obvious candidate:
