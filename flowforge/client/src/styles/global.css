@@ -8672,6 +8672,46 @@ html, body, #root {
   color: #b45309;
 }
 
+/* — Repeat hint ————————————————————————————————————————————————————— */
+/* Shown beside the crash-recovery dropdown, whose middle option asserts that
+   this workflow's steps are idempotent. Two findings share the styling and not
+   the meaning: the retry warning is true whatever the policy says, and the
+   contradiction is about the option currently selected. */
+
+.repeat-hint {
+  font-size: 12px;
+  line-height: 1.55;
+  color: #334155;
+  background: #f8fafc;
+  border-left: 3px solid #cbd5e1;
+  border-radius: 0 5px 5px 0;
+  padding: 7px 10px;
+  margin: 6px 0 10px;
+}
+
+.repeat-hint strong { color: #0f172a; }
+.repeat-hint code { font-size: 11px; }
+
+.repeat-hint--warn {
+  background: #fef2f2;
+  border-left-color: #dc2626;
+  color: #991b1b;
+}
+
+.repeat-hint--warn strong { color: #991b1b; }
+
+.repeat-hint--clear {
+  background: #f0fdf4;
+  border-left-color: #16a34a;
+  color: #166534;
+}
+
+.repeat-hint--quiet {
+  color: var(--text-muted, #64748b);
+  background: transparent;
+  border-left-color: #e2e8f0;
+}
+
 /* — Contract gate ——————————————————————————————————————————————————— */
 /* The confirmation shown when deploying would break the workflows that call
    this one. Reuses the import-modal shell; everything below is what a list of

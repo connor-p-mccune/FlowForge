@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { apiFetch } from '../../services/api'
+import RepeatHint from './RepeatHint'
 import { useToast } from '../../hooks/useToast'
 import StatusBadgeSection from './StatusBadgeSection'
 import ChaosSection from './ChaosSection'
@@ -592,7 +593,7 @@ export default function RunSettingsPanel({ workflowId, open, onClose }) {
                 proof a copy of the thing deleted.
               </p>
 
-              <div className="run-settings__section">Crash recovery</div>              <div className="run-settings__section">Crash recovery</div>
+              <div className="run-settings__section">Crash recovery</div>
               <p className="webhook-panel__hint">
                 If the worker running this workflow stops existing — an eviction,
                 an out-of-memory kill — the run is picked up and{' '}
@@ -623,6 +624,11 @@ export default function RunSettingsPanel({ workflowId, open, onClose }) {
                   from run history.
                 </p>
               )}
+              {/* The dropdown above makes a claim about the graph. This checks
+                  it — against the option on screen rather than the saved one,
+                  because somebody selecting "always continue" is exactly who
+                  needs telling, and after they save is too late. */}
+              <RepeatHint workflowId={workflowId} policy={recoveryPolicy} />
 
               <div className="run-settings__section">Error handler</div>
               <p className="webhook-panel__hint">
