@@ -729,10 +729,23 @@ than a scatter of new checks:
   point right beside the concurrency admission it already runs — the manual and
   public-API triggers (a 409, the kill switch beating the cap because "stop"
   outranks "you're full"), replay and resume, the webhook trigger, the schedule
-  tick, and the error-handler escalation. The two silent, unattended paths
-  (webhook, schedule) additionally record `flowforge_paused_skips_total` by
-  source, because there the counter is the *only* witness that traffic hit a
-  closed door; the interactive paths told their caller directly.
+  tick, the error-handler escalation, and the **sub-workflow call**. The two
+  silent, unattended paths (webhook, schedule) additionally record
+  `flowforge_paused_skips_total` by source, because there the counter is the
+  *only* witness that traffic hit a closed door; the interactive paths told
+  their caller directly.
+- **The door that is easiest to forget.** The sub-workflow call is not a route
+  and has no request to refuse, so it was the one entry point the switch did
+  not cover — and it is the one that matters most, because a *shared* workflow
+  gets most of its traffic from callers rather than from its own trigger.
+  Pausing the utility that is melting a downstream API stopped the trickle and
+  left the flood, and reported `completed` while doing it. That is worse than
+  having no switch: somebody believed they had pulled it.
+
+  The call now fails the calling node, which is what the neighbouring
+  not-deployed check already did. Skipping it instead would produce a run that
+  omitted half its work and finished green — a lie the error branch never gets
+  to handle. Dry runs stay exempt, the same exemption every other gate makes.
 - **Two boundaries are deliberate, not incidental.** In-flight runs settle
   normally — tearing down a half-sent HTTP call is exactly what pause is *not*
   for; that's cancellation, and even that is cooperative and inter-node. And

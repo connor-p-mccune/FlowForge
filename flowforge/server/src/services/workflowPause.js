@@ -1,8 +1,19 @@
 // Workflow pause — the operational kill switch. While a workflow is paused
 // (workflows.paused_at set), no new *real* run starts anywhere: manual and
 // API triggers are refused with a 409, webhook deliveries are acknowledged
-// without firing, schedule ticks are skipped, and error-handler escalations
-// don't launch it. What pause deliberately does NOT do:
+// without firing, schedule ticks are skipped, error-handler escalations
+// don't launch it, and a **sub-workflow call fails the calling node**.
+//
+// That last one is the entry point it is easiest to forget and worst to miss.
+// A shared workflow gets most of its traffic from callers rather than from its
+// own trigger, so a switch that only closed the front door would be weakest
+// precisely on the workflows somebody is most likely to reach for it on — and
+// would report success while the flood continued, which is worse than having
+// no switch, because somebody believed they had pulled it. "Anywhere" in the
+// paragraph above is a claim, and the test suite holds it to every one of the
+// five paths.
+//
+// What pause deliberately does NOT do:
 //
 // - **In-flight runs settle normally.** Interrupting half-done work is the
 //   cancellation feature's job (and even that is cooperative, inter-node);

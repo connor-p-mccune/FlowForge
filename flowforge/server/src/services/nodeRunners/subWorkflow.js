@@ -5,6 +5,11 @@
 // {{thisNodeId.field}}). This makes a workflow a reusable building block — define
 // "send alert" once and call it from many workflows.
 //
+// A call is refused when the target is missing, in another workspace, not
+// deployed, already on the call stack, or **paused** — the last because a
+// sub-workflow call is a real run of the callee by every standard the kill
+// switch uses, and a shared workflow gets most of its traffic this way.
+//
 // Circular references are blocked via ctx.ancestorWorkflowIds: the chain of
 // workflow ids already on the call stack (the engine appends each running workflow
 // before invoking its nodes — see executionEngine.runExecution). A target already
@@ -12,6 +17,7 @@
 // — would recurse forever, so it is rejected up front.
 const { v4: uuidv4 } = require('uuid')
 const db = require('../../config/database')
+const { isPaused, PAUSED_ERROR } = require('../workflowPause')
 
 module.exports = async function runSubWorkflow(config, input, isDryRun, ctx = {}) {
   const workflowId = config?.workflowId
@@ -52,6 +58,28 @@ module.exports = async function runSubWorkflow(config, input, isDryRun, ctx = {}
 
   if (target.status !== 'deployed') {
     throw new Error('Sub-workflow is not deployed')
+  }
+
+  // The kill switch closes this door too.
+  //
+  // Pause means no new *real* run of a workflow starts anywhere, and every
+  // other entry point enforces it — manual and API triggers 409, webhook
+  // deliveries are acknowledged without firing, schedule ticks are skipped,
+  // error-handler escalations don't launch it. A sub-workflow call is a real
+  // run by every one of those standards: it writes an executions row, it fires
+  // side effects, it costs money.
+  //
+  // Leaving it out made the switch weakest exactly where it is most likely to
+  // be reached for. A shared workflow gets most of its traffic from callers,
+  // so pausing the one melting a downstream API stopped the trickle and left
+  // the flood — and reported success while doing it, which is worse than not
+  // having the switch, because somebody believed they had pulled it.
+  //
+  // Throwing rather than skipping, for the same reason the not-deployed check
+  // above throws: a run that silently omitted half its work and reported
+  // 'completed' is a lie the error branch never gets to handle.
+  if (!isDryRun && isPaused(target)) {
+    throw new Error(PAUSED_ERROR)
   }
 
   // A fresh execution for the child run, tagged with the parent execution + the

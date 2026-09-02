@@ -1,8 +1,13 @@
 // Workflow pause — the operational kill switch. While paused, no new real
 // run starts at any entry point (manual, public API, webhook, schedule,
-// error-handler escalation), in-flight semantics are untouched, and dry runs
-// stay allowed so the person debugging the incident can still test fixes.
-// Pause and resume are idempotent; the first pause wins the audit trail.
+// error-handler escalation, sub-workflow call), in-flight semantics are
+// untouched, and dry runs stay allowed so the person debugging the incident
+// can still test fixes. Pause and resume are idempotent; the first pause wins
+// the audit trail.
+//
+// "Any entry point" is a claim, and the last test in this file holds it to the
+// list rather than to whichever paths somebody remembered — the sub-workflow
+// call was missing for exactly as long as nothing counted them.
 
 const request = require('supertest')
 const { v4: uuidv4 } = require('uuid')
@@ -230,6 +235,56 @@ describe('workflow pause', () => {
 
     await authed(request(app).post(`/api/workflows/${workflowId}/resume`))
     expect(await triggerErrorHandler(executionId)).toBeTruthy()
+    db.prepare("UPDATE workflows SET status = 'draft' WHERE id = ?").run(workflowId)
+  })
+
+  it('fails a sub-workflow call to a paused workflow', async () => {
+    // The entry point that is easiest to forget and worst to miss: a shared
+    // workflow gets most of its traffic from callers, so a switch that only
+    // closed the front door would be weakest precisely where somebody reaches
+    // for it — and would report success while the flood continued.
+    db.prepare("UPDATE workflows SET status = 'deployed' WHERE id = ?").run(workflowId)
+    const caller = await authed(request(app).post(`/api/workspaces/${workspaceId}/workflows`))
+      .send({ name: 'Caller' })
+    const callerId = caller.body.workflow.id
+    db.prepare('UPDATE workflows SET graph_json = ? WHERE id = ?').run(
+      JSON.stringify({
+        nodes: [
+          { id: 't', type: 'trigger-manual', position: { x: 0, y: 0 }, data: { label: 't', config: {} } },
+          {
+            id: 'sub',
+            type: 'sub-workflow',
+            position: { x: 0, y: 0 },
+            data: { label: 'call', config: { workflowId } },
+          },
+        ],
+        edges: [{ id: 'e', source: 't', target: 'sub' }],
+      }),
+      callerId
+    )
+
+    const { runExecution } = require('../services/executionEngine')
+    const run = async () => {
+      const execId = uuidv4()
+      db.prepare(
+        "INSERT INTO executions (id, workflow_id, status, trigger_type, created_at) VALUES (?, ?, 'pending', 'manual', ?)"
+      ).run(execId, callerId, new Date().toISOString())
+      await runExecution(execId, { publish: () => {}, payload: {} })
+      return db.prepare('SELECT status FROM executions WHERE id = ?').get(execId).status
+    }
+
+    const calleeRuns = () =>
+      db.prepare('SELECT COUNT(*) n FROM executions WHERE workflow_id = ?').get(workflowId).n
+
+    await authed(request(app).post(`/api/workflows/${workflowId}/pause`))
+    const before = calleeRuns()
+    expect(await run()).toBe('failed')
+    // Nothing ran on the callee's behalf, which is the whole point. Counted as
+    // a delta because earlier tests in this file share the workflow.
+    expect(calleeRuns()).toBe(before)
+
+    await authed(request(app).post(`/api/workflows/${workflowId}/resume`))
+    expect(await run()).toBe('completed')
     db.prepare("UPDATE workflows SET status = 'draft' WHERE id = ?").run(workflowId)
   })
 })

@@ -180,6 +180,85 @@ describe('sub-workflow node — engine', () => {
     expect(childOf(child.id)).toHaveLength(0)
   })
 
+  // The kill switch has to close this door too. A shared workflow gets most of
+  // its traffic from callers, so a pause that only stopped the front door would
+  // be weakest exactly where somebody is most likely to reach for it.
+  it('fails when the target workflow is paused', async () => {
+    const userId = seedUser()
+    const wsId = seedWorkspace(userId)
+    const childWfId = insertWorkflow(uuidv4(), wsId, userId, childGraph())
+    const parentWfId = insertWorkflow(uuidv4(), wsId, userId, parentGraph(childWfId))
+    db.prepare('UPDATE workflows SET paused_at = ? WHERE id = ?').run(
+      new Date().toISOString(),
+      childWfId
+    )
+    const execId = seedExecution(parentWfId, userId)
+
+    await runExecution(execId, { publish: noop, payload: {} })
+
+    expect(getExecution(execId).status).toBe('failed')
+    expect(stepFor(execId, 'p-sub').error).toMatch(/paused/)
+    // Refused before any work: no child row, so nothing to explain away later.
+    expect(childOf(execId)).toHaveLength(0)
+  })
+
+  it('fails loudly rather than skipping the paused call and reporting success', async () => {
+    // A run that silently omitted half its work and finished 'completed' is a
+    // lie the error branch never gets a chance to handle.
+    const userId = seedUser()
+    const wsId = seedWorkspace(userId)
+    const childWfId = insertWorkflow(uuidv4(), wsId, userId, childGraph())
+    const parentWfId = insertWorkflow(uuidv4(), wsId, userId, parentGraph(childWfId))
+    db.prepare('UPDATE workflows SET paused_at = ? WHERE id = ?').run(
+      new Date().toISOString(),
+      childWfId
+    )
+    const execId = seedExecution(parentWfId, userId)
+
+    await runExecution(execId, { publish: noop, payload: {} })
+    expect(getExecution(execId).status).not.toBe('completed')
+  })
+
+  it('still calls a paused target on a dry run', async () => {
+    // The same exemption every other entry point makes: a dry run fires no side
+    // effects, and the person debugging the incident that prompted the pause
+    // needs to test the fix. Blocking it would make the switch fight its own
+    // use case.
+    const userId = seedUser()
+    const wsId = seedWorkspace(userId)
+    const childWfId = insertWorkflow(uuidv4(), wsId, userId, childGraph())
+    const parentWfId = insertWorkflow(uuidv4(), wsId, userId, parentGraph(childWfId))
+    db.prepare('UPDATE workflows SET paused_at = ? WHERE id = ?').run(
+      new Date().toISOString(),
+      childWfId
+    )
+    const execId = seedExecution(parentWfId, userId)
+
+    await runExecution(execId, { publish: noop, payload: { msg: 'hi' }, dryRun: true })
+
+    expect(getExecution(execId).status).toBe('completed')
+    expect(stepFor(execId, 'p-sub').error).toBeNull()
+  })
+
+  it('runs the target again once the pause is lifted', async () => {
+    const userId = seedUser()
+    const wsId = seedWorkspace(userId)
+    const childWfId = insertWorkflow(uuidv4(), wsId, userId, childGraph())
+    const parentWfId = insertWorkflow(uuidv4(), wsId, userId, parentGraph(childWfId))
+    db.prepare('UPDATE workflows SET paused_at = ? WHERE id = ?').run(
+      new Date().toISOString(),
+      childWfId
+    )
+    await runExecution(seedExecution(parentWfId, userId), { publish: noop, payload: {} })
+
+    db.prepare('UPDATE workflows SET paused_at = NULL WHERE id = ?').run(childWfId)
+    const execId = seedExecution(parentWfId, userId)
+    await runExecution(execId, { publish: noop, payload: { msg: 'hi' } })
+
+    expect(getExecution(execId).status).toBe('completed')
+    expect(childOf(execId)).toHaveLength(1)
+  })
+
   it('fails when the target workflow is not deployed', async () => {
     const userId = seedUser()
     const wsId = seedWorkspace(userId)
