@@ -192,3 +192,67 @@ describe('CapacityHint — the busiest hour', () => {
     expect(screen.queryByText(/busiest hour/)).not.toBeInTheDocument()
   })
 })
+
+// A sub-workflow call runs inside the caller's slot and never queues here. The
+// hint sits beside the field where the number is typed, which makes it the one
+// place where "this number governs a tenth of the traffic" has to be said.
+describe('CapacityHint - traffic the cap does not govern', () => {
+  const governed = (over) => ({
+    ...REPORT,
+    governance: { governed: 336, called: 3000, share: 0.101, callers: [], ...over },
+  })
+
+  it('says what share of the traffic the quoted wait describes', async () => {
+    apiFetch.mockResolvedValue(
+      governed({ callers: [{ workflowId: 'wf2', name: 'Order webhook' }] })
+    )
+    hint()
+    vi.advanceTimersByTime(600)
+    expect(
+      await screen.findByText(/describes 10% of the runs reaching this workflow/)
+    ).toBeInTheDocument()
+    expect(screen.getByText(/from Order webhook/)).toBeInTheDocument()
+  })
+
+  it('stays quiet when the cap governs everything', async () => {
+    apiFetch.mockResolvedValue(governed({ called: 0, share: 1 }))
+    hint()
+    vi.advanceTimersByTime(600)
+    await screen.findByText(/mean wait/)
+    expect(screen.queryByText(/never queue here/)).not.toBeInTheDocument()
+  })
+
+  it('counts the callers rather than listing them once there are too many', async () => {
+    apiFetch.mockResolvedValue(
+      governed({ callers: [1, 2, 3, 4].map((n) => ({ workflowId: `w${n}`, name: `C${n}` })) })
+    )
+    hint()
+    vi.advanceTimersByTime(600)
+    expect(await screen.findByText(/from 4 other workflows/)).toBeInTheDocument()
+  })
+
+  it('says the field barely matters rather than asking for more history', async () => {
+    // "Not enough runs" would send somebody to wait for traffic that is
+    // already arriving and simply bypassing this number.
+    apiFetch.mockResolvedValue({
+      available: false,
+      reason: 'not-governed',
+      runs: 2,
+      needed: 30,
+      windowDays: 7,
+      governance: {
+        governed: 2,
+        called: 400,
+        share: 0.005,
+        callers: [{ workflowId: 'wf2', name: 'Orders' }],
+      },
+    })
+    hint()
+    vi.advanceTimersByTime(600)
+    expect(
+      await screen.findByText(/This cap governs almost none of the traffic/)
+    ).toBeInTheDocument()
+    expect(screen.getByText(/it never queues here/)).toBeInTheDocument()
+    expect(screen.queryByText(/Not enough history/)).not.toBeInTheDocument()
+  })
+})

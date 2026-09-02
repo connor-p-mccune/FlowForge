@@ -379,3 +379,119 @@ describe('analyzeCapacity — a workflow younger than the window', () => {
     expect(measured.arrivalsPerHour).toBeCloseTo(40, 0)
   })
 })
+
+// A sub-workflow call runs inside the caller's engine loop, holding the
+// *caller's* slot. It never asks the worker for one of the callee's, so it
+// never queues and the callee's cap never sees it. Every number in this report
+// is about a queue those runs are not in.
+describe('analyzeCapacity — traffic the cap does not govern', () => {
+  // `count` child runs, each attributed to a real parent execution of `parentId`
+  // so the foreign key holds and the caller can be named.
+  function seedCalledRuns(wfId, userId, parentId, { count, serviceMs = 60000, windowDays = 7 }) {
+    const windowMs = windowDays * 86400000
+    const now = Date.now()
+    const gap = windowMs / (count + 1)
+    const insert = db.prepare(
+      `INSERT INTO executions (id, workflow_id, status, triggered_by, trigger_type,
+                               parent_execution_id, created_at, started_at, finished_at)
+       VALUES (?, ?, 'completed', ?, 'sub-workflow', ?, ?, ?, ?)`
+    )
+    for (let i = 0; i < count; i += 1) {
+      const created = now - windowMs + gap * (i + 1)
+      // A called run starts the instant it is created: there is no queue.
+      insert.run(uuidv4(), wfId, userId, parentId, iso(created), iso(created), iso(created + serviceMs))
+    }
+  }
+
+  // A caller in the same workspace, with one execution for the children to hang
+  // off, so `callers` can be read back by name.
+  function seedCaller(wfId, userId, name = 'Orders') {
+    const wsId = db.prepare('SELECT workspace_id w FROM workflows WHERE id = ?').get(wfId).w
+    const callerId = uuidv4()
+    const now = new Date().toISOString()
+    db.prepare(
+      `INSERT INTO workflows (id, workspace_id, name, graph_json, created_by, created_at, updated_at)
+       VALUES (?, ?, ?, '{"nodes":[],"edges":[]}', ?, ?, ?)`
+    ).run(callerId, wsId, name, userId, now, now)
+    const execId = uuidv4()
+    db.prepare(
+      `INSERT INTO executions (id, workflow_id, status, created_at) VALUES (?, ?, 'completed', ?)`
+    ).run(execId, callerId, now)
+    return execId
+  }
+
+  it('does not count a called run as an arrival at the queue', () => {
+    const { wfId, userId } = seedWorkflow({ cap: 2 })
+    seedRuns(wfId, userId, { count: 40 })
+    const parent = seedCaller(wfId, userId)
+    seedCalledRuns(wfId, userId, parent, { count: 400 })
+
+    const report = analyzeCapacity(wfId)
+    // Ten times the traffic, and the modelled arrival rate does not move.
+    expect(report.measured.runs).toBe(40)
+    expect(report.governance).toMatchObject({ governed: 40, called: 400 })
+  })
+
+  it('says how much of the traffic the cap is applied to', () => {
+    const { wfId, userId } = seedWorkflow({ cap: 2 })
+    seedRuns(wfId, userId, { count: 40 })
+    const parent = seedCaller(wfId, userId)
+    seedCalledRuns(wfId, userId, parent, { count: 360 })
+
+    expect(analyzeCapacity(wfId).governance.share).toBeCloseTo(0.1, 3)
+  })
+
+  it('names the workflows the ungoverned traffic came through', () => {
+    // Read from the runs that happened rather than from the call graph: a
+    // caller rewired last week should stop appearing once its runs age out.
+    const { wfId, userId } = seedWorkflow({ cap: 2 })
+    seedRuns(wfId, userId, { count: 40 })
+    seedCalledRuns(wfId, userId, seedCaller(wfId, userId, 'Refunds'), { count: 5 })
+    seedCalledRuns(wfId, userId, seedCaller(wfId, userId, 'Orders'), { count: 5 })
+
+    expect(analyzeCapacity(wfId).governance.callers.map((c) => c.name)).toEqual([
+      'Orders',
+      'Refunds',
+    ])
+  })
+
+  it('reports a fully governed workflow as fully governed', () => {
+    const { wfId, userId } = seedWorkflow({ cap: 2 })
+    seedRuns(wfId, userId, { count: 40 })
+
+    expect(analyzeCapacity(wfId).governance).toMatchObject({ called: 0, share: 1, callers: [] })
+  })
+
+  it('distinguishes "no traffic" from "no traffic this cap governs"', () => {
+    // Conflating them sends somebody to wait for history that is already there.
+    const { wfId, userId } = seedWorkflow({ cap: 2 })
+    seedRuns(wfId, userId, { count: 2 })
+    seedCalledRuns(wfId, userId, seedCaller(wfId, userId), { count: 400 })
+
+    const report = analyzeCapacity(wfId)
+    expect(report.available).toBe(false)
+    expect(report.reason).toBe('not-governed')
+    expect(report.governance.called).toBe(400)
+  })
+
+  it('still says not-enough-runs when there is genuinely nothing', () => {
+    const { wfId, userId } = seedWorkflow({ cap: 2 })
+    seedRuns(wfId, userId, { count: 2 })
+
+    expect(analyzeCapacity(wfId).reason).toBe('not-enough-runs')
+  })
+
+  it('does not let called runs fill the observed wait sample with zeros', () => {
+    // The calibration check compares the predicted wait against the recorded
+    // one. A called run starts the instant it is created, so counting it would
+    // drag the observed mean toward zero and make the model look like it was
+    // over-predicting a queue that was in fact never measured.
+    const { wfId, userId } = seedWorkflow({ cap: 2 })
+    seedRuns(wfId, userId, { count: 40, waitMs: 30000 })
+    const withoutCalls = analyzeCapacity(wfId).measured.observedWaitMeanMs
+
+    seedCalledRuns(wfId, userId, seedCaller(wfId, userId), { count: 400 })
+    expect(analyzeCapacity(wfId).measured.observedWaitMeanMs).toBe(withoutCalls)
+    expect(withoutCalls).toBeCloseTo(30000, -1)
+  })
+})

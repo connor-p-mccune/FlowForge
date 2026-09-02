@@ -209,10 +209,63 @@ keep up, and the curve then shows which one can.
 
 ---
 
+## Traffic the cap does not govern
+
+A cap is enforced by the **worker**, at pickup. The worker only ever sees
+top-level runs.
+
+A sub-workflow call does not go through it. It executes inside the caller's
+engine loop, holding the **caller's** slot, and never asks for one of the
+callee's — so a called run does not queue, does not wait, and is not subject to
+the number this report is about. A workflow that is mostly invoked as a
+subroutine therefore has a cap that governs almost nothing, and no amount of
+correct queueing theory about it would be the useful thing to say.
+
+Counting those runs was wrong in **both directions at once**:
+
+| | |
+|---|---|
+| They inflated the **arrival rate** | The model predicted a wait for traffic that never entered the queue. |
+| They filled the **observed wait sample with zeros** | A called run's `started_at` is effectively its `created_at`. |
+
+And the two errors met in the calibration block, which compares exactly those
+two numbers — so a mostly-called workflow could report `agrees` on the strength
+of traffic neither number described. That is the worst possible failure for a
+report whose whole argument is *"this model has been checked"*.
+
+So called runs are excluded from every measured figure, and `governance` carries
+the split:
+
+```json
+"governance": {
+  "governed": 336,
+  "called": 3000,
+  "share": 0.101,
+  "callers": [{ "workflowId": "…", "name": "Order webhook" }]
+}
+```
+
+`callers` is read from the runs that actually happened rather than from the
+[call graph](./ARCHITECTURE.md#cross-workflow-dependencies), so a caller rewired
+last week stops appearing once its runs age out of the window.
+
+A workflow with plenty of traffic but too little **governed** traffic reports
+`not-governed`, not `not-enough-runs`. Those two sentences send somebody to do
+entirely different things, and conflating them tells them to wait for history
+that is already arriving.
+
+> The same fact is why the [exposure report](./EXPOSURE.md) attributes a called
+> run's consequence to its caller: a run that exists because somebody else asked
+> for it belongs to them in both reports.
+
+---
+
 ## What it refuses to answer
 
 - **Fewer than 30 runs in the window.** An arrival rate measured from a handful
   of runs is a rumour, not a rate.
+- **A workflow whose traffic is mostly sub-workflow calls.** Not a shortage of
+  history — a shortage of history this cap has any say over. See above.
 - **A workflow with no cap.** It is not queueing. There is a global worker limit
   above it, but that is not this workflow's number and attributing somebody
   else's contention to this graph would be wrong.

@@ -32,6 +32,14 @@ const CAVEAT = {
   'over-predicts': 'Runs have actually waited less than this, so treat it as the generous end.',
 }
 
+// The callers ungoverned traffic came through. Named while a name still helps;
+// past three it is a list nobody reads.
+function Callers({ callers = [] }) {
+  if (callers.length === 0) return null
+  if (callers.length > 3) return <> from {callers.length} other workflows</>
+  return <> from {callers.map((c) => c.name).join(', ')}</>
+}
+
 export default function CapacityHint({ workflowId, cap }) {
   const [report, setReport] = useState(null)
 
@@ -57,8 +65,24 @@ export default function CapacityHint({ workflowId, cap }) {
   if (!report) return null
 
   if (!report.available) {
-    // Only the case worth explaining. "No cap" is what the empty field already
-    // says, and a workflow nobody has run yet does not need telling.
+    // The one case that is not about history at all: there is plenty of
+    // traffic, and this field has no say over it. Shown loudly rather than
+    // quietly, because somebody is typing a number that will not do anything.
+    if (report.reason === 'not-governed') {
+      return (
+        <p className="capacity-hint capacity-hint--over">
+          <strong>This cap governs almost none of the traffic.</strong>{' '}
+          {report.governance.called} of the{' '}
+          {report.governance.called + report.governance.governed} runs in the last{' '}
+          {report.windowDays} days arrived as sub-workflow calls
+          <Callers callers={report.governance.callers} />, and a called run executes inside the
+          caller&rsquo;s slot — it never queues here.
+        </p>
+      )
+    }
+    // Otherwise only one case is worth explaining. "No cap" is what the empty
+    // field already says, and a workflow nobody has run yet does not need
+    // telling.
     if (report.reason !== 'not-enough-runs') return null
     return (
       <p className="capacity-hint capacity-hint--quiet">
@@ -69,7 +93,7 @@ export default function CapacityHint({ workflowId, cap }) {
     )
   }
 
-  const { measured, current, peak, calibration } = report
+  const { measured, current, peak, calibration, governance } = report
 
   // The peak is worth a sentence only when it says something the mean did not.
   // A hint that always printed two numbers would train somebody to read one.
@@ -110,6 +134,16 @@ export default function CapacityHint({ workflowId, cap }) {
       )}
       {CAVEAT[calibration.verdict] && (
         <span className="capacity-hint__caveat"> {CAVEAT[calibration.verdict]}</span>
+      )}
+      {/* A stronger caveat than any the model makes about itself: the sentence
+          above can be exactly right about a queue most of the traffic is not
+          in. */}
+      {governance?.called > 0 && (
+        <span className="capacity-hint__caveat">
+          {' '}That describes {Math.round(governance.share * 100)}% of the runs reaching this
+          workflow — the other {governance.called} arrived as sub-workflow calls
+          <Callers callers={governance.callers} />, which never queue here.
+        </span>
       )}
     </p>
   )

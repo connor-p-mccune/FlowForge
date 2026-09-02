@@ -93,6 +93,52 @@ describe('capacity endpoints', () => {
       expect(res.body.current.stable).toBe(true)
     })
 
+    it('says what share of the traffic the cap governs', async () => {
+      // A pipeline acting on a wait prediction needs to know it describes a
+      // queue the traffic is actually in, so the split ships in the payload.
+      const res = await get()
+      expect(res.body.governance).toEqual({
+        governed: 336,
+        called: 0,
+        share: 1,
+        callers: [],
+      })
+    })
+
+    it('does not let a sub-workflow call move the arrival rate', async () => {
+      // A called run executes inside the caller's slot and never queues here.
+      const callerId = uuidv4()
+      db.prepare(
+        `INSERT INTO workflows (id, workspace_id, name, graph_json, status, created_by)
+         VALUES (?, ?, 'Caller', '{"nodes":[],"edges":[]}', 'deployed', ?)`
+      ).run(callerId, workspaceId, userId)
+      const parentId = uuidv4()
+      db.prepare(
+        `INSERT INTO executions (id, workflow_id, status, created_at)
+         VALUES (?, ?, 'completed', ?)`
+      ).run(parentId, callerId, iso(Date.now()))
+
+      const before = (await get()).body.measured.arrivalsPerHour
+      const insert = db.prepare(
+        `INSERT INTO executions (id, workflow_id, status, trigger_type, parent_execution_id,
+                                 created_at, started_at, finished_at)
+         VALUES (?, ?, 'completed', 'sub-workflow', ?, ?, ?, ?)`
+      )
+      for (let i = 0; i < 500; i += 1) {
+        const at = iso(Date.now() - i * 60000)
+        insert.run(uuidv4(), workflowId, parentId, at, at, iso(Date.parse(at) + 1000))
+      }
+
+      const after = (await get()).body
+      expect(after.measured.arrivalsPerHour).toBeCloseTo(before, 5)
+      expect(after.governance.called).toBe(500)
+      expect(after.governance.callers).toEqual([{ workflowId: callerId, name: 'Caller' }])
+      // Clean up so the suite's other expectations still see the seeded window.
+      db.prepare(
+        'DELETE FROM executions WHERE workflow_id = ? AND parent_execution_id IS NOT NULL'
+      ).run(workflowId)
+    })
+
     it('names the model and what M/M/c would have said', async () => {
       const res = await get()
       expect(res.body.model.name).toBe('Allen–Cunneen G/G/c')

@@ -307,3 +307,67 @@ test('does not repeat the peak sizing when it matches the average one', async ()
   )
   assert.doesNotMatch(out, /during the busiest hour too/)
 })
+
+// A sub-workflow call runs inside the caller's slot and never queues here, so
+// the callee's cap never sees it. A report that quoted a wait without saying
+// so would be describing a queue most of the traffic is not in.
+test('says how much of the traffic the cap actually governs', async () => {
+  const { out } = await run({
+    ...HEALTHY,
+    governance: {
+      governed: 336,
+      called: 3000,
+      share: 0.101,
+      callers: [{ workflowId: 'wf-2', name: 'Orders webhook' }],
+    },
+  })
+  assert.match(out, /10% of the runs reaching this workflow are governed by this cap/)
+  assert.match(out, /3000 arrived as sub-workflow calls from Orders webhook/)
+  // Above the model check, because it is a stronger caveat than any the model
+  // makes about itself.
+  assert.ok(out.indexOf('governed by this cap') < out.indexOf('Model check'))
+})
+
+test('stays quiet about governance when the cap governs everything', async () => {
+  const { out } = await run({
+    ...HEALTHY,
+    governance: { governed: 336, called: 0, share: 1, callers: [] },
+  })
+  assert.ok(!out.includes('governed by this cap'), out)
+})
+
+test('counts the callers instead of listing them once there are too many', async () => {
+  const { out } = await run({
+    ...HEALTHY,
+    governance: {
+      governed: 336,
+      called: 900,
+      share: 0.27,
+      callers: [1, 2, 3, 4, 5].map((n) => ({ workflowId: `wf-${n}`, name: `Caller ${n}` })),
+    },
+  })
+  assert.match(out, /from 5 other workflows/)
+  assert.ok(!out.includes('Caller 1'), out)
+})
+
+test('distinguishes traffic it has not seen from traffic this cap does not govern', async () => {
+  // "Wait for more history" is the wrong instruction when the history is
+  // already arriving and simply bypassing the cap.
+  const { code, out } = await run({
+    available: false,
+    reason: 'not-governed',
+    runs: 2,
+    needed: 30,
+    windowDays: 7,
+    governance: {
+      governed: 2,
+      called: 400,
+      share: 0.005,
+      callers: [{ workflowId: 'wf-2', name: 'Orders' }],
+    },
+  })
+  assert.equal(code, 0)
+  assert.match(out, /governs 2 of the 402 runs that reached this workflow in 7 days/)
+  assert.match(out, /never queues and this cap never sees it/)
+  assert.ok(!out.includes('a rumour, not a rate'), out)
+})

@@ -30,6 +30,16 @@
 // grows without bound rather than quoting a large finite wait — which would be
 // describing a transient on the way to infinity. And a workflow with no cap set
 // is not queueing at all, so there is no queue to model.
+//
+// **What the cap does not cover.** A sub-workflow call runs inside the
+// caller's engine loop, holding the *caller's* slot; it never asks the worker
+// for one of the callee's, so it never queues and the callee's cap never sees
+// it. A workflow that is mostly invoked as a subroutine therefore has a cap
+// that governs almost nothing, and the honest report of it is not a wait
+// prediction — it is that sentence. `governance` carries the split on every
+// payload, and a workflow with enough traffic but not enough *governed*
+// traffic is `not-governed` rather than `not-enough-runs`, because those two
+// send somebody to do entirely different things.
 
 const db = require('../config/database')
 const queueing = require('./queueing')
@@ -52,20 +62,64 @@ const CURVE_SPAN = 8
 const isoAgo = (days) => new Date(Date.now() - days * 86400000).toISOString()
 const msOf = (iso) => (iso ? Date.parse(iso) : NaN)
 
-// The runs the measurement is built from.
+// The runs the measurement is built from — which is to say, the runs the cap
+// actually governs.
 //
 // Dry runs are excluded because they never occupied a slot. Runs still in
 // flight are excluded from the *service* sample (their duration is unknown) but
 // kept in the *arrival* sample, because they did arrive — dropping them would
 // under-count exactly the traffic a saturated queue is drowning in.
+//
+// **Sub-workflow child runs are excluded too**, and that one is not a modelling
+// nicety. The cap is enforced by the worker at pickup, and the worker only ever
+// sees top-level runs: a sub-workflow call executes inside the parent's engine
+// loop, holding the *parent's* slot and never asking for one of the callee's.
+// So a called run does not queue, does not wait, and is not subject to the
+// number this report is about.
+//
+// Including them was wrong in both directions at once. They inflated the
+// arrival rate the model predicts a wait from, and — because their
+// `started_at` is effectively their `created_at` — they filled the observed
+// wait sample with zeros. The calibration check compares those two, so a
+// mostly-called workflow could report agreement built entirely out of traffic
+// neither number describes.
 function sampleRuns(workflowId, windowDays) {
   return db.prepare(`
     SELECT created_at, started_at, finished_at, status
     FROM executions
     WHERE workflow_id = ? AND created_at >= ?
       AND (trigger_type IS NULL OR trigger_type != 'dry-run')
+      AND parent_execution_id IS NULL
     ORDER BY created_at ASC
   `).all(workflowId, isoAgo(windowDays))
+}
+
+// What reaches this workflow without passing the cap, and who sent it.
+//
+// Read from the executions themselves rather than from the call graph: this is
+// traffic that happened, not traffic a graph says could. A workflow whose
+// callers were rewired last week should report last week's callers as gone.
+function calledTraffic(workflowId, windowDays) {
+  const since = isoAgo(windowDays)
+  const { n } = db
+    .prepare(
+      `SELECT COUNT(*) AS n FROM executions
+        WHERE workflow_id = ? AND created_at >= ?
+          AND (trigger_type IS NULL OR trigger_type != 'dry-run')
+          AND parent_execution_id IS NOT NULL`
+    )
+    .get(workflowId, since)
+  const callers = db
+    .prepare(
+      `SELECT DISTINCT pw.id AS id, pw.name AS name
+         FROM executions e
+         JOIN executions p ON p.id = e.parent_execution_id
+         JOIN workflows pw ON pw.id = p.workflow_id
+        WHERE e.workflow_id = ? AND e.created_at >= ?
+        ORDER BY pw.name`
+    )
+    .all(workflowId, since)
+  return { runs: n, callers }
 }
 
 // What the history says, before any model touches it.
@@ -226,15 +280,33 @@ function analyzeCapacity(
   }
 
   const rows = sampleRuns(workflowId, windowDays)
+  const called = calledTraffic(workflowId, windowDays)
+  const reaching = rows.length + called.runs
+  // How much of what reaches this workflow the cap is actually applied to.
+  // Reported on every payload, including the ones that decline to model
+  // anything, because "the cap governs a tenth of the traffic" is the more
+  // useful sentence in exactly the cases the model has least to say.
+  const governance = {
+    governed: rows.length,
+    called: called.runs,
+    share: reaching > 0 ? Number((rows.length / reaching).toFixed(3)) : 1,
+    callers: called.callers.map((c) => ({ workflowId: c.id, name: c.name })),
+  }
+
   if (rows.length < MIN_RUNS) {
     return {
       available: false,
-      reason: 'not-enough-runs',
+      // Two different sentences, and conflating them sends somebody to wait for
+      // history that is already there. A workflow called thirty times and
+      // triggered twice does not lack traffic; it lacks traffic this cap has
+      // any say over.
+      reason: called.runs >= MIN_RUNS ? 'not-governed' : 'not-enough-runs',
       workflowId,
       name: workflow.name,
       runs: rows.length,
       needed: MIN_RUNS,
       windowDays,
+      governance,
     }
   }
 
@@ -311,6 +383,10 @@ function analyzeCapacity(
     workflowId,
     name: workflow.name,
     cap: configured,
+    // What the cap governs, beside what it was measured on. A number this
+    // report has just sized against a tenth of the traffic is a number whose
+    // limits belong in the payload, not only in the docs.
+    governance,
     measured,
     current,
     peak,

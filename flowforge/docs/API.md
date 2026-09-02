@@ -1319,6 +1319,9 @@ the database: how often runs arrive (`created_at`), how long each holds a slot
   "workflowId": "6f0c…",
   "name": "Order processing",
   "cap": 4,
+  "governance": {
+    "governed": 336, "called": 0, "share": 1.0, "callers": []
+  },
   "measured": {
     "runs": 336, "windowDays": 7, "arrivalsPerHour": 2,
     "serviceMeanMs": 1800000, "cvSquaredService": 4.1, "cvSquaredArrival": 1.0,
@@ -1372,10 +1375,27 @@ the number to read before anything is on fire. Past saturation `stable` is
 finite number there would be describing a transient on the way to infinity.
 
 `?target=<ms>` sizes a recommendation, `?cap=N` prices a hypothetical cap
-without changing the stored one, `?days=N` widens the window. Below 30 runs the
-report refuses (`reason: "not-enough-runs"`) rather than measuring an arrival
-rate from a handful of events. `flowforge capacity --target` gates a build on
-it. See [docs/CAPACITY.md](./CAPACITY.md).
+**Check `governance` before acting on any of it.** A cap is enforced by the
+worker at pickup, and the worker only ever sees top-level runs: a sub-workflow
+call executes inside the caller's engine loop, holding the *caller's* slot, and
+never asks for one of the callee's. So a called run never queues here and this
+cap never sees it.
+
+Counting those runs was wrong in both directions at once — they inflated the
+arrival rate the model predicts a wait from, and, because a called run's
+`started_at` is effectively its `created_at`, they filled the observed-wait
+sample with zeros. `calibration` compares exactly those two numbers, so a
+mostly-called workflow could report `agrees` on traffic neither described. They
+are now excluded from every figure in `measured`, and `governance.share` says
+what fraction of the arriving traffic the rest of the payload describes.
+`callers` is read from the runs that happened rather than from the call graph.
+
+`?target=<ms>` sizes a recommendation, `?cap=N` prices a hypothetical cap
+without changing the stored one, `?days=N` widens the window. Below 30 governed
+runs the report refuses rather than measuring an arrival rate from a handful of
+events — `reason: "not-governed"` when the traffic is there but arriving through
+callers, `"not-enough-runs"` when there is genuinely none. `flowforge capacity
+--target` gates a build on it. See [docs/CAPACITY.md](./CAPACITY.md).
 
 Requires the `read` scope.
 

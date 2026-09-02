@@ -29,6 +29,15 @@ const pct = (value) => (value == null ? '—' : `${(value * 100).toFixed(0)}%`)
 
 const when = (iso) => (iso ? String(iso).replace('T', ' ').slice(0, 16) : 'an unknown time')
 
+// The callers ungoverned traffic came through, named where there are few enough
+// for a name to be useful. Past three it is a list nobody reads, so it becomes
+// a count.
+function callerList(callers = []) {
+  if (callers.length === 0) return ''
+  if (callers.length > 3) return ` from ${callers.length} other workflows`
+  return ` from ${callers.map((c) => c.name).join(', ')}`
+}
+
 // How the model did against the window it was measured from. This is the line
 // that says whether the rest of the output is worth acting on.
 const VERDICT = {
@@ -62,6 +71,25 @@ function unavailable(report, ctx) {
         `Not enough history: ${report.runs} run(s) in the last ${report.windowDays} days, ` +
           `${report.needed} needed.\n` +
           gray('  An arrival rate measured from a handful of runs is a rumour, not a rate.')
+      )
+      return 0
+    case 'not-governed':
+      // Not a shortage of history — a shortage of history this cap has any say
+      // over. Telling somebody to wait for traffic that is already arriving is
+      // the wrong instruction, so this gets its own sentence.
+      ctx.log(
+        yellow(
+          `This cap governs ${report.governance.governed} of the ` +
+            `${report.governance.governed + report.governance.called} runs that reached this ` +
+            `workflow in ${report.windowDays} days.`
+        ) +
+          '\n' +
+          gray(
+            '  The rest arrived as sub-workflow calls' +
+              callerList(report.governance.callers) +
+              '. A called run executes inside the caller\'s slot and never asks for one of\n' +
+              '  this workflow\'s, so it never queues and this cap never sees it.'
+          )
       )
       return 0
     case 'no-service-time':
@@ -100,6 +128,23 @@ module.exports = async function capacity(args, ctx) {
         `${ms(measured.serviceMeanMs)} mean service time`
     )
   )
+
+  // Printed above the model check, not below it, because it is a stronger
+  // caveat than any of the model's own: a wait predicted accurately for a
+  // tenth of the traffic is still a wait most runs never experience.
+  const gov = report.governance
+  if (gov && gov.called > 0) {
+    ctx.log(
+      yellow(
+        `  ${pct(gov.share)} of the runs reaching this workflow are governed by this cap.`
+      ) +
+        gray(
+          `\n  ${gov.called} arrived as sub-workflow calls${callerList(gov.callers)} — a called ` +
+            'run executes inside the\n  caller\'s slot and never queues here. Everything below ' +
+            `describes the other ${gov.governed}.`
+        )
+    )
+  }
 
   // Leads, because everything below is worth exactly as much as this says.
   ctx.log('')

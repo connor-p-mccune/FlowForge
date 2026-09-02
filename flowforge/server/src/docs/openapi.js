@@ -1949,7 +1949,13 @@ const spec = {
           '`recommendation.confident: false`.\n\n' +
           'Past saturation `current.stable` is false and the waits are null: ' +
           'the backlog grows without bound, and a large finite number there ' +
-          'would be describing a transient on the way to infinity. ' +
+          'would be describing a transient on the way to infinity.\n\n' +
+          'Check `governance` before acting on any of it. A sub-workflow call ' +
+          'executes inside the caller’s slot and never queues here, so a ' +
+          'workflow that is mostly invoked as a subroutine has a cap that ' +
+          'governs almost nothing. Those runs are excluded from every measured ' +
+          'figure, and a workflow with plenty of traffic but too little ' +
+          '*governed* traffic is `not-governed` rather than `not-enough-runs`. ' +
           'Requires the `read` scope.',
         operationId: 'getWorkflowCapacity',
         parameters: [
@@ -1980,7 +1986,8 @@ const spec = {
           200: {
             description:
               'The capacity report, or `available: false` with a reason ' +
-              '(`not-found`, `no-cap`, `not-enough-runs`, `no-service-time`).',
+              '(`not-found`, `no-cap`, `not-enough-runs`, `not-governed`, ' +
+              '`no-service-time`).',
             content: {
               'application/json': {
                 schema: { $ref: '#/components/schemas/CapacityReport' },
@@ -4153,11 +4160,40 @@ const spec = {
           reason: {
             type: 'string',
             nullable: true,
-            enum: ['not-found', 'no-cap', 'not-enough-runs', 'no-service-time'],
+            enum: ['not-found', 'no-cap', 'not-enough-runs', 'not-governed', 'no-service-time'],
           },
           workflowId: { type: 'string' },
           name: { type: 'string' },
           cap: { type: 'integer', description: 'The cap the report was computed for.' },
+          governance: {
+            type: 'object',
+            description:
+              'How much of what reaches this workflow the cap is applied to. A ' +
+              'sub-workflow call runs inside the caller’s engine loop holding the ' +
+              'caller’s slot; it never asks the worker for one of the callee’s, so it ' +
+              'never queues and this cap never sees it. Those runs are excluded from ' +
+              'every figure in `measured` — including them inflated the arrival rate ' +
+              'and filled the observed-wait sample with zeros at the same time. ' +
+              'Present on unavailable payloads too.',
+            properties: {
+              governed: { type: 'integer', description: 'Runs the cap applies to — what was modelled.' },
+              called: { type: 'integer', description: 'Runs that arrived as sub-workflow calls.' },
+              share: {
+                type: 'number',
+                description: 'governed ÷ (governed + called). 1 when nothing calls this workflow.',
+              },
+              callers: {
+                type: 'array',
+                description:
+                  'The workflows the ungoverned traffic came through, read from the runs ' +
+                  'that happened rather than from the call graph.',
+                items: {
+                  type: 'object',
+                  properties: { workflowId: { type: 'string' }, name: { type: 'string' } },
+                },
+              },
+            },
+          },
           measured: {
             type: 'object',
             description: 'What history says, before any model touches it.',
