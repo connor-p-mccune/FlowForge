@@ -99,6 +99,7 @@ const { snapshotVersion } = require('../services/canaryMonitor')
 const { forbidViewer, memberRole } = require('../services/workspaceRoles')
 const { exposureReport, WINDOW_DAYS: EXPOSURE_WINDOW_DAYS } = require('../services/exposure')
 const { analyzeRepeats } = require('../services/repeats')
+const { analyzeSchedule, HORIZON_DAYS } = require('../services/scheduleCollision')
 const { recoveryPolicy: recoveryPolicyOf } = require('../services/crashRecovery')
 const { isPaused, PAUSED_ERROR, pauseWorkflow, resumeWorkflow } = require('../services/workflowPause')
 const { computeDependencies } = require('../services/workflowDependencies')
@@ -274,6 +275,34 @@ router.get('/workspaces/:id/exposure', tokenAuth('read'), (req, res) => {
     const raw = parseInt(req.query.days, 10)
     const days = Number.isFinite(raw) ? Math.min(Math.max(raw, 1), 90) : EXPOSURE_WINDOW_DAYS
     res.json(exposureReport(req.params.id, { days }))
+  } catch (err) {
+    console.error(err)
+    res.status(500).json({ error: 'Internal server error' })
+  }
+})
+
+// GET /api/v1/workspaces/:id/schedule — what a week of this workspace's cron
+// schedules does to the machine they share (services/scheduleCollision.js).
+//
+// Every other timing endpoint here is about one thing: the parallelism cap
+// inside a run, the queue in front of a workflow, the longest chain in an
+// execution. This is the load they all land on, and it is not random — cron is
+// written by people, and people write round numbers.
+//
+// `?capacity=N` is how a caller says what the machine can do. Nothing here
+// invents it: the worker's concurrency is a deployment fact this process may
+// not share, and a verdict built on a guessed capacity is worse than no
+// verdict. `read` scope; any member.
+router.get('/workspaces/:id/schedule', tokenAuth('read'), (req, res) => {
+  try {
+    if (memberRole(req.params.id, req.user.id) === null) {
+      return res.status(404).json({ error: 'Workspace not found' })
+    }
+    const rawDays = parseInt(req.query.days, 10)
+    const horizonDays = Number.isFinite(rawDays) ? Math.min(Math.max(rawDays, 1), 31) : HORIZON_DAYS
+    const rawCapacity = parseInt(req.query.capacity, 10)
+    const capacity = Number.isFinite(rawCapacity) && rawCapacity > 0 ? rawCapacity : null
+    res.json(analyzeSchedule(req.params.id, { horizonDays, capacity }))
   } catch (err) {
     console.error(err)
     res.status(500).json({ error: 'Internal server error' })

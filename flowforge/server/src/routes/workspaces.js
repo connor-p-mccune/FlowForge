@@ -9,6 +9,7 @@ const { forbidViewer } = require('../services/workspaceRoles')
 const { recordAudit } = require('../services/auditLog')
 const trustStore = require('../services/trustStore')
 const { exposureReport, WINDOW_DAYS } = require('../services/exposure')
+const { analyzeSchedule, HORIZON_DAYS } = require('../services/scheduleCollision')
 
 const router = express.Router()
 
@@ -448,6 +449,35 @@ router.get('/workspaces/:id/exposure', auth, (req, res) => {
     const days = Number.isFinite(raw) ? Math.min(Math.max(raw, 1), 90) : WINDOW_DAYS
 
     res.json(exposureReport(req.params.id, { days }))
+  } catch (err) {
+    console.error(err)
+    res.status(500).json({ error: 'Internal server error' })
+  }
+})
+
+// GET /api/workspaces/:id/schedule — what a week of this workspace's cron
+// schedules does to the machine they share (services/scheduleCollision.js).
+//
+// Any member may read it, viewers included: it is derived from the workflow
+// list and the run history a member can already see, arranged into a curve.
+router.get('/workspaces/:id/schedule', auth, (req, res) => {
+  try {
+    const member = db
+      .prepare('SELECT 1 FROM workspace_members WHERE workspace_id = ? AND user_id = ?')
+      .get(req.params.id, req.user.id)
+    if (!member) return res.status(404).json({ error: 'Workspace not found' })
+
+    const rawDays = parseInt(req.query.days, 10)
+    // A horizon under a day cannot contain a daily schedule, and one over a
+    // month is expanding a cron nobody has looked at since.
+    const horizonDays = Number.isFinite(rawDays) ? Math.min(Math.max(rawDays, 1), 31) : HORIZON_DAYS
+
+    // The caller says what the machine can do; nothing here invents it. The
+    // worker's concurrency is a deployment fact this process may not share.
+    const rawCapacity = parseInt(req.query.capacity, 10)
+    const capacity = Number.isFinite(rawCapacity) && rawCapacity > 0 ? rawCapacity : null
+
+    res.json(analyzeSchedule(req.params.id, { horizonDays, capacity }))
   } catch (err) {
     console.error(err)
     res.status(500).json({ error: 'Internal server error' })

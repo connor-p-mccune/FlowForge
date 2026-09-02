@@ -315,6 +315,169 @@ const spec = {
         },
       },
     },
+    '/workspaces/{workspaceId}/schedule': {
+      get: {
+        tags: ['workspaces'],
+        summary: 'What a week of this workspace’s schedules does to the machine',
+        description:
+          'Every other timing endpoint here is about one thing: the parallelism ' +
+          'cap inside a run, the queue in front of a workflow, the longest chain ' +
+          'in an execution. This is the load they all land on — and it is not ' +
+          'random, because cron is written by people and people write round ' +
+          'numbers. Nobody schedules a report for 03:47.\n\n' +
+          'Each schedule is expanded over the horizon **in its own time zone**, ' +
+          'the one the scheduler already honours, so two workflows both set to ' +
+          '"midnight" in different zones do not collide and two set to different ' +
+          'hours may. An occurrence occupies `[start, start + mean duration)`, ' +
+          'and `peak.concurrent` is the largest number of those intervals ' +
+          'overlapping at any instant — not the number starting together, which ' +
+          'would miss the 40-minute job still holding a worker when the 00:30 ' +
+          'job lands.\n\n' +
+          '`suggestion` is the single move that flattens the peak most, ' +
+          'constrained to whole minutes inside the hour a workflow already fires ' +
+          'in: a daily 00:00 job moved to 00:17 still runs nightly, and one moved ' +
+          'to 01:00 is a different schedule than its author asked for.\n\n' +
+          '`clock` reports how much of the schedule lands on the hour, which is ' +
+          'the finding rather than a curiosity — a peak that is an accident of ' +
+          'everyone independently picking midnight has a cheap fix, and one whose ' +
+          'load is genuinely that high does not.\n\n' +
+          'A scheduled workflow that has never run has no measured duration and ' +
+          'is **excluded**, with `summary.lowerBound: true`. Substituting a ' +
+          'nominal duration would produce a peak built partly out of a number ' +
+          'nobody measured. `?capacity=N` is the only way a verdict is reached: ' +
+          'the worker concurrency is a deployment fact this process may not ' +
+          'share, so `summary.overCapacity` is null until you say. Requires the ' +
+          '`read` scope.',
+        operationId: 'getWorkspaceSchedule',
+        parameters: [
+          { name: 'workspaceId', in: 'path', required: true, schema: { type: 'string' } },
+          {
+            name: 'days',
+            in: 'query',
+            required: false,
+            schema: { type: 'integer', minimum: 1, maximum: 31, default: 7 },
+            description: 'Horizon to expand the crons over. Clamped to [1, 31].',
+          },
+          {
+            name: 'capacity',
+            in: 'query',
+            required: false,
+            schema: { type: 'integer', minimum: 1 },
+            description: 'Concurrent runs the deployment can serve. Sets `summary.overCapacity`.',
+          },
+        ],
+        responses: {
+          200: {
+            description:
+              'The schedule report, or `available: false` with a reason ' +
+              '(`no-schedules`, `nothing-measured`).',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    available: { type: 'boolean' },
+                    reason: {
+                      type: 'string',
+                      nullable: true,
+                      enum: ['no-schedules', 'nothing-measured'],
+                    },
+                    workspaceId: { type: 'string' },
+                    horizonDays: { type: 'integer' },
+                    schedules: {
+                      type: 'array',
+                      items: {
+                        type: 'object',
+                        properties: {
+                          workflowId: { type: 'string' },
+                          name: { type: 'string' },
+                          cron: { type: 'string' },
+                          timeZone: { type: 'string', nullable: true },
+                          durationMs: { type: 'integer' },
+                          occurrences: { type: 'integer' },
+                        },
+                      },
+                    },
+                    peak: {
+                      type: 'object',
+                      properties: {
+                        concurrent: { type: 'integer' },
+                        at: { type: 'string', format: 'date-time', nullable: true },
+                        workflows: {
+                          type: 'array',
+                          description: 'The workflows live at the peak instant.',
+                          items: {
+                            type: 'object',
+                            properties: {
+                              workflowId: { type: 'string' },
+                              name: { type: 'string' },
+                              cron: { type: 'string' },
+                              timeZone: { type: 'string', nullable: true },
+                              durationMs: { type: 'integer' },
+                            },
+                          },
+                        },
+                      },
+                    },
+                    suggestion: {
+                      type: 'object',
+                      nullable: true,
+                      description: 'The one move that flattens the peak most, or null.',
+                      properties: {
+                        workflowId: { type: 'string' },
+                        name: { type: 'string' },
+                        minutes: { type: 'integer' },
+                        peakBefore: { type: 'integer' },
+                        peakAfter: { type: 'integer' },
+                      },
+                    },
+                    clock: {
+                      type: 'object',
+                      properties: {
+                        occurrences: { type: 'integer' },
+                        onTheHour: { type: 'integer' },
+                        atMidnight: { type: 'integer' },
+                        share: { type: 'number' },
+                      },
+                    },
+                    summary: {
+                      type: 'object',
+                      properties: {
+                        scheduled: { type: 'integer' },
+                        occurrences: { type: 'integer' },
+                        unmeasured: { type: 'integer' },
+                        lowerBound: {
+                          type: 'boolean',
+                          description:
+                            'True when a scheduled workflow was excluded for want of a duration.',
+                        },
+                        capacity: { type: 'integer', nullable: true },
+                        overCapacity: { type: 'boolean', nullable: true },
+                      },
+                    },
+                    unmeasured: {
+                      type: 'array',
+                      items: {
+                        type: 'object',
+                        properties: {
+                          workflowId: { type: 'string' },
+                          name: { type: 'string' },
+                          cron: { type: 'string' },
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+          401: { $ref: '#/components/responses/Unauthorized' },
+          403: { $ref: '#/components/responses/Forbidden' },
+          404: { $ref: '#/components/responses/NotFound' },
+          429: { $ref: '#/components/responses/RateLimited' },
+        },
+      },
+    },
     '/workspaces/{workspaceId}/workflows/import': {
       post: {
         tags: ['workspaces'],
