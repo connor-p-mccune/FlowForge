@@ -253,3 +253,94 @@ describe('seed — the problems a real workspace has', () => {
     expect(verdicts).toEqual(['safe', 'unsafe'])
   })
 })
+
+// A sub-workflow is one box on the canvas and an entire other workflow at run
+// time, and three reports turn on that distinction. Without a call in the demo
+// data all three answer honestly and say nothing.
+describe('seed — across the sub-workflow boundary', () => {
+  const { reachableEffects } = require('../services/reach')
+  const { analyzeRepeats } = require('../services/repeats')
+  const { exposureReport } = require('../services/exposure')
+  const { subWorkflowGraphs } = require('../services/reachLookup')
+
+  const resolve = () => subWorkflowGraphs(result.wsId)
+  const wfNamed = (name) => db.prepare('SELECT * FROM workflows WHERE name = ?').get(name)
+
+  it('gives every graph unique node ids', () => {
+    // Two nodes sharing an id is not a graph, and the analyses that walk one
+    // fail quietly rather than loudly.
+    for (const w of db
+      .prepare('SELECT name, graph_json FROM workflows WHERE workspace_id = ?')
+      .all(result.wsId)) {
+      const ids = JSON.parse(w.graph_json).nodes.map((n) => n.id)
+      expect(new Set(ids).size).toBe(ids.length)
+    }
+  })
+
+  it('points each call at a workflow that is actually there', () => {
+    const ids = new Set(
+      db.prepare('SELECT id FROM workflows WHERE workspace_id = ?').all(result.wsId).map((r) => r.id)
+    )
+    let calls = 0
+    for (const w of db
+      .prepare('SELECT graph_json FROM workflows WHERE workspace_id = ?')
+      .all(result.wsId)) {
+      for (const n of JSON.parse(w.graph_json).nodes) {
+        if (n.type !== 'sub-workflow') continue
+        calls += 1
+        expect(ids.has(n.data.config.workflowId)).toBe(true)
+      }
+    }
+    expect(calls).toBeGreaterThanOrEqual(2)
+  })
+
+  it('records a child run for each call, nested under the calling step', () => {
+    const children = db
+      .prepare(
+        `SELECT COUNT(*) n FROM executions
+          WHERE parent_execution_id IS NOT NULL AND parent_node_id IS NOT NULL`
+      )
+      .get().n
+    expect(children).toBeGreaterThan(0)
+    // And they are attributed to the callee, not to the caller.
+    const callee = wfNamed('Notify Customer')
+    const forCallee = db
+      .prepare('SELECT COUNT(*) n FROM executions WHERE workflow_id = ? AND parent_execution_id IS NOT NULL')
+      .get(callee.id).n
+    expect(forCallee).toBe(children)
+  })
+
+  it('carries the caller’s gate onto an effect inside the callee', () => {
+    // The conjunction the whole transitive report turns on: the email lives in
+    // Notify Customer and is unconditional there, and it must not report as
+    // `always` once it is reached through an approval.
+    const refund = wfNamed('Refund Approval')
+    const r = resolve()
+    const reach = reachableEffects(r(refund.id), r)
+    const inherited = reach.effects.find((e) => e.via.length > 0)
+    expect(inherited).toBeTruthy()
+    expect(inherited.always).toBe(false)
+    expect(inherited.conditions.map((c) => c.label)).toContain('Approve Refund')
+    expect(reach.summary.inherited).toBe(1)
+  })
+
+  it('inherits the callee’s worst repeat verdict at the call site', () => {
+    const refund = wfNamed('Refund Approval')
+    const r = resolve()
+    const call = analyzeRepeats(r(refund.id), r).steps.find((s) => s.calls)
+    expect(call).toMatchObject({ verdict: 'unsafe', retried: false })
+    expect(call.calls.name).toBe('Notify Customer')
+  })
+
+  it('names the callers a shared workflow is reached through', () => {
+    const row = exposureReport(result.wsId, { days: 30 }).workflows.find(
+      (w) => w.name === 'Notify Customer'
+    )
+    expect(row.calledBy.sort()).toEqual(['Refund Approval', 'Support Ticket Router'])
+    expect(row.runs.called).toBeGreaterThan(0)
+  })
+
+  it('counts what happens off the canvas', () => {
+    expect(exposureReport(result.wsId, { days: 30 }).summary.offCanvas).toBeGreaterThan(0)
+  })
+})

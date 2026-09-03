@@ -237,7 +237,52 @@ function buildWorkflows() {
     },
   }
 
-  return [wf1, wf2, wf3, wf4, wf5]
+  // 6. Notify Customer (the shared callee)
+  //
+  // Extracted because two workflows needed the same thing, which is how a
+  // sub-workflow actually comes to exist. Its own trigger is manual — somebody
+  // re-sending a notice by hand — so most of its runs arrive through callers
+  // and a few do not. That split is the one the exposure report has to get
+  // right: a run made on somebody else's behalf is *their* consequence, and a
+  // callee that scored zero without saying why would read as harmless.
+  nodeSeq = 0
+  const t6 = node('trigger-manual', 'Notice Requested', 0)
+  const e6 = node('action-email', 'Send Notice', 200)
+  const wf6 = {
+    name: 'Notify Customer',
+    nodes: [t6, e6],
+    edges: [edge(t6.id, e6.id)],
+    lambda: 0.4,
+    failRate: 0.03,
+    plan: () => ({ path: [t6, e6], skipped: [] }),
+  }
+
+  // The two callers. `calls` is patched with the callee's real id once the rows
+  // exist — the graph has to name a workflow that is already in the database,
+  // and a seed that generated the id first would be asserting an ordering the
+  // product does not have.
+  const sub5 = node('sub-workflow', 'Tell the customer', 640, 'notify')
+  wf5.nodes.push(sub5)
+  wf5.edges.push(edge(h5.id, sub5.id))
+  wf5.calls = { nodeId: sub5.id, target: 'Notify Customer' }
+  const plan5 = wf5.plan
+  wf5.plan = () => {
+    const inner = plan5()
+    // Only an approved refund notifies; a declined one takes the other branch.
+    return inner.path.includes(h5)
+      ? { path: [...inner.path, sub5], skipped: inner.skipped }
+      : { path: inner.path, skipped: [...inner.skipped, sub5] }
+  }
+
+  // Explicit id: nodeSeq restarted for the callee above, so an auto-generated
+  // one here would collide with a node this graph already has.
+  const sub3 = node('sub-workflow', 'Tell the customer', 800, 'notify')
+  wf3.nodes.push(sub3)
+  wf3.edges.push(edge(s3.id, sub3.id))
+  wf3.calls = { nodeId: sub3.id, target: 'Notify Customer' }
+  wf3.plan = () => ({ path: [t3, x3, cl3, s3, sub3], skipped: [] })
+
+  return [wf1, wf2, wf3, wf4, wf5, wf6]
 }
 
 // A plausible output for each node type. This is the difference between a demo
@@ -498,16 +543,35 @@ function seed({ days = DAYS } = {}) {
     const workflowIds = {}
     const workflows = buildWorkflows()
 
+    // Two passes, because a sub-workflow node has to name a workflow that is
+    // already there. Every row is written first, then the call targets are
+    // filled in, and only then does anything run — which is also the order the
+    // product enforces: the runner refuses a target it cannot resolve.
+    const createdAt = new Date(todayMidnight - days * DAY_MS).toISOString()
     for (const wf of workflows) {
       const workflowId = uuidv4()
-      const createdAt = new Date(todayMidnight - days * DAY_MS).toISOString()
+      workflowIds[wf.name] = workflowId
       insertWorkflow.run(
         workflowId, wsId, wf.name,
         JSON.stringify({ nodes: wf.nodes, edges: wf.edges }),
         wf.cap ?? null, wf.subjectPath ?? null, wf.recoveryPolicy ?? 'safe',
         userId, createdAt, nowIso
       )
-      workflowIds[wf.name] = workflowId
+    }
+
+    const setGraph = db.prepare('UPDATE workflows SET graph_json = ? WHERE id = ?')
+    for (const wf of workflows) {
+      if (!wf.calls) continue
+      const target = workflowIds[wf.calls.target]
+      const called = wf.nodes.find((n) => n.id === wf.calls.nodeId)
+      called.data.config = { workflowId: target, workflowName: wf.calls.target }
+      setGraph.run(JSON.stringify({ nodes: wf.nodes, edges: wf.edges }), workflowIds[wf.name])
+    }
+
+    const calleeByName = Object.fromEntries(workflows.map((w) => [w.name, w]))
+
+    for (const wf of workflows) {
+      const workflowId = workflowIds[wf.name]
 
       // Slots live for the whole 90 days, not per day: a run that starts at
       // 17:55 and takes two hours is still holding one the next morning.
@@ -563,6 +627,36 @@ function seed({ days = DAYS } = {}) {
               s.startedAt, s.finishedAt
             )
             stepCount++
+          }
+
+          // A sub-workflow call is a real run of the callee, with its own row
+          // pointing back at the step that made it. Seeding the parent alone
+          // would leave the call tree empty and the callee looking untouched —
+          // and it is the row's `parent_execution_id` that three reports read
+          // to decide whose consequence a run is.
+          const callStep = wf.calls && rows.find((s) => s.n.id === wf.calls.nodeId)
+          if (callStep && callStep.status === 'succeeded') {
+            const callee = calleeByName[wf.calls.target]
+            const childStart = Date.parse(callStep.startedAt)
+            const { rows: childRows } = buildSteps(callee.plan(), false, childStart, payload)
+            const childId = uuidv4()
+            insertExecution.run(
+              childId, workflowIds[wf.calls.target], 'completed', userId, 'sub-workflow',
+              null, payload ? JSON.stringify(payload) : null,
+              callStep.startedAt, callStep.startedAt, callStep.finishedAt
+            )
+            execCount++
+            for (const s of childRows) {
+              insertStep.run(
+                uuidv4(), childId, s.n.id, s.n.type, s.status, s.error,
+                s.output ? JSON.stringify(s.output) : null,
+                s.startedAt, s.finishedAt
+              )
+              stepCount++
+            }
+            // The child run is nested under the calling step.
+            db.prepare('UPDATE executions SET parent_execution_id = ?, parent_node_id = ? WHERE id = ?')
+              .run(executionId, wf.calls.nodeId, childId)
           }
         }
       }
