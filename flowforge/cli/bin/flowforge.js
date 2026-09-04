@@ -31,6 +31,7 @@ const COMMANDS = {
   effects: require('../src/commands/effects'),
   exposure: require('../src/commands/exposure'),
   repeats: require('../src/commands/repeats'),
+  impact: require('../src/commands/impact'),
   converge: require('../src/commands/converge'),
   capacity: require('../src/commands/capacity'),
   contract: require('../src/commands/contract'),
@@ -82,6 +83,7 @@ Usage:
   flowforge lint <workflow-id> [file] [--strict]   Lint the live workflow — or an exported file against its workspace (exits non-zero on errors)
   flowforge verify <id> [--facts] [--suggest]      Check declared path invariants over every execution the graph admits (exits non-zero on a break)
   flowforge paths <workflow-id> [--cover]          Which branches an input can take, and what payload takes them (exits non-zero on a dead branch)
+  flowforge impact <id> <file> [--strict]          What this change *means* — every static analysis over both graphs, and the difference in their verdicts (exits non-zero when another gate would refuse it; --strict on the rest)
   flowforge preview <id> <file> [--runs N] [--strict] Replay recent runs against a candidate definition — what would this change do? (--strict fails on any behaviour change)
   flowforge debug <id> --break <node> [--step]     Run with breakpoints and report what each node was about to do (--stop parks it)
   flowforge types <workflow-id> [--node <id>]      Inferred data schema per node — what each one produces (exits non-zero on a type error)

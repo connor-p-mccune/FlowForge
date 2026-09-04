@@ -1079,6 +1079,70 @@ peak whose load is genuinely that high does not.
 renders the same thing and exits non-zero over budget. Requires the `read`
 scope; any member. See [docs/SCHEDULE-LOAD.md](./SCHEDULE-LOAD.md).
 
+### What does this change mean?
+
+```bash
+curl -s -X POST https://your-flowforge-host/api/v1/workflows/6f0c…/impact   -H "Authorization: Bearer $FLOWFORGE_TOKEN"   -H 'Content-Type: application/json'   -d '{"graph_data": {"nodes": [...], "edges": [...]}}'
+```
+
+Four checks look at a candidate before it ships. `diff` says the file drifted,
+`lint` says it is valid, `contract` says whether it breaks its callers,
+`preview` says what last week's traffic would have done. None says what the edit
+does to the properties somebody was relying on.
+
+And the change that matters most is structurally tiny: delete one edge, wire a
+trigger straight at the node behind it, and an approval is no longer in front of
+a payment. Every node still lints. Nothing is unreachable. `preview` sees the
+same outputs, because the payloads that reached the charge before still reach
+it.
+
+```json
+{
+  "available": true,
+  "name": "Orders",
+  "findings": [
+    { "code": "ungated-effect", "severity": 100, "blocking": false, "nodeId": "charge",
+      "summary": "Charge card now runs on every run",
+      "detail": "It was gated before this change; nothing in the graph gates it now." },
+    { "code": "guarantee-broken", "severity": 90, "blocking": true,
+      "summary": "A declared guarantee no longer holds",
+      "detail": "Charge card never runs unless Approve ran first — it is broken by this change." }
+  ],
+  "resolved": [
+    { "code": "effect-gated", "summary": "Fetch price is now gated", "subject": "wf1:fetch" }
+  ],
+  "nodes": { "added": [], "removed": [] },
+  "summary": { "introduced": 2, "resolved": 1, "blocking": 1, "review": 1, "verdict": "blocked" }
+}
+```
+
+**Only what changed.** A property already broken before the edit is not a
+finding of the edit — a review that relists every pre-existing problem is one
+nobody reads twice, and the one new line gets lost among the forty old ones.
+`resolved` is reported for the same reason in reverse: a reviewer told only
+about the bad half cannot tell a refactor from a regression.
+
+**The ungating leads, above the broken guarantee.** A broken guarantee is
+already refused at deploy — somebody declared the property, so the gate exists
+and this is a second opinion. An effect that quietly loses its gate is legal,
+nobody declared anything about it, and this is the only place it will ever be
+said. `summary.review` counts exactly that tier; `summary.blocking` counts the
+findings some other gate already stops.
+
+**Identity.** Two findings are the same finding when they share a code and a
+node id. That breaks when a node is deleted and redrawn — one reads as resolved
+and another as introduced — so `nodes.added` and `nodes.removed` are published
+beside the findings. Guessing at the correspondence from labels or positions
+would be inventing an identity the graph does not carry.
+
+Sub-workflow calls are expanded on both sides, so adding a call reports what the
+call reaches rather than that a call appeared. Body is `graph_data` or a `flow`
+string, the same document contract lint and preview take.
+
+`flowforge impact <id> <file>` renders the same thing, exits non-zero on a
+`blocking` finding and with `--strict` on any. Requires the `read` scope. See
+[docs/IMPACT.md](./IMPACT.md).
+
 ### What happens twice?
 
 ```bash
