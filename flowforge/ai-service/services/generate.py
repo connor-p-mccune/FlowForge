@@ -11,14 +11,39 @@ import os
 
 from services import llm
 
-# Keep in sync with the client's nodeTypes map. Membership here is what makes a
-# generated graph "loadable": each type renders on the canvas.
+# What the generator may emit. Membership here is what makes a generated graph
+# "loadable": each type renders on the canvas.
+#
+# This is one half of the client's nodeTypes map, and the other half is
+# NOT_GENERATED below. Between them they must account for *every* type the
+# canvas can render — a cross-package test asserts exactly that, so adding a
+# node type to the client forces a decision here rather than silently shrinking
+# what a generated workflow can be.
 KNOWN_NODE_TYPES = {
     'trigger-manual', 'trigger-webhook', 'trigger-schedule',
     'action-http', 'action-email', 'action-slack', 'action-delay',
-    'transform', 'condition',
+    'transform', 'filter', 'map', 'aggregate',
+    'condition', 'switch', 'validate', 'approval',
     'ai-prompt', 'ai-classify', 'ai-extract',
     'output-log', 'output-return',
+}
+
+# Types the canvas renders and the generator deliberately will not emit. Each
+# for a reason, and the reason is why this is a list rather than an oversight:
+NOT_GENERATED = {
+    # Both need the id of another workflow, which does not exist yet and which
+    # the model has no way to know. A generated call to a workflow that is not
+    # there fails at run time and lints as a dangling reference.
+    'sub-workflow',
+    'for-each',
+    # Parks the run until an external system POSTs to a one-time URL, which some
+    # *upstream* node has to send. A naive one is a workflow that waits forever
+    # and is indistinguishable from a partner that never replied — precisely the
+    # shape the callback-liveness check exists to refuse.
+    'wait-callback',
+    # A sticky note. It renders and it never runs, so generating one would be
+    # decoration presented as automation.
+    'note',
 }
 
 # gpt-4o (not -mini): turning a vague sentence into a correct, connected graph
@@ -65,7 +90,13 @@ Node types and their config fields:
 - action-slack     config: {"webhookUrl":"https://hooks.slack.com/...","text":""}
 - action-delay     config: {"durationMs":1000}
 - transform        config: {"template":"{\\"field\\":\\"{{id.value}}\\"}"}   JSON template; resolves placeholders into a new object.
+- filter           config: {"source":"{{id.body}}","predicate":"price > 10"}  Keeps the list items an FXL predicate accepts. Item fields are in scope directly.
+- map              config: {"source":"{{id.body}}","mapping":"{ id: item.id, total: price * qty }"}  Reshapes each item with an FXL expression.
+- aggregate        config: {"source":"{{id.body}}","value":"price * qty","groupBy":"item.region"}  Rolls a list up; value and groupBy are optional FXL expressions.
 - condition        config: {"left":"{{id.field}}","operator":"equals","right":"value"}  operator is one of equals, not_equals, contains, greater_than, less_than. A condition has TWO outgoing edges: one with "sourceHandle":"true" and one with "sourceHandle":"false".
+- switch           config: {"cases":[{"label":"high","expression":"amount > 1000"},{"label":"low","expression":"true"}]}  Multi-way routing: the FIRST matching case wins. One outgoing edge per case with "sourceHandle" set to that case's label, plus optionally one with "sourceHandle":"default".
+- validate         config: {"schema":"{\\"type\\":\\"object\\",\\"required\\":[\\"email\\"]}"}  Checks the input against a JSON Schema. TWO outgoing edges: "sourceHandle":"valid" and "sourceHandle":"invalid".
+- approval         config: {"message":"Approve this refund?","timeoutMinutes":1440}  Pauses the run until a workspace member responds. TWO outgoing edges: "sourceHandle":"approved" and "sourceHandle":"rejected". Use this whenever the description asks for sign-off, review, or a human to confirm something before it happens.
 - ai-prompt        config: {"prompt":"...","system":""}  Returns {text}; use {{id.text}} downstream.
 - ai-classify      config: {"text":"{{id.field}}","labels":"urgent, normal, spam"}  Returns {label}; use {{id.label}}.
 - ai-extract       config: {"text":"{{id.field}}","fields":"name, email, amount"}  Returns {data:{...}}; use {{id.data.name}}.

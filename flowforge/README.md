@@ -64,7 +64,7 @@ one of them started as something the obvious implementation got wrong.
 </details>
 
 Everything above is covered by tests: **196 server suites (2,932 tests)**, 73
-client files (737), 32 CLI files (425 tests), and 84 pytest tests for the AI
+client files (737), 32 CLI files (425 tests), and 118 pytest tests for the AI
 service — lint and all four run on every push. The file counts are held to the
 repository by a test, because a number in a README is exactly the kind of thing
 that goes quietly wrong.
