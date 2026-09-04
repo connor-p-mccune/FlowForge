@@ -5,7 +5,7 @@ between them they answer everything except the question.
 
 | | Answers |
 |---|---|
-| [`diff`](./API.md#compare-a-workflow-against-a-file) | The live workflow and your file have drifted, here. |
+| [`diff`](./API.md#detect-drift-against-an-exported-document) | The live workflow and your file have drifted, here. |
 | [`lint`](./ARCHITECTURE.md#static-analysis-the-linter) | The candidate is valid. |
 | [`contract`](./CONTRACTS.md) | It does or does not break the workflows that call it. |
 | [`preview`](./PREVIEW.md) | Last week's traffic would have produced these outputs. |

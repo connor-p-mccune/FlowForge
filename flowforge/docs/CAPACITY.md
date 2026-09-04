@@ -246,7 +246,7 @@ the split:
 ```
 
 `callers` is read from the runs that actually happened rather than from the
-[call graph](./ARCHITECTURE.md#cross-workflow-dependencies), so a caller rewired
+[call graph](./ARCHITECTURE.md#cross-workflow-dependency-analysis), so a caller rewired
 last week stops appearing once its runs age out of the window.
 
 A workflow with plenty of traffic but too little **governed** traffic reports
