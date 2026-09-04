@@ -129,7 +129,8 @@ export default function ExecutionHistory({ workflowId, nodes, autoOpenId }) {
   const [workflowUpdatedAt, setWorkflowUpdatedAt] = useState(null)
   const [selected, setSelected] = useState(null) // { execution, steps }
   const [detailView, setDetailView] = useState('steps') // 'steps' | 'timeline'
-  const [schedule, setSchedule] = useState(null) // GET .../schedule, for the timeline's queueing overlay
+  const [schedule, setSchedule] = useState(null)
+  const [explanations, setExplanations] = useState(null) // GET .../schedule, for the timeline's queueing overlay
   const [pendingReplay, setPendingReplay] = useState(null) // execution awaiting confirm
   const [pendingResume, setPendingResume] = useState(null) // execution awaiting confirm
   const [replaying, setReplaying] = useState(false)
@@ -221,6 +222,29 @@ export default function ExecutionHistory({ workflowId, nodes, autoOpenId }) {
       cancelled = true
     }
   }, [detailView, selectedId])
+
+  // Why each skipped step was skipped. A second read over the same run, made
+  // once a run is open rather than for every row in the list — and best-effort,
+  // because a panel that failed to render its steps over a missing explanation
+  // would have traded the answer for the question.
+  useEffect(() => {
+    if (!selectedId) return undefined
+    let cancelled = false
+    setExplanations(null)
+    apiFetch(`/api/executions/${selectedId}/explain`)
+      .then((report) => {
+        if (cancelled || !report?.available) return
+        const byNode = {}
+        for (const step of report.steps) if (step.because) byNode[step.nodeId] = step.because
+        setExplanations(byNode)
+      })
+      .catch(() => {
+        /* the step list is complete without it */
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [selectedId])
 
   async function handleReplay() {
     if (!pendingReplay) return
@@ -376,6 +400,7 @@ export default function ExecutionHistory({ workflowId, nodes, autoOpenId }) {
             steps={selected.steps}
             nodes={nodes}
             childExecutionsByNode={selected.childExecutionsByNode}
+            explanations={explanations}
           />
         )}
         {/* Below the steps, because it happened after them: the run failed

@@ -61,7 +61,33 @@ function ApprovalGate({ approval }) {
 // paired with `onRespondApproval`, a running approval step grows inline
 // Approve / Reject controls. `pendingCallbacks` (optional) maps a nodeId → its
 // waiting callback ({ url, expiresAt }) for the same treatment.
-export function StepList({ steps, nodes, childExecutionsByNode, pendingApprovals, onRespondApproval, pendingCallbacks }) {
+// Why a step did not run, shown under the step somebody is already looking at.
+//
+// The run panel's whole job is answering "what happened", and for a skipped
+// step it has always answered with the word `skipped` — which is the fact the
+// person reading it already had. This is the sentence they came for.
+function SkipReason({ because }) {
+  if (!because) return null
+  return (
+    <p className="step__because">
+      <span className="step__because-cause">{because.label}</span> was{' '}
+      <span className="step__because-outcome">{String(because.outcome)}</span>, and that branch does
+      not reach it.
+      {because.expression && (
+        <span className="step__because-expr">
+          {because.expression}
+          {/* The values are read out of the recorded input, not re-derived — so
+              `not set` really does mean the field was absent rather than
+              falsy, which is most of what a 3am investigation is about. */}
+          {because.reads.length > 0 &&
+            ` — ${because.reads.map((r) => `${r.path} was ${r.value}`).join(', ')}`}
+        </span>
+      )}
+    </p>
+  )
+}
+
+export function StepList({ steps, nodes, childExecutionsByNode, pendingApprovals, onRespondApproval, pendingCallbacks, explanations }) {
   // Prefer the canvas node's label; nested child steps belong to another workflow
   // whose nodes aren't on this canvas, so fall back to the step's node type, then id.
   const labelFor = (step) =>
@@ -87,6 +113,7 @@ export function StepList({ steps, nodes, childExecutionsByNode, pendingApprovals
                 <pre>{s.error || JSON.stringify(s.output, null, 2)}</pre>
               </details>
             )}
+            {s.status === 'skipped' && <SkipReason because={explanations?.[s.nodeId]} />}
             {callback && <CallbackWaiting callback={callback} />}
             {approval && onRespondApproval && (
               <div className="approval-actions">

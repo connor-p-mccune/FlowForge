@@ -8783,6 +8783,31 @@ html, body, #root {
   max-width: 520px;
 }
 
+/* — Why a step was skipped ——————————————————————————————————————————— */
+/* The run panel has always answered "what happened" for a skipped step with
+   the word `skipped`, which is the fact the reader already had. This is the
+   sentence they came for, under the step they are already looking at. */
+
+.step__because {
+  margin: 4px 0 0 8px;
+  padding-left: 8px;
+  border-left: 2px solid #e2e8f0;
+  font-size: 12px;
+  line-height: 1.55;
+  color: #64748b;
+}
+
+.step__because-cause { color: #0f172a; font-weight: 600; }
+.step__because-outcome { color: #4f46e5; font-weight: 600; }
+
+.step__because-expr {
+  display: block;
+  margin-top: 2px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  color: #475569;
+}
+
 /* — Impact gate ————————————————————————————————————————————————————— */
 /* Shown at deploy, beside the contract gate and before it. The contract gate
    is about somebody else's workflow breaking; this is the author's own change
