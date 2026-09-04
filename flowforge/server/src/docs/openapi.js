@@ -2544,6 +2544,144 @@ const spec = {
         },
       },
     },
+    '/executions/{executionId}/explain': {
+      get: {
+        tags: ['executions'],
+        summary: 'Why did this run do what it did?',
+        description:
+          'The question every workflow tool is asked and none of them answers. ' +
+          'The run says `completed`. The email step says `skipped`. Everything ' +
+          'is green and the customer did not get their receipt.\n\n' +
+          'Answering it needs three things this API already had separately: what ' +
+          'the run did (`execution_steps`, including the rows settled `skipped` ' +
+          'for nodes a branch went past), what gates what (control dependence, ' +
+          'the same analysis `/effects` uses), and which way each gate actually ' +
+          'went (the decision node’s own recorded output).\n\n' +
+          'Each skipped step carries `because`: the decision that closed the ' +
+          'path to it, the outcome that decision took, and — for an FXL ' +
+          'condition — the expression and the values it read. Those come out of ' +
+          'the recorded input rather than being re-derived: the expression is ' +
+          'pure and the row is already there. A left/right comparison reports no ' +
+          'operands, because those are `{{…}}` templates resolved against a ' +
+          'scope spanning every prior node and that scope is not recorded per ' +
+          'step; reconstructing it would be inventing a value and printing it ' +
+          'as a fact.\n\n' +
+          'Where several gates could have closed a path, the **deepest** is ' +
+          'named — the last one the run passed. Everything upstream of it is why ' +
+          '*that* gate was reached, which is the next question. ' +
+          '`summary.unexplained` counts skipped steps this could not attribute, ' +
+          'because a report claiming to explain everything that quietly does not ' +
+          'is worse than one that says which rows it could not.\n\n' +
+          'This is the runtime counterpart to `/effects`: that says what a run ' +
+          '*could* do and what would have to be true first, this says what one ' +
+          'run *did*. Requires the `read` scope.',
+        operationId: 'explainExecution',
+        parameters: [{ $ref: '#/components/parameters/ExecutionId' }],
+        responses: {
+          200: {
+            description:
+              'The explanation, or `available: false` with a reason ' +
+              '(`not-found`, `workflow-gone`, `unreadable-graph`, `empty`).',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    available: { type: 'boolean' },
+                    reason: {
+                      type: 'string',
+                      nullable: true,
+                      enum: ['not-found', 'workflow-gone', 'unreadable-graph', 'empty'],
+                    },
+                    executionId: { type: 'string' },
+                    workflowId: { type: 'string' },
+                    name: { type: 'string' },
+                    status: { $ref: '#/components/schemas/ExecutionStatus' },
+                    steps: {
+                      type: 'array',
+                      items: {
+                        type: 'object',
+                        properties: {
+                          nodeId: { type: 'string' },
+                          label: { type: 'string' },
+                          type: { type: 'string' },
+                          status: {
+                            type: 'string',
+                            enum: ['succeeded', 'failed', 'skipped', 'pending', 'running', 'not-reached'],
+                          },
+                          error: { type: 'string', nullable: true },
+                          because: {
+                            type: 'object',
+                            nullable: true,
+                            description: 'The decision that closed the path to this node.',
+                            properties: {
+                              nodeId: { type: 'string' },
+                              label: { type: 'string' },
+                              outcome: { type: 'string', nullable: true },
+                              expression: { type: 'string', nullable: true },
+                              reads: {
+                                type: 'array',
+                                items: {
+                                  type: 'object',
+                                  properties: {
+                                    path: { type: 'string' },
+                                    value: {
+                                      type: 'string',
+                                      description:
+                                        'Rendered for reading, and `not set` for a field the ' +
+                                        'input did not have — which is not the same as false.',
+                                    },
+                                  },
+                                },
+                              },
+                            },
+                          },
+                        },
+                      },
+                    },
+                    decisions: {
+                      type: 'array',
+                      items: {
+                        type: 'object',
+                        properties: {
+                          nodeId: { type: 'string' },
+                          label: { type: 'string' },
+                          type: { type: 'string' },
+                          status: { type: 'string' },
+                          outcome: { type: 'string', nullable: true },
+                          expression: { type: 'string', nullable: true },
+                          reads: { type: 'array', items: { type: 'object' } },
+                          closed: {
+                            type: 'array',
+                            items: { type: 'string' },
+                            description: 'The outcomes this decision ruled out.',
+                          },
+                        },
+                      },
+                    },
+                    summary: {
+                      type: 'object',
+                      properties: {
+                        ran: { type: 'integer' },
+                        skipped: { type: 'integer' },
+                        failed: { type: 'integer' },
+                        unreached: { type: 'integer' },
+                        decisions: { type: 'integer' },
+                        unexplained: { type: 'integer' },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+          401: { $ref: '#/components/responses/Unauthorized' },
+          403: { $ref: '#/components/responses/Forbidden' },
+          404: { $ref: '#/components/responses/NotFound' },
+          429: { $ref: '#/components/responses/RateLimited' },
+        },
+      },
+    },
     '/workflows/{workflowId}/impact': {
       post: {
         tags: ['workflows'],

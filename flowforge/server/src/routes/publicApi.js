@@ -101,6 +101,7 @@ const { exposureReport, WINDOW_DAYS: EXPOSURE_WINDOW_DAYS } = require('../servic
 const { analyzeRepeats } = require('../services/repeats')
 const { analyzeSchedule, HORIZON_DAYS } = require('../services/scheduleCollision')
 const { analyzeImpact } = require('../services/changeImpact')
+const { explainRun } = require('../services/runExplain')
 const { recoveryPolicy: recoveryPolicyOf } = require('../services/crashRecovery')
 const { isPaused, PAUSED_ERROR, pauseWorkflow, resumeWorkflow } = require('../services/workflowPause')
 const { computeDependencies } = require('../services/workflowDependencies')
@@ -1830,6 +1831,32 @@ router.post('/executions/:id/breaks/:breakId/resume', tokenAuth('trigger'), (req
       return res.status(409).json({ error: `This break was already ${result.status}` })
     }
     res.status(202).json({ ok: true })
+  } catch (err) {
+    console.error(err)
+    res.status(500).json({ error: 'Internal server error' })
+  }
+})
+
+// GET /api/v1/executions/:id/explain — why this run did what it did
+// (services/runExplain.js).
+//
+// The question every workflow tool is asked and none answers: the run says
+// completed, the email step says skipped, and the customer did not get their
+// receipt. This names the decision that closed the path, and for an FXL
+// condition the values it read to decide — read out of the recorded input
+// rather than re-derived, because the expression is pure and the row is there.
+//
+// The runtime counterpart to `/effects`: that says what a run *could* do and
+// what would have to be true first, this says what one run *did* and which of
+// those conditions decided it. `read` scope.
+router.get('/executions/:id/explain', tokenAuth('read'), (req, res) => {
+  try {
+    const execution = db.prepare('SELECT workflow_id FROM executions WHERE id = ?').get(req.params.id)
+    if (!execution) return res.status(404).json({ error: 'Execution not found' })
+    if (!getWorkflowForMember(execution.workflow_id, req.user.id)) {
+      return res.status(404).json({ error: 'Execution not found' })
+    }
+    res.json(explainRun(req.params.id))
   } catch (err) {
     console.error(err)
     res.status(500).json({ error: 'Internal server error' })

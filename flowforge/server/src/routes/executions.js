@@ -11,6 +11,7 @@ const { compareRuns } = require('../services/runComparison')
 const { isValidPriority, resolvePriority, enqueueOpts } = require('../services/runPriority')
 const { forbidViewer } = require('../services/workspaceRoles')
 const { isPaused, PAUSED_ERROR } = require('../services/workflowPause')
+const { explainRun } = require('../services/runExplain')
 const { rollbackExecution } = require('../services/executionEngine')
 const { recordAudit } = require('../services/auditLog')
 const { parseDebugRequest, resumeBreak, listBreaks } = require('../services/debugger')
@@ -462,6 +463,31 @@ router.get('/executions/:id/trace', auth, (req, res) => {
       .all(execution.id)
 
     res.json(buildTrace(execution, steps, workflow))
+  } catch (err) {
+    console.error(err)
+    res.status(500).json({ error: 'Internal server error' })
+  }
+})
+
+// GET /api/executions/:id/explain — why this run did what it did
+// (services/runExplain.js).
+//
+// The question every workflow tool is asked and none of them answers: the run
+// says completed, the email step says skipped, and the customer did not get
+// their receipt. This names the decision that closed the path and, for an FXL
+// condition, the values it read to decide.
+//
+// The runtime counterpart to the effect report: that one says what a run *could*
+// do and what would have to be true first, this says what one run *did* and
+// which of those conditions decided it.
+router.get('/executions/:id/explain', auth, (req, res) => {
+  try {
+    const execution = db.prepare('SELECT workflow_id FROM executions WHERE id = ?').get(req.params.id)
+    if (!execution) return res.status(404).json({ error: 'Execution not found' })
+    if (!getWorkflowForMember(execution.workflow_id, req.user.id)) {
+      return res.status(404).json({ error: 'Execution not found' })
+    }
+    res.json(explainRun(req.params.id))
   } catch (err) {
     console.error(err)
     res.status(500).json({ error: 'Internal server error' })

@@ -31,6 +31,7 @@ describe('GET /api/v1/openapi.json', () => {
       '/executions/{executionId}/breaks/{breakId}/resume',
       '/executions/{executionId}/cancel',
       '/executions/{executionId}/compare/{otherExecutionId}',
+      '/executions/{executionId}/explain',
       '/executions/{executionId}/resume',
       '/executions/{executionId}/rollback',
       '/executions/{executionId}/schedule',
