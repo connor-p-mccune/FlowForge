@@ -92,3 +92,27 @@ def test_the_prompt_documents_every_type_it_may_emit(node_type):
     from services.generate import _INSTRUCTIONS
 
     assert f'- {node_type} ' in _INSTRUCTIONS, f'{node_type} is generatable but undocumented'
+
+
+def test_the_suggester_offers_what_the_generator_can_build():
+    """One list, not two.
+
+    The suggester kept its own — shorter — copy: no schedule trigger, no return
+    node, and none of the branching nodes, so the builder could never suggest
+    putting an approval in front of the payment it had just helped somebody
+    add. Two lists of the same thing is one list and one stale copy, and which
+    one is stale is decided by whichever was edited last.
+    """
+    from services.suggestion import AVAILABLE_NODE_TYPES
+
+    offered = {t.strip() for t in AVAILABLE_NODE_TYPES.split(',')}
+    assert offered == KNOWN_NODE_TYPES
+
+
+def test_the_suggester_prompt_is_stable_across_calls():
+    """An unordered set would reshuffle the sentence on every call, which makes
+    a cached completion a coin toss and a diff of two prompts unreadable."""
+    from services.suggestion import AVAILABLE_NODE_TYPES
+
+    expected = ', '.join(sorted(KNOWN_NODE_TYPES))
+    assert expected == AVAILABLE_NODE_TYPES
