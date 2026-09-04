@@ -1079,6 +1079,71 @@ peak whose load is genuinely that high does not.
 renders the same thing and exits non-zero over budget. Requires the `read`
 scope; any member. See [docs/SCHEDULE-LOAD.md](./SCHEDULE-LOAD.md).
 
+### Why did this run do what it did?
+
+```bash
+curl -s https://your-flowforge-host/api/v1/executions/e57a…/explain   -H "Authorization: Bearer $FLOWFORGE_TOKEN"
+```
+
+The question every workflow tool is asked and none of them answers. The run says
+`completed`. The email step says `skipped`. Everything is green and the customer
+did not get their receipt — and the run history hands back the fact the person
+asking already had.
+
+```json
+{
+  "available": true,
+  "name": "Orders",
+  "status": "completed",
+  "steps": [
+    { "nodeId": "log", "label": "Log it", "status": "succeeded" },
+    { "nodeId": "mail", "label": "Send receipt", "status": "skipped",
+      "because": {
+        "nodeId": "risky", "label": "High risk?", "outcome": "true",
+        "expression": "total > 100",
+        "reads": [{ "path": "total", "value": "850" }]
+      } }
+  ],
+  "decisions": [
+    { "nodeId": "risky", "label": "High risk?", "status": "succeeded",
+      "outcome": "true", "closed": ["false"],
+      "expression": "total > 100",
+      "reads": [{ "path": "total", "value": "850" }] }
+  ],
+  "summary": { "ran": 3, "skipped": 2, "failed": 0, "unreached": 0,
+               "decisions": 1, "unexplained": 0 }
+}
+```
+
+**This is the runtime counterpart to [`/effects`](#what-a-run-can-do).** That one
+says what a run *could* do and what would have to be true first; this says what
+one run *did*, and which of those conditions decided it. Same control
+dependence, read in the other direction — which is why it works for a condition,
+a switch, a validate gate, an approval, a wait-callback and a per-node error
+branch without knowing what any of them are.
+
+**It names the deepest gate, not every gate.** A node can be dominated by
+several decisions, and listing them all is an audit trail rather than an answer.
+The last gate the run passed is the one somebody would point at; everything
+upstream of it is why *that* gate was reached, which is the next question.
+
+**The values come out of the row.** An FXL expression is pure and its scope is
+the step's recorded input, so `reads` is read rather than re-derived. A field the
+input did not have reports `not set` — the difference between "the value was
+falsy" and "the field was absent" is most of what a 3am investigation is about.
+
+**A left/right comparison reports no operands.** Those are `{{…}}` templates
+resolved against a scope spanning every prior node's output, and that scope is
+not recorded per step. Reconstructing it would be inventing a value and printing
+it as a fact.
+
+`summary.unexplained` counts skipped steps no settled decision accounts for,
+because a report claiming to explain everything that quietly does not is worse
+than one that says which rows it could not.
+
+`flowforge explain <exec-id> [--node <id>]` renders the same thing. Requires the
+`read` scope. See [docs/EXPLAIN.md](./EXPLAIN.md).
+
 ### What does this change mean?
 
 ```bash

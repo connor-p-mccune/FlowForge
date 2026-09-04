@@ -56,6 +56,7 @@ const COMMANDS = {
   test: require('../src/commands/test'),
   run: require('../src/commands/run'),
   compare: require('../src/commands/compare'),
+  explain: require('../src/commands/explain'),
   cancel: require('../src/commands/cancel'),
   resume: require('../src/commands/resume'),
   rollback: require('../src/commands/rollback'),
@@ -116,6 +117,7 @@ Usage:
   flowforge test <workflow-id> [--junit <file>]    Run the workflow's test scenarios (exits non-zero on failure)
   flowforge run <execution-id> [--watch]           One run with its steps
   flowforge compare <execution-id> <execution-id>  Diff two runs node by node
+  flowforge explain <execution-id> [--node <id>]   Why this run did what it did — the decision that closed each path, and the values it read
   flowforge cancel <execution-id>                  Stop a queued or running run
   flowforge resume <execution-id> [--watch]        Re-run only the failed part of a run
   flowforge rollback <execution-id> [--yes]        Undo a failed run's side effects (previews unless --yes)
