@@ -2544,6 +2544,155 @@ const spec = {
         },
       },
     },
+    '/workflows/{workflowId}/impact': {
+      post: {
+        tags: ['workflows'],
+        summary: 'What does this change mean?',
+        description:
+          'The promotion gate the other checks add up to. `lint` says whether ' +
+          'the candidate is valid, `contract` whether it breaks its callers, ' +
+          '`preview` what last week’s traffic would have done. None of them ' +
+          'says what the edit does to the properties somebody was relying on — ' +
+          'and the change that matters most is the one that is structurally ' +
+          'tiny. Deleting one edge and wiring a trigger at the node behind it ' +
+          'removes an approval from a payment path, and passes every other ' +
+          'check there is.\n\n' +
+          'So every static analysis runs over **both** graphs and the ' +
+          'difference in their verdicts is the answer.\n\n' +
+          '**Only what changed.** A property already broken before the edit is ' +
+          'not a finding of the edit. A review that relists every pre-existing ' +
+          'problem on every change is one nobody reads twice, and the one new ' +
+          'line gets lost among the forty old ones. `resolved` is reported for ' +
+          'the same reason in reverse: a reviewer told only about the bad half ' +
+          'cannot tell a refactor from a regression.\n\n' +
+          '`summary.verdict` is `blocked` when a finding is one some other gate ' +
+          'already refuses (a broken guarantee, an introduced lint error), ' +
+          '`review` when every finding is legal and deployable — which is the ' +
+          'tier this report exists for — and `clear` when nothing changed.\n\n' +
+          '**Identity.** Two findings are the same finding when they share a ' +
+          'code and a node id. That breaks when a node is deleted and redrawn: ' +
+          'one reads as resolved and another as introduced. `nodes.added` and ' +
+          '`nodes.removed` are published so a reviewer can see it; guessing at ' +
+          'the correspondence by label or position would be inventing an ' +
+          'identity the graph does not carry.\n\n' +
+          'Body is `graph_data` or a `flow` string, the same document contract ' +
+          'lint and preview take. Requires the `read` scope.',
+        operationId: 'analyzeWorkflowImpact',
+        parameters: [{ $ref: '#/components/parameters/WorkflowId' }],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                properties: {
+                  graph_data: {
+                    type: 'object',
+                    properties: {
+                      nodes: { type: 'array', items: { type: 'object' } },
+                      edges: { type: 'array', items: { type: 'object' } },
+                    },
+                  },
+                  flow: {
+                    type: 'string',
+                    description: 'The `.flow` text form, parsed server-side.',
+                  },
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          200: {
+            description: 'What the change does to the properties somebody was relying on.',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    available: { type: 'boolean' },
+                    workflowId: { type: 'string' },
+                    name: { type: 'string' },
+                    findings: {
+                      type: 'array',
+                      description: 'What the change introduced, worst first.',
+                      items: {
+                        type: 'object',
+                        properties: {
+                          code: {
+                            type: 'string',
+                            enum: [
+                              'ungated-effect',
+                              'guarantee-broken',
+                              'lint-error',
+                              'unsafe-repeat',
+                              'new-effect',
+                              'dead-branch',
+                              'dynamic-target',
+                              'unresolved-tie',
+                              'lint-warning',
+                            ],
+                          },
+                          severity: { type: 'integer' },
+                          blocking: {
+                            type: 'boolean',
+                            description: 'Some other gate already refuses this one.',
+                          },
+                          summary: { type: 'string' },
+                          detail: { type: 'string' },
+                          nodeId: { type: 'string', nullable: true },
+                          subject: { type: 'string' },
+                        },
+                      },
+                    },
+                    resolved: {
+                      type: 'array',
+                      description: 'What the change fixed.',
+                      items: {
+                        type: 'object',
+                        properties: {
+                          code: {
+                            type: 'string',
+                            enum: ['effect-gated', 'repeat-guarded', 'lint-fixed', 'branch-reachable'],
+                          },
+                          summary: { type: 'string' },
+                          subject: { type: 'string' },
+                        },
+                      },
+                    },
+                    nodes: {
+                      type: 'object',
+                      description:
+                        'Node ids the change added and removed — what lets a reviewer read a ' +
+                        'suspicious resolved/introduced pair as one node having been replaced.',
+                      properties: {
+                        added: { type: 'array', items: { type: 'string' } },
+                        removed: { type: 'array', items: { type: 'string' } },
+                      },
+                    },
+                    summary: {
+                      type: 'object',
+                      properties: {
+                        introduced: { type: 'integer' },
+                        resolved: { type: 'integer' },
+                        blocking: { type: 'integer' },
+                        review: { type: 'integer' },
+                        verdict: { type: 'string', enum: ['blocked', 'review', 'clear'] },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+          400: { $ref: '#/components/responses/BadRequest' },
+          401: { $ref: '#/components/responses/Unauthorized' },
+          403: { $ref: '#/components/responses/Forbidden' },
+          404: { $ref: '#/components/responses/NotFound' },
+          429: { $ref: '#/components/responses/RateLimited' },
+        },
+      },
+    },
     '/workflows/{workflowId}/repeats': {
       get: {
         tags: ['workflows'],

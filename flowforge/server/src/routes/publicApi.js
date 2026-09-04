@@ -100,6 +100,7 @@ const { forbidViewer, memberRole } = require('../services/workspaceRoles')
 const { exposureReport, WINDOW_DAYS: EXPOSURE_WINDOW_DAYS } = require('../services/exposure')
 const { analyzeRepeats } = require('../services/repeats')
 const { analyzeSchedule, HORIZON_DAYS } = require('../services/scheduleCollision')
+const { analyzeImpact } = require('../services/changeImpact')
 const { recoveryPolicy: recoveryPolicyOf } = require('../services/crashRecovery')
 const { isPaused, PAUSED_ERROR, pauseWorkflow, resumeWorkflow } = require('../services/workflowPause')
 const { computeDependencies } = require('../services/workflowDependencies')
@@ -1516,6 +1517,95 @@ router.post('/workflows/:id/contract', tokenAuth('read'), (req, res) => {
     }
 
     res.json(analyzeContract(workflow.id, candidate))
+  } catch (err) {
+    console.error(err)
+    res.status(500).json({ error: 'Internal server error' })
+  }
+})
+
+// The live workspace context the linter needs, built once so the impact report
+// checks a candidate against the same references the lint gate does. Anything
+// less would let a change introduce a broken {{secrets.*}} reference and report
+// it as no change at all.
+function lintContextFor(workflow) {
+  return {
+    secretNames: new Set(
+      db.prepare('SELECT name FROM workspace_secrets WHERE workspace_id = ?')
+        .all(workflow.workspace_id)
+        .map((r) => r.name)
+    ),
+    variableNames: new Set(
+      db.prepare('SELECT name FROM workspace_variables WHERE workspace_id = ?')
+        .all(workflow.workspace_id)
+        .map((r) => r.name)
+    ),
+    workflowTargets: new Map(
+      db.prepare('SELECT id, name, status FROM workflows WHERE workspace_id = ?')
+        .all(workflow.workspace_id)
+        .map((r) => [r.id, { name: r.name, status: r.status }])
+    ),
+    resolveWorkflow: graphResolver(workflow.workspace_id),
+    rollbackPolicy: workflow.rollback_policy,
+    redact: workflow.redact_json,
+    approvers: approverCounts(workflow.workspace_id),
+    // Guarantees are checked by the impact report itself, as a before/after
+    // delta. Passing them here too would report the same break twice, once as
+    // a lint error and once as a broken guarantee.
+  }
+}
+
+// POST /api/v1/workflows/:id/impact — what does this change *mean*?
+// (services/changeImpact.js).
+//
+// The promotion gate the other checks add up to. `lint` says whether the
+// candidate is valid, `contract` whether it breaks its callers, `preview` what
+// last week's traffic would have done. None of them says what the edit does to
+// the properties somebody was relying on — and the change that matters most is
+// the one that is structurally tiny: deleting one edge and wiring a trigger at
+// the node behind it removes an approval from a payment path and passes every
+// other check there is.
+//
+// So every static analysis runs over both graphs and the *difference* in their
+// verdicts is the answer. A property already broken before the edit is not a
+// finding of the edit — a review that relists every pre-existing problem is one
+// nobody reads twice.
+//
+// Body is `graph_data` or a `flow` string, the same document contract lint and
+// preview take. Requires the `read` scope: it reads graphs and returns an
+// analysis.
+router.post('/workflows/:id/impact', tokenAuth('read'), (req, res) => {
+  try {
+    const workflow = getWorkflowForMember(req.params.id, req.user.id)
+    if (!workflow) return res.status(404).json({ error: 'Workflow not found' })
+
+    const body = resolveDocument(req, res)
+    if (!body) return
+
+    const graphData = body.graph_data
+    if (!graphData || !Array.isArray(graphData.nodes) || !Array.isArray(graphData.edges)) {
+      return res.status(400).json({ error: 'graph_data must include nodes and edges arrays' })
+    }
+    if (graphData.nodes.length > 2000 || graphData.edges.length > 5000) {
+      return res.status(400).json({ error: 'Graph too large to analyse' })
+    }
+
+    const resolve = subWorkflowGraphs(workflow.workspace_id)
+    const before = resolve(workflow.id)
+    if (!before) return res.json({ available: false, reason: 'empty', workflowId: workflow.id })
+
+    res.json({
+      ...analyzeImpact(
+        before,
+        { id: workflow.id, name: workflow.name, graph: { nodes: graphData.nodes, edges: graphData.edges } },
+        {
+          resolve,
+          guarantees: workflow.guarantees_json,
+          recoveryPolicy: recoveryPolicyOf(workflow),
+          lintOptions: lintContextFor(workflow),
+        }
+      ),
+      name: workflow.name,
+    })
   } catch (err) {
     console.error(err)
     res.status(500).json({ error: 'Internal server error' })

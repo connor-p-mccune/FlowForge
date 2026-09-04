@@ -17,6 +17,7 @@ const { isValidPriority } = require('../services/runPriority')
 const { ROLLBACK_POLICIES } = require('../services/compensation')
 const { POLICIES: RECOVERY_POLICIES, recoveryPolicy: recoveryPolicyOf } = require('../services/crashRecovery')
 const { analyzeRepeats, MAX_ATTEMPTS } = require('../services/repeats')
+const { analyzeImpact } = require('../services/changeImpact')
 const { describeLineage, analyzeLineage, traceProvenance, traceImpact } = require('../services/lineage')
 const { verifyGuarantees, parseGuarantees } = require('../services/guarantees')
 const { formatWorkflow, parseWorkflow, DslError } = require('../services/workflowDsl')
@@ -1091,6 +1092,51 @@ router.post('/workflows/:id/contract', auth, (req, res) => {
     }
 
     res.json(analyzeContract(workflow.id, candidate))
+  } catch (err) {
+    console.error(err)
+    res.status(500).json({ error: 'Internal server error' })
+  }
+})
+
+// POST /api/workflows/:id/impact — what would deploying the graph on screen
+// *mean*? (services/changeImpact.js)
+//
+// A body-taking POST like its analysis neighbours, and for the same reason:
+// the canvas asks about the graph in front of it, which is precisely the one
+// nobody has saved yet. The *before* side is the deployed graph, because the
+// question is what this edit changes rather than what the workflow is.
+router.post('/workflows/:id/impact', auth, (req, res) => {
+  try {
+    const workflow = db.prepare('SELECT * FROM workflows WHERE id = ?').get(req.params.id)
+    if (!workflow || !isMember(workflow.workspace_id, req.user.id)) {
+      return res.status(404).json({ error: 'Workflow not found' })
+    }
+    if (!req.body || !Array.isArray(req.body.nodes) || !Array.isArray(req.body.edges)) {
+      return res.status(400).json({ error: 'nodes and edges arrays are required' })
+    }
+    if (req.body.nodes.length > 2000 || req.body.edges.length > 5000) {
+      return res.status(400).json({ error: 'Graph too large to analyse' })
+    }
+
+    const resolve = subWorkflowGraphs(workflow.workspace_id)
+    const before = resolve(workflow.id)
+    if (!before) return res.json({ available: false, reason: 'empty', workflowId: workflow.id })
+
+    res.json(
+      analyzeImpact(
+        before,
+        {
+          id: workflow.id,
+          name: workflow.name,
+          graph: { nodes: req.body.nodes, edges: req.body.edges },
+        },
+        {
+          resolve,
+          guarantees: workflow.guarantees_json,
+          recoveryPolicy: recoveryPolicyOf(workflow),
+        }
+      )
+    )
   } catch (err) {
     console.error(err)
     res.status(500).json({ error: 'Internal server error' })
