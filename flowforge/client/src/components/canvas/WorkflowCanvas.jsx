@@ -41,6 +41,7 @@ import IssuesPanel from './IssuesPanel'
 import LineagePanel from './LineagePanel'
 import ConvergencePanel from './ConvergencePanel'
 import ContractGate from './ContractGate'
+import ImpactGate from './ImpactGate'
 import AssertionsPanel from './AssertionsPanel'
 import GuaranteesPanel from './GuaranteesPanel'
 import FlowTextPanel from './FlowTextPanel'
@@ -138,6 +139,7 @@ function CanvasInner({ workflowId }) {
   // The contract report that stopped a deploy, or null. Cleared either way once
   // the author has answered.
   const [contractGate, setContractGate] = useState(null)
+  const [impactGate, setImpactGate] = useState(null)
   const [previewOpen, setPreviewOpen] = useState(false)
   // The pause this run is currently sitting at, or null. Driven by the
   // `debug` exec-update, which is why a collaborator watching the same run sees
@@ -701,7 +703,7 @@ function CanvasInner({ workflowId }) {
   // Best-effort by construction: if the check itself fails, the deploy proceeds.
   // A contract analysis that could block a deploy by being unavailable would be
   // a worse failure than the one it exists to prevent.
-  const handleDeploy = useCallback(async () => {
+  const runContractGate = useCallback(async () => {
     setDeploying(true)
     let report = null
     try {
@@ -720,6 +722,32 @@ function CanvasInner({ workflowId }) {
     }
     await runDeploy()
   }, [workflowId, nodes, edges, runDeploy])
+
+  // Two gates, asked in the order the questions belong to different people.
+  // The impact report is about *this* workflow's properties — the approval no
+  // longer in front of the payment — and is the author's own change coming back
+  // to them. The contract report is about somebody else's workflow breaking.
+  // Both are best-effort: a check that could block a deploy by being
+  // unavailable would be a worse failure than the one it exists to prevent.
+  const handleDeploy = useCallback(async () => {
+    setDeploying(true)
+    let report = null
+    try {
+      report = await apiFetch(`/api/workflows/${workflowId}/impact`, {
+        method: 'POST',
+        body: serializeGraph(nodes, edges),
+      })
+    } catch {
+      /* the gate never blocks on its own failure */
+    } finally {
+      setDeploying(false)
+    }
+    if (report?.available && report.findings.length > 0) {
+      setImpactGate(report)
+      return
+    }
+    await runContractGate()
+  }, [workflowId, nodes, edges, runContractGate])
 
   // Flip the kill switch. Idempotent server-side, so a stale UI can't wedge;
   // the toast names the resulting state. On success the hook has already folded
@@ -1399,6 +1427,16 @@ function CanvasInner({ workflowId }) {
           data or an outcome. */}
       {assertionsOpen && (
         <AssertionsPanel workflowId={workflowId} onClose={() => setAssertionsOpen(false)} />
+      )}
+      {impactGate && (
+        <ImpactGate
+          report={impactGate}
+          onCancel={() => setImpactGate(null)}
+          onConfirm={() => {
+            setImpactGate(null)
+            runContractGate()
+          }}
+        />
       )}
       {contractGate && (
         <ContractGate
