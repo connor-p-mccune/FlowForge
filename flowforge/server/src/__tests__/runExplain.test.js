@@ -187,9 +187,118 @@ describe('runExplain — naming the decision, not a decision', () => {
       { nodeId: 'log', status: 'skipped' },
     ])
     const report = explainRun(executionId)
+    expect(stepFor(report, 'mail').because.kind).not.toBe('decision')
+  })
+})
+
+// Three reasons a step does not run. A decision chose against it; something
+// above it failed and the run never got there; or somebody stopped the run.
+describe('runExplain — the other two reasons', () => {
+  it('blames the failure above it when no decision did', () => {
+    const { executionId } = seedRun(
+      RISK_GRAPH,
+      [
+        { nodeId: 't', status: 'failed', error: 'the webhook payload was not JSON' },
+        { nodeId: 'risky', status: 'skipped' },
+        { nodeId: 'charge', status: 'skipped' },
+        { nodeId: 'mail', status: 'skipped' },
+        { nodeId: 'log', status: 'skipped' },
+      ],
+      { status: 'failed' }
+    )
+    const report = explainRun(executionId)
+    expect(stepFor(report, 'mail').because).toMatchObject({
+      kind: 'upstream-failure',
+      nodeId: 't',
+      label: 'Start',
+      error: 'the webhook payload was not JSON',
+    })
+    // And nothing is left unattributed.
+    expect(report.summary.unexplained).toBe(0)
+  })
+
+  it('names the deepest failure, not the first one', () => {
+    const { executionId } = seedRun(
+      RISK_GRAPH,
+      [
+        { nodeId: 't', status: 'failed', error: 'first' },
+        { nodeId: 'risky', status: 'failed', error: 'second' },
+        { nodeId: 'charge', status: 'skipped' },
+        { nodeId: 'mail', status: 'skipped' },
+        { nodeId: 'log', status: 'skipped' },
+      ],
+      { status: 'failed' }
+    )
+    expect(stepFor(explainRun(executionId), 'mail').because.error).toBe('second')
+  })
+
+  it('prefers a decision over a failure that did not stop the path', () => {
+    // A decision that settled is a *choice*; a failure elsewhere is not what
+    // closed this path, and blaming it would send somebody to the wrong node.
+    const { executionId } = seedRun(
+      RISK_GRAPH,
+      [
+        { nodeId: 't', status: 'succeeded' },
+        { nodeId: 'risky', status: 'succeeded', input: { total: 850 }, output: { result: true } },
+        { nodeId: 'log', status: 'failed', error: 'disk full' },
+        { nodeId: 'charge', status: 'skipped' },
+        { nodeId: 'mail', status: 'skipped' },
+      ],
+      { status: 'failed' }
+    )
+    expect(stepFor(explainRun(executionId), 'mail').because).toMatchObject({
+      kind: 'decision',
+      label: 'High risk?',
+    })
+  })
+
+  it('does not blame a failure something downstream of it recovered from', () => {
+    // Dominance rather than reachability: a node whose failure was caught did
+    // not stop anything, and blaming it would point at a step handled on
+    // purpose. `log` does not dominate `mail`, so it is never the cause.
+    const { executionId } = seedRun(
+      RISK_GRAPH,
+      [
+        { nodeId: 't', status: 'succeeded' },
+        { nodeId: 'risky', status: 'succeeded', input: { total: 10 }, output: { result: false } },
+        { nodeId: 'charge', status: 'succeeded' },
+        { nodeId: 'mail', status: 'succeeded' },
+        { nodeId: 'log', status: 'failed', error: 'disk full' },
+      ],
+      { status: 'failed' }
+    )
+    const report = explainRun(executionId)
+    expect(stepFor(report, 'mail').status).toBe('succeeded')
     expect(stepFor(report, 'mail').because).toBeUndefined()
-    // And says so in the summary rather than pretending it explained them.
-    expect(report.summary.unexplained).toBe(4)
+  })
+
+  it('says a cancelled run was cancelled, which is not a graph fact', () => {
+    const { executionId } = seedRun(
+      RISK_GRAPH,
+      [
+        { nodeId: 't', status: 'succeeded' },
+        { nodeId: 'risky', status: 'skipped' },
+        { nodeId: 'charge', status: 'skipped' },
+        { nodeId: 'mail', status: 'skipped' },
+        { nodeId: 'log', status: 'skipped' },
+      ],
+      { status: 'cancelled' }
+    )
+    const report = explainRun(executionId)
+    expect(stepFor(report, 'mail').because).toEqual({ kind: 'cancelled', reads: [] })
+    expect(report.summary.unexplained).toBe(0)
+  })
+
+  it('still reports what it cannot attribute at all', () => {
+    // A run that simply stopped, with nothing failed and nothing cancelled.
+    const { executionId } = seedRun(RISK_GRAPH, [
+      { nodeId: 't', status: 'succeeded' },
+      { nodeId: 'risky', status: 'skipped' },
+      { nodeId: 'charge', status: 'skipped' },
+      { nodeId: 'mail', status: 'skipped' },
+      { nodeId: 'log', status: 'skipped' },
+    ])
+    expect(explainRun(executionId).summary.unexplained).toBe(4)
   })
 })
 

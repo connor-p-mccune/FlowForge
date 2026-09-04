@@ -58,6 +58,22 @@ describe('a skipped step', () => {
     expect(screen.getAllByText(/that branch does not reach it/)).toHaveLength(1)
   })
 
+  it('blames the failure above it, and does not dress it as a choice', () => {
+    // Only a decision is a fact about the graph. Rendering the other two the
+    // same way would suggest somebody chose this.
+    panel({
+      mail: { kind: 'upstream-failure', nodeId: 't', label: 'Start', error: 'payload was not JSON', reads: [] },
+    })
+    expect(screen.getByText(/failed above it, so the run never got here/)).toBeInTheDocument()
+    expect(screen.getByText('payload was not JSON')).toBeInTheDocument()
+    expect(screen.queryByText(/does not reach it/)).not.toBeInTheDocument()
+  })
+
+  it('says a cancelled run was cancelled', () => {
+    panel({ mail: { kind: 'cancelled', reads: [] } })
+    expect(screen.getByText(/The run was cancelled before it got here/)).toBeInTheDocument()
+  })
+
   it('renders the steps unchanged when no explanation arrived', () => {
     // A panel that failed to render its steps over a missing explanation would
     // have traded the answer for the question.

@@ -94,6 +94,33 @@ test('--node fails on a node the run does not have', async () => {
   assert.match(out, /No node "nope"/)
 })
 
+test('blames the failure above a step when no decision did', async () => {
+  const upstream = report({
+    steps: [
+      { nodeId: 'mail', label: 'Send receipt', type: 'action-email', status: 'skipped',
+        because: { kind: 'upstream-failure', nodeId: 't', label: 'Start', error: 'payload was not JSON', reads: [] } },
+    ],
+    decisions: [],
+    summary: { ran: 0, skipped: 1, failed: 1, unreached: 0, decisions: 0, unexplained: 0 },
+  })
+  const { out } = await run(upstream)
+  assert.match(out, /Start failed above it, so the run never got here/)
+  assert.match(out, /payload was not JSON/)
+})
+
+test('says a cancelled run was cancelled', async () => {
+  const cancelled = report({
+    status: 'cancelled',
+    steps: [
+      { nodeId: 'mail', label: 'Send receipt', type: 'action-email', status: 'skipped',
+        because: { kind: 'cancelled', reads: [] } },
+    ],
+    decisions: [],
+    summary: { ran: 0, skipped: 1, failed: 0, unreached: 0, decisions: 0, unexplained: 0 },
+  })
+  assert.match((await run(cancelled)).out, /the run was cancelled before it got here/)
+})
+
 test('says plainly when no decision accounts for a skip', async () => {
   const orphan = report({
     steps: [{ nodeId: 'mail', label: 'Send receipt', type: 'action-email', status: 'skipped' }],
@@ -101,7 +128,7 @@ test('says plainly when no decision accounts for a skip', async () => {
     summary: { ran: 0, skipped: 1, failed: 0, unreached: 0, decisions: 0, unexplained: 1 },
   })
   const { out } = await run(orphan)
-  assert.match(out, /no decision in this run closed the path to it/)
+  assert.match(out, /nothing in this run accounts for it/)
   assert.match(out, /1 skipped step\(s\) no settled decision in this run accounts for/)
 })
 

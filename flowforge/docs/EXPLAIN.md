@@ -71,6 +71,28 @@ what any of them are. A seventh kind of decision would work the day it is added.
 
 ---
 
+## Three reasons a step does not run
+
+A decision is only one of them, and reporting the other two as though they were
+decisions would suggest somebody chose this.
+
+| `because.kind` | |
+|---|---|
+| `decision` | A gate chose against it. The one this report was built for. |
+| `upstream-failure` | Something above it failed and the run never got there. |
+| `cancelled` | Somebody stopped the run — not a fact about the graph at all, which is exactly why it has to be said. |
+
+The failure case uses **dominance, not reachability**. A node whose failure was
+caught by an `onError` branch did not stop anything downstream of that branch,
+and blaming it would send somebody to a step that was handled on purpose. Only a
+failure that every path to this node goes through is a failure that stopped it.
+
+A settled decision always wins over a failure elsewhere. A decision is a
+*choice*; a failure on some other branch is not what closed this path, and
+naming it would point at the wrong node.
+
+---
+
 ## Naming the decision, not a decision
 
 A node skipped in a run is usually excluded by exactly one decision, but the
@@ -131,8 +153,8 @@ explanation must never do. The outcome is reported; the operands are not.
 
 ## What it does not do
 
-- **It does not explain a node nothing gated.** A step that simply never ran
-  because the run failed upstream has no decision to blame, and
+- **It does not invent a cause.** A run that simply stopped — nothing failed,
+  nothing cancelled, no decision against it — leaves the step unattributed, and
   `summary.unexplained` counts those rather than hiding them. A report claiming
   to explain everything that quietly does not is worse than one that says which
   rows it could not.

@@ -68,6 +68,23 @@ function ApprovalGate({ approval }) {
 // person reading it already had. This is the sentence they came for.
 function SkipReason({ because }) {
   if (!because) return null
+
+  // Three reasons a step does not run, and only the first is a fact about the
+  // graph. Rendering the other two the same way would suggest somebody chose
+  // this, which is the opposite of what happened.
+  if (because.kind === 'upstream-failure') {
+    return (
+      <p className="step__because">
+        <span className="step__because-cause">{because.label}</span> failed above it, so the run
+        never got here.
+        {because.error && <span className="step__because-expr">{because.error}</span>}
+      </p>
+    )
+  }
+  if (because.kind === 'cancelled') {
+    return <p className="step__because">The run was cancelled before it got here.</p>
+  }
+
   return (
     <p className="step__because">
       <span className="step__because-cause">{because.label}</span> was{' '}

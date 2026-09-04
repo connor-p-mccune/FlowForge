@@ -206,6 +206,26 @@ function reachSet(graph, starts) {
   return seen
 }
 
+// The deepest failed node that dominates this one, or null.
+//
+// The second reason a step does not run, and the one a decision cannot account
+// for: nothing chose against it, the run simply did not get there. Symmetric
+// with `excludedBy` and over the same dominance data — a failure that every
+// path to this node goes through is a failure that stopped it.
+//
+// Dominance rather than mere reachability, because a node whose failure was
+// caught by an `onError` branch did not stop anything downstream of the branch,
+// and blaming it would send somebody to a step that was handled on purpose.
+function failedAbove(nodeId, failures, idom, depth) {
+  let best = null
+  for (const f of failures) {
+    if (f.nodeId === nodeId) continue
+    if (!dominates(idom, f.nodeId, nodeId)) continue
+    if (!best || (depth.get(f.nodeId) ?? 0) > (depth.get(best.nodeId) ?? 0)) best = f
+  }
+  return best
+}
+
 // Which decision closed the path to this node, or null.
 //
 // The deepest gate that (a) dominates the node, (b) actually settled in this
@@ -314,6 +334,15 @@ function explainRun(executionId) {
     })
   }
 
+  // Every node that failed, for the second kind of cause.
+  const failures = ids
+    .filter((id) => steps.get(id)?.status === 'failed')
+    .map((id) => ({
+      nodeId: id,
+      label: byId.get(id)?.data?.label || id,
+      error: steps.get(id)?.error || null,
+    }))
+
   const explained = []
   for (const nodeId of ids) {
     const node = byId.get(nodeId)
@@ -328,14 +357,33 @@ function explainRun(executionId) {
     }
     if (status === 'failed' && step?.error) row.error = step.error
     if (status === 'skipped' || status === 'not-reached') {
+      // Three reasons a step does not run, in the order they answer the
+      // question. A decision chose against it; something above it failed and
+      // the run never got there; or somebody stopped the run.
       const cause = excludedBy(nodeId, decisions, idom, depth)
       if (cause) {
         row.because = {
+          kind: 'decision',
           nodeId: cause.nodeId,
           label: cause.label,
           outcome: cause.taken,
           expression: cause.expression || null,
           reads: cause.reads,
+        }
+      } else {
+        const failure = failedAbove(nodeId, failures, idom, depth)
+        if (failure) {
+          row.because = {
+            kind: 'upstream-failure',
+            nodeId: failure.nodeId,
+            label: failure.label,
+            error: failure.error,
+            reads: [],
+          }
+        } else if (execution.status === 'cancelled') {
+          // Not a graph fact at all, which is exactly why it has to be said:
+          // nothing about the shape of the workflow explains this one.
+          row.because = { kind: 'cancelled', reads: [] }
         }
       }
     }

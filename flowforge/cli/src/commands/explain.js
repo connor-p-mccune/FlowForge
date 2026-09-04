@@ -21,12 +21,23 @@ const MARK = {
   skipped: yellow('skipped'),
 }
 
-// "High risk? was true" — the sentence, with the expression and the values
-// under it when the graph recorded enough to say.
+// The sentence. Three reasons a step does not run, in the order they answer the
+// question: a decision chose against it, something above it failed and the run
+// never got there, or somebody stopped the run.
 function why(step, ctx) {
   const b = step.because
   if (!b) {
-    ctx.log(gray('    no decision in this run closed the path to it'))
+    ctx.log(gray('    nothing in this run accounts for it'))
+    return
+  }
+  if (b.kind === 'upstream-failure') {
+    ctx.log(`    ${cyan(b.label)} failed above it, so the run never got here`)
+    if (b.error) ctx.log(gray(`      ${b.error}`))
+    return
+  }
+  if (b.kind === 'cancelled') {
+    // Not a graph fact at all, which is exactly why it has to be said.
+    ctx.log(gray('    the run was cancelled before it got here'))
     return
   }
   ctx.log(`    ${cyan(b.label)} was ${cyan(String(b.outcome))}, and that branch does not reach it`)
